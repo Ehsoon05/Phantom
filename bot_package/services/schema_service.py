@@ -28,6 +28,7 @@ class SchemaService:
                         "original_price": "INTEGER",
                         "discount_amount": "INTEGER DEFAULT 0 NOT NULL",
                         "coupon_id": "INTEGER",
+                        "coupon_code": "VARCHAR",
                     },
                 )
 

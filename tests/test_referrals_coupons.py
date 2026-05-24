@@ -132,6 +132,7 @@ async def test_coupon_redeemed_cannot_be_reused_by_same_user(db):
             original_price=15_000,
             discount_amount=5_000,
             coupon_id=coupon.id,
+            coupon_code=coupon.code,
         )
         session.add(purchase)
         await session.flush()
@@ -174,6 +175,7 @@ async def test_admin_can_list_deactivate_and_delete_coupons(db):
             original_price=15_000,
             discount_amount=5_000,
             coupon_id=deleted.id,
+            coupon_code=deleted.code,
         )
         session.add(purchase)
         await session.commit()
@@ -195,6 +197,7 @@ async def test_admin_can_list_deactivate_and_delete_coupons(db):
         saved_purchase = (await session.execute(select(Purchase).where(Purchase.id == purchase.id))).scalar_one()
 
     assert saved_purchase.coupon_id is None
+    assert saved_purchase.coupon_code == "DELETE-ME"
 
 
 @pytest.mark.asyncio
@@ -283,4 +286,4 @@ async def test_schema_service_adds_new_columns_to_existing_sqlite_database(tmp_p
     await database.engine.dispose()
 
     assert {"referral_code", "referred_by_user_id", "referred_at"} <= users_columns
-    assert {"original_price", "discount_amount", "coupon_id"} <= purchase_columns
+    assert {"original_price", "discount_amount", "coupon_id", "coupon_code"} <= purchase_columns

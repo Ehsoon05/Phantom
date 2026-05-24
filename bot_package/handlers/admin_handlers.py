@@ -431,9 +431,10 @@ async def search_user_result(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if purchase_summary["purchases"]:
             message += "\n\n**آخرین خریدها**\n"
             for purchase in purchase_summary["purchases"]:
+                coupon_text = f" | کد تخفیف: {purchase.coupon_code}" if purchase.coupon_code else ""
                 message += (
                     f"{purchase.purchased_at.strftime('%Y-%m-%d %H:%M')} | "
-                    f"{purchase.volume_gb} گیگ | {purchase.price:,} تومان\n"
+                    f"{purchase.volume_gb} گیگ | {purchase.price:,} تومان{coupon_text}\n"
                 )
         else:
             message += "\n\nخریدی برای این کاربر ثبت نشده است."

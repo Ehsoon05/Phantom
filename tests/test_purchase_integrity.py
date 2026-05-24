@@ -66,6 +66,37 @@ async def test_purchase_flow_commits_wallet_stock_purchase_and_transaction(db):
 
 
 @pytest.mark.asyncio
+async def test_purchase_can_store_coupon_code_snapshot(db):
+    from bot_package.models import Config, Coupon, Purchase, User
+
+    async with db.async_session() as session:
+        user = User(telegram_id=1001, first_name="Test")
+        config = Config(volume_gb=1, sub_link="vless://one", is_sold=True, sold_to_user_id=1001)
+        coupon = Coupon(code="SAVE10", discount_type="percent", amount=10, created_by=123456)
+        session.add_all([user, config, coupon])
+        await session.flush()
+        session.add(
+            Purchase(
+                user_id=1001,
+                config_id=config.id,
+                volume_gb=1,
+                price=13_500,
+                original_price=15_000,
+                discount_amount=1_500,
+                coupon_id=coupon.id,
+                coupon_code=coupon.code,
+            )
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        purchase = (await session.execute(select(Purchase))).scalar_one()
+
+    assert purchase.coupon_id == coupon.id
+    assert purchase.coupon_code == "SAVE10"
+
+
+@pytest.mark.asyncio
 async def test_sold_config_cannot_be_sold_again(db):
     from bot_package.models import Config
     from bot_package.services.inventory_service import InventoryService
