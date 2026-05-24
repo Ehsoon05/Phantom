@@ -235,6 +235,7 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
             original_price=original_price,
             discount_amount=discount_amount,
             coupon_id=coupon.id if coupon else None,
+            coupon_code=coupon.code if coupon else None,
         )
         session.add(purchase)
         await session.flush()
@@ -291,8 +292,9 @@ async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = "**آخرین خریدهای شما**\n\n"
     for purchase in purchases:
         discount = f" | تخفیف: {purchase.discount_amount:,} تومان" if purchase.discount_amount else ""
+        coupon = f" | کد: {purchase.coupon_code}" if purchase.coupon_code else ""
         text += (
-            f"حجم: {purchase.volume_gb} گیگ | مبلغ: {purchase.price:,} تومان{discount}\n"
+            f"حجم: {purchase.volume_gb} گیگ | مبلغ: {purchase.price:,} تومان{discount}{coupon}\n"
             f"زمان: {purchase.purchased_at.strftime('%Y-%m-%d %H:%M')}\n"
             f"`{purchase.config.sub_link}`\n\n"
         )

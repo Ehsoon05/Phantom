@@ -45,6 +45,7 @@ class Purchase(Base):
     original_price = Column(Integer, nullable=True)
     discount_amount = Column(Integer, nullable=False, default=0)
     coupon_id = Column(Integer, ForeignKey("coupons.id"), nullable=True)
+    coupon_code = Column(String, nullable=True)
     purchased_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     user = relationship("User", back_populates="purchases")
     config = relationship("Config", back_populates="purchases")
