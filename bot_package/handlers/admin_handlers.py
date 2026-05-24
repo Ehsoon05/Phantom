@@ -10,18 +10,23 @@ from ..config_loader import BotConfig
 from ..database import async_session
 from ..models import Purchase
 from ..services.admin_service import ALL_PERMISSIONS, AdminService, normalize_permissions
+from ..services.coupon_service import CouponError, CouponService
 from ..services.inventory_service import InventoryService
 from ..services.price_service import PriceService
+from ..services.referral_service import ReferralService
 from ..services.user_service import UserService
 from ..utils.keyboards import (
     ADMIN_ADMINS,
     ADMIN_ADD_CONFIG,
     ADMIN_BACK,
     ADMIN_CHARGE_WALLET,
+    ADMIN_COUPONS,
+    ADMIN_CREATE_COUPON,
     ADMIN_EDIT_PRICE,
     ADMIN_INVENTORY,
     ADMIN_LOGOUT,
     ADMIN_PRICES,
+    ADMIN_REFERRAL_REPORT,
     ADMIN_REFRESH_ADMINS,
     ADMIN_REPORTS,
     ADMIN_SEARCH_USER,
@@ -30,17 +35,24 @@ from ..utils.keyboards import (
     ADMIN_USER_STATS,
     ADMIN_VIEW_PRICES,
     CANCEL,
+    COUPON_ALL_USERS,
+    COUPON_FIXED,
+    COUPON_PERCENT,
+    COUPON_SELECTED_USERS,
     DONE_ADDING_CONFIGS,
     REPORT_MONTH,
     REPORT_TODAY,
     REPORT_WEEK,
     add_links_collecting_keyboard,
+    admin_coupons_keyboard,
     admin_inventory_keyboard,
     admin_main_keyboard,
     admin_management_keyboard,
     admin_prices_keyboard,
     admin_reports_keyboard,
     admin_users_keyboard,
+    coupon_target_keyboard,
+    coupon_type_keyboard,
     volume_selection_keyboard,
 )
 from ..utils.messages import (
@@ -70,7 +82,20 @@ from ..utils.messages import (
 from ..utils.validators import extract_links_from_text
 
 
-(CHOOSE_VOLUME_ADD, COLLECT_LINKS, CHOOSE_VOLUME_PRICE, ENTER_NEW_PRICE, SEARCH_USER, CHARGE_USER_ID, CHARGE_AMOUNT) = range(7)
+(
+    CHOOSE_VOLUME_ADD,
+    COLLECT_LINKS,
+    CHOOSE_VOLUME_PRICE,
+    ENTER_NEW_PRICE,
+    SEARCH_USER,
+    CHARGE_USER_ID,
+    CHARGE_AMOUNT,
+    COUPON_CODE,
+    COUPON_TYPE,
+    COUPON_AMOUNT,
+    COUPON_TARGET,
+    COUPON_TARGET_USERS,
+) = range(12)
 
 
 def _exact_filter(text: str):
@@ -179,6 +204,7 @@ async def admin_menu_navigation(update: Update, context: ContextTypes.DEFAULT_TY
         ADMIN_PRICES: (ADMIN_PRICES_MENU, admin_prices_keyboard()),
         ADMIN_USERS: (ADMIN_USERS_MENU, admin_users_keyboard()),
         ADMIN_REPORTS: (ADMIN_REPORTS_MENU, admin_reports_keyboard()),
+        ADMIN_COUPONS: ("**مدیریت تخفیف‌ها**\n\nبرای ساخت کد تخفیف جدید از دکمه پایین استفاده کنید.", admin_coupons_keyboard()),
     }
     text, keyboard = nav_map[update.message.text]
     await update.message.reply_text(text, reply_markup=keyboard, parse_mode=constants.ParseMode.MARKDOWN)
@@ -487,6 +513,161 @@ async def user_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+@require_auth(permission="users")
+async def referral_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        rows = await ReferralService.referral_map(session)
+
+    if not rows:
+        await update.message.reply_text("هنوز هیچ دعوتی ثبت نشده است.", reply_markup=admin_users_keyboard())
+        return
+
+    lines = ["**گزارش دعوت‌ها**\n"]
+    for referred_id, referrer_id, referred_at in rows[:50]:
+        when = referred_at.strftime("%Y-%m-%d %H:%M") if referred_at else "-"
+        lines.append(f"`{referred_id}` ← `{referrer_id}` | {when}")
+
+    await update.message.reply_text(
+        "\n".join(lines),
+        reply_markup=admin_users_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+
+
+@require_auth(permission="coupons")
+async def create_coupon_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("coupon_draft", None)
+    await update.message.reply_text(
+        "**ساخت کد تخفیف**\n\nکد تخفیف را ارسال کنید. مثال: `SPRING25`",
+        reply_markup=admin_coupons_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return COUPON_CODE
+
+
+@require_auth(permission="coupons")
+async def create_coupon_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    code = update.message.text.strip()
+    if not code or any(char.isspace() for char in code):
+        await update.message.reply_text("کد تخفیف نباید خالی باشد یا فاصله داشته باشد.")
+        return COUPON_CODE
+
+    context.user_data["coupon_draft"] = {"code": code}
+    await update.message.reply_text(
+        "نوع تخفیف را انتخاب کنید.",
+        reply_markup=coupon_type_keyboard(),
+    )
+    return COUPON_TYPE
+
+
+@require_auth(permission="coupons")
+async def create_coupon_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == COUPON_PERCENT:
+        discount_type = "percent"
+        prompt = "درصد تخفیف را به صورت عددی بین ۱ تا ۱۰۰ ارسال کنید. مثال: `25`"
+    elif update.message.text == COUPON_FIXED:
+        discount_type = "fixed"
+        prompt = "مبلغ تخفیف را به تومان ارسال کنید. مثال: `50000`"
+    else:
+        await update.message.reply_text("نوع تخفیف معتبر نیست.", reply_markup=coupon_type_keyboard())
+        return COUPON_TYPE
+
+    context.user_data.setdefault("coupon_draft", {})["discount_type"] = discount_type
+    await update.message.reply_text(prompt, parse_mode=constants.ParseMode.MARKDOWN)
+    return COUPON_AMOUNT
+
+
+@require_auth(permission="coupons")
+async def create_coupon_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        amount = int(update.message.text.replace(",", "").strip())
+    except ValueError:
+        await update.message.reply_text("مقدار تخفیف باید عددی باشد.")
+        return COUPON_AMOUNT
+
+    draft = context.user_data.setdefault("coupon_draft", {})
+    discount_type = draft.get("discount_type")
+    if discount_type == "percent" and not 1 <= amount <= 100:
+        await update.message.reply_text("درصد تخفیف باید بین ۱ تا ۱۰۰ باشد.")
+        return COUPON_AMOUNT
+    if discount_type == "fixed" and amount <= 0:
+        await update.message.reply_text("مبلغ تخفیف باید بیشتر از صفر باشد.")
+        return COUPON_AMOUNT
+
+    draft["amount"] = amount
+    await update.message.reply_text(
+        "این کد برای چه کسانی فعال باشد؟",
+        reply_markup=coupon_target_keyboard(),
+    )
+    return COUPON_TARGET
+
+
+@require_auth(permission="coupons")
+async def create_coupon_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == COUPON_ALL_USERS:
+        return await save_coupon(update, context, [])
+    if update.message.text == COUPON_SELECTED_USERS:
+        await update.message.reply_text(
+            "آیدی عددی کاربران را با فاصله، ویرگول یا هرکدام در یک خط ارسال کنید.",
+            reply_markup=admin_coupons_keyboard(),
+        )
+        return COUPON_TARGET_USERS
+
+    await update.message.reply_text("محدوده کاربران معتبر نیست.", reply_markup=coupon_target_keyboard())
+    return COUPON_TARGET
+
+
+@require_auth(permission="coupons")
+async def create_coupon_target_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    raw_ids = re.split(r"[\s,]+", update.message.text.strip())
+    user_ids = []
+    for raw_id in raw_ids:
+        if not raw_id:
+            continue
+        try:
+            user_ids.append(int(raw_id))
+        except ValueError:
+            await update.message.reply_text("همه آیدی‌ها باید عددی باشند.")
+            return COUPON_TARGET_USERS
+
+    if not user_ids:
+        await update.message.reply_text("حداقل یک آیدی کاربر ارسال کنید.")
+        return COUPON_TARGET_USERS
+
+    return await save_coupon(update, context, user_ids)
+
+
+async def save_coupon(update: Update, context: ContextTypes.DEFAULT_TYPE, target_user_ids: list[int]):
+    draft = context.user_data.get("coupon_draft", {})
+    async with async_session() as session:
+        try:
+            coupon = await CouponService.create_coupon(
+                session,
+                code=draft["code"],
+                discount_type=draft["discount_type"],
+                amount=draft["amount"],
+                created_by=update.effective_user.id,
+                target_user_ids=target_user_ids,
+            )
+        except (KeyError, CouponError):
+            await update.message.reply_text("کد تخفیف ساخته نشد. اطلاعات واردشده را بررسی کنید.", reply_markup=admin_coupons_keyboard())
+            return ConversationHandler.END
+
+    target_text = "همه کاربران" if coupon.applies_to_all else f"{len(target_user_ids)} کاربر"
+    if coupon.discount_type == "percent":
+        amount_text = f"{coupon.amount} درصد"
+    else:
+        amount_text = f"{coupon.amount:,} تومان"
+
+    context.user_data.pop("coupon_draft", None)
+    await update.message.reply_text(
+        f"کد تخفیف **{coupon.code}** ساخته شد.\nمقدار: **{amount_text}**\nمحدوده: **{target_text}**",
+        reply_markup=admin_coupons_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return ConversationHandler.END
+
+
 @require_auth(owner_only=True)
 async def list_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with async_session() as session:
@@ -660,6 +841,41 @@ charge_wallet_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
 )
 
+create_coupon_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_CREATE_COUPON), create_coupon_start)],
+    states={
+        COUPON_CODE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_code),
+        ],
+        COUPON_TYPE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.Regex(f"^({re.escape(COUPON_PERCENT)}|{re.escape(COUPON_FIXED)})$"), create_coupon_type),
+        ],
+        COUPON_AMOUNT: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_amount),
+        ],
+        COUPON_TARGET: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(
+                filters.Regex(f"^({re.escape(COUPON_ALL_USERS)}|{re.escape(COUPON_SELECTED_USERS)})$"),
+                create_coupon_target,
+            ),
+        ],
+        COUPON_TARGET_USERS: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_target_users),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
 admin_handlers = [
     CommandHandler("start", admin_start),
     CommandHandler("admins", list_admins),
@@ -670,13 +886,14 @@ admin_handlers = [
     edit_price_conv,
     search_user_conv,
     charge_wallet_conv,
+    create_coupon_conv,
     MessageHandler(_exact_filter(ADMIN_LOGOUT), admin_logout),
     MessageHandler(_exact_filter(ADMIN_ADMINS), admin_management_menu),
     MessageHandler(_exact_filter(ADMIN_REFRESH_ADMINS), admin_management_menu),
     MessageHandler(
         filters.Regex(
             f"^({re.escape(ADMIN_BACK)}|{re.escape(ADMIN_INVENTORY)}|{re.escape(ADMIN_PRICES)}|"
-            f"{re.escape(ADMIN_USERS)}|{re.escape(ADMIN_REPORTS)})$"
+            f"{re.escape(ADMIN_USERS)}|{re.escape(ADMIN_REPORTS)}|{re.escape(ADMIN_COUPONS)})$"
         ),
         admin_menu_navigation,
     ),
@@ -687,5 +904,6 @@ admin_handlers = [
         sales_report,
     ),
     MessageHandler(_exact_filter(ADMIN_USER_STATS), user_stats),
+    MessageHandler(_exact_filter(ADMIN_REFERRAL_REPORT), referral_report),
     MessageHandler(filters.TEXT & ~filters.COMMAND, check_admin_password),
 ]
