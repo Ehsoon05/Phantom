@@ -3,8 +3,8 @@ import logging
 from telegram.ext import Application
 from .config_loader import BotConfig
 from .database import engine
-from .models import Base
 from .handlers.user_handlers import user_handlers
+from .services.schema_service import SchemaService
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +15,7 @@ async def log_error(update, context):
 
 
 async def setup_main_bot():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    await SchemaService.ensure_schema(engine)
     
     app = Application.builder().token(BotConfig.MAIN_BOT_TOKEN).build()
     for handler in user_handlers:
