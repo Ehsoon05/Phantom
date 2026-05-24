@@ -477,17 +477,16 @@ async def charge_wallet_start(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 @require_auth(permission="users")
 async def charge_wallet_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        user_id = int(update.message.text.strip())
-    except ValueError:
-        await update.message.reply_text("آیدی عددی تلگرام باید فقط عدد باشد.")
+    query_text = update.message.text.strip()
+    if not query_text:
+        await update.message.reply_text("آیدی عددی یا یوزرنیم کاربر را ارسال کنید.")
         return CHARGE_USER_ID
 
     async with async_session() as session:
-        user = await UserService.search_user(session, str(user_id))
+        user = await UserService.search_user(session, query_text)
 
     if not user:
-        await update.message.reply_text("کاربری با این آیدی پیدا نشد. دوباره آیدی عددی را ارسال کنید.")
+        await update.message.reply_text("کاربری با این آیدی یا یوزرنیم پیدا نشد. دوباره ارسال کنید.")
         return CHARGE_USER_ID
 
     context.user_data["charge_user_id"] = user.telegram_id
