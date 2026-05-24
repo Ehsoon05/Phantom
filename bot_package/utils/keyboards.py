@@ -49,9 +49,25 @@ CANCEL = "❌ لغو"
 
 VOLUMES = (1, 2, 3, 5, 10, 20)
 
+STYLE_PRIMARY = "primary"
+STYLE_SUCCESS = "success"
+STYLE_DANGER = "danger"
+
+# Replace this with your own Telegram custom/premium emoji ID.
+# It is intentionally one fixed icon for every user-facing shop button.
+SHOP_BUTTON_CUSTOM_EMOJI_ID = "5373141891321699086"
+
 
 def _button(text: str) -> KeyboardButton:
     return KeyboardButton(text=text)
+
+
+def _shop_button(text: str, *, style: str = STYLE_PRIMARY) -> KeyboardButton:
+    return KeyboardButton(
+        text=text,
+        style=style,
+        icon_custom_emoji_id=SHOP_BUTTON_CUSTOM_EMOJI_ID,
+    )
 
 
 def _keyboard(rows: list[list[str | KeyboardButton]], *, one_time_keyboard: bool = False) -> ReplyKeyboardMarkup:
@@ -66,9 +82,9 @@ def _keyboard(rows: list[list[str | KeyboardButton]], *, one_time_keyboard: bool
 def main_menu_keyboard() -> ReplyKeyboardMarkup:
     return _keyboard(
         [
-            [_button(BUY_SUBSCRIPTION)],
-            [_button(WALLET), _button(PURCHASE_HISTORY)],
-            [_button(SUPPORT), _button(HELP)],
+            [_shop_button(BUY_SUBSCRIPTION, style=STYLE_SUCCESS)],
+            [_shop_button(WALLET), _shop_button(PURCHASE_HISTORY)],
+            [_shop_button(SUPPORT), _shop_button(HELP)],
         ]
     )
 
@@ -86,19 +102,19 @@ def buy_volume_keyboard(prices: dict | None = None) -> ReplyKeyboardMarkup:
                 label += f" | تخفیف {discount:,}"
         else:
             label = f"📦 {volume} گیگ | {value:,} تومان"
-        buttons.append(_button(label))
+        buttons.append(_shop_button(label, style=STYLE_SUCCESS))
 
     rows = [buttons[index : index + 2] for index in range(0, len(buttons), 2)]
-    rows.append([_button(BACK_TO_MAIN)])
+    rows.append([_shop_button(BACK_TO_MAIN, style=STYLE_DANGER)])
     return _keyboard(rows)
 
 
 def wallet_keyboard() -> ReplyKeyboardMarkup:
     return _keyboard(
         [
-            [_button(APPLY_COUPON), _button(REFERRALS)],
-            [_button(SUPPORT)],
-            [_button(BACK_TO_MAIN)],
+            [_shop_button(APPLY_COUPON, style=STYLE_SUCCESS), _shop_button(REFERRALS)],
+            [_shop_button(SUPPORT, style=STYLE_SUCCESS)],
+            [_shop_button(BACK_TO_MAIN, style=STYLE_DANGER)],
         ]
     )
 
@@ -124,7 +140,7 @@ def coupon_type_keyboard() -> ReplyKeyboardMarkup:
 
 
 def back_to_main() -> ReplyKeyboardMarkup:
-    return _keyboard([[_button(BACK_TO_MAIN)]])
+    return _keyboard([[_shop_button(BACK_TO_MAIN, style=STYLE_DANGER)]])
 
 
 def admin_main_keyboard() -> ReplyKeyboardMarkup:
