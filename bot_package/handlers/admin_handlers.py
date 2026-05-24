@@ -22,6 +22,8 @@ from ..utils.keyboards import (
     ADMIN_CHARGE_WALLET,
     ADMIN_COUPONS,
     ADMIN_CREATE_COUPON,
+    ADMIN_DEACTIVATE_COUPON,
+    ADMIN_DELETE_COUPON,
     ADMIN_EDIT_PRICE,
     ADMIN_INVENTORY,
     ADMIN_LOGOUT,
@@ -33,6 +35,7 @@ from ..utils.keyboards import (
     ADMIN_STOCK_STATUS,
     ADMIN_USERS,
     ADMIN_USER_STATS,
+    ADMIN_VIEW_COUPONS,
     ADMIN_VIEW_PRICES,
     CANCEL,
     COUPON_ALL_USERS,
@@ -95,7 +98,9 @@ from ..utils.validators import extract_links_from_text
     COUPON_AMOUNT,
     COUPON_TARGET,
     COUPON_TARGET_USERS,
-) = range(12)
+    COUPON_DEACTIVATE_CODE,
+    COUPON_DELETE_CODE,
+) = range(14)
 
 
 def _exact_filter(text: str):
@@ -204,7 +209,11 @@ async def admin_menu_navigation(update: Update, context: ContextTypes.DEFAULT_TY
         ADMIN_PRICES: (ADMIN_PRICES_MENU, admin_prices_keyboard()),
         ADMIN_USERS: (ADMIN_USERS_MENU, admin_users_keyboard()),
         ADMIN_REPORTS: (ADMIN_REPORTS_MENU, admin_reports_keyboard()),
-        ADMIN_COUPONS: ("**مدیریت تخفیف‌ها**\n\nبرای ساخت کد تخفیف جدید از دکمه پایین استفاده کنید.", admin_coupons_keyboard()),
+        ADMIN_COUPONS: (
+            "**مدیریت تخفیف‌ها**\n\n"
+            "از این بخش می‌توانید کد تخفیف بسازید، لیست تخفیف‌ها را ببینید، یا کدهای قبلی را غیرفعال و حذف کنید.",
+            admin_coupons_keyboard(),
+        ),
     }
     text, keyboard = nav_map[update.message.text]
     await update.message.reply_text(text, reply_markup=keyboard, parse_mode=constants.ParseMode.MARKDOWN)
@@ -532,6 +541,84 @@ async def referral_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=admin_users_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
+
+
+@require_auth(permission="coupons")
+async def list_coupons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        coupons = await CouponService.list_coupons(session)
+
+    if not coupons:
+        await update.message.reply_text("هنوز هیچ کد تخفیفی ساخته نشده است.", reply_markup=admin_coupons_keyboard())
+        return
+
+    lines = ["**کدهای تخفیف فعلی**\n"]
+    for coupon in coupons[:50]:
+        status = "فعال" if coupon.is_active else "غیرفعال"
+        if coupon.discount_type == "percent":
+            amount = f"{coupon.amount} درصد"
+        else:
+            amount = f"{coupon.amount:,} تومان"
+        target = "همه کاربران" if coupon.applies_to_all else f"{len(coupon.targets)} کاربر"
+        lines.append(f"`{coupon.code}` | {amount} | {target} | {status}")
+
+    await update.message.reply_text(
+        "\n".join(lines),
+        reply_markup=admin_coupons_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+
+
+@require_auth(permission="coupons")
+async def deactivate_coupon_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "کد تخفیفی را که می‌خواهید غیرفعال شود ارسال کنید.",
+        reply_markup=admin_coupons_keyboard(),
+    )
+    return COUPON_DEACTIVATE_CODE
+
+
+@require_auth(permission="coupons")
+async def deactivate_coupon_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        coupon = await CouponService.deactivate_coupon(session, update.message.text)
+
+    if not coupon:
+        await update.message.reply_text("کد تخفیف پیدا نشد.", reply_markup=admin_coupons_keyboard())
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        f"کد تخفیف **{coupon.code}** غیرفعال شد.",
+        reply_markup=admin_coupons_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return ConversationHandler.END
+
+
+@require_auth(permission="coupons")
+async def delete_coupon_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "کد تخفیفی را که می‌خواهید حذف شود ارسال کنید.",
+        reply_markup=admin_coupons_keyboard(),
+    )
+    return COUPON_DELETE_CODE
+
+
+@require_auth(permission="coupons")
+async def delete_coupon_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        coupon = await CouponService.delete_coupon(session, update.message.text)
+
+    if not coupon:
+        await update.message.reply_text("کد تخفیف پیدا نشد.", reply_markup=admin_coupons_keyboard())
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        f"کد تخفیف **{coupon.code}** حذف شد.",
+        reply_markup=admin_coupons_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return ConversationHandler.END
 
 
 @require_auth(permission="coupons")
@@ -876,6 +963,30 @@ create_coupon_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
 )
 
+deactivate_coupon_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_DEACTIVATE_COUPON), deactivate_coupon_start)],
+    states={
+        COUPON_DEACTIVATE_CODE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, deactivate_coupon_code),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+delete_coupon_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_DELETE_COUPON), delete_coupon_start)],
+    states={
+        COUPON_DELETE_CODE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, delete_coupon_code),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
 admin_handlers = [
     CommandHandler("start", admin_start),
     CommandHandler("admins", list_admins),
@@ -887,6 +998,8 @@ admin_handlers = [
     search_user_conv,
     charge_wallet_conv,
     create_coupon_conv,
+    deactivate_coupon_conv,
+    delete_coupon_conv,
     MessageHandler(_exact_filter(ADMIN_LOGOUT), admin_logout),
     MessageHandler(_exact_filter(ADMIN_ADMINS), admin_management_menu),
     MessageHandler(_exact_filter(ADMIN_REFRESH_ADMINS), admin_management_menu),
@@ -899,6 +1012,7 @@ admin_handlers = [
     ),
     MessageHandler(_exact_filter(ADMIN_STOCK_STATUS), stock_status),
     MessageHandler(_exact_filter(ADMIN_VIEW_PRICES), view_prices),
+    MessageHandler(_exact_filter(ADMIN_VIEW_COUPONS), list_coupons),
     MessageHandler(
         filters.Regex(f"^({re.escape(REPORT_TODAY)}|{re.escape(REPORT_WEEK)}|{re.escape(REPORT_MONTH)})$"),
         sales_report,

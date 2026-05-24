@@ -142,12 +142,70 @@ async def test_coupon_redeemed_cannot_be_reused_by_same_user(db):
             await CouponService.apply_coupon(session, 1001, "once")
 
 
+@pytest.mark.asyncio
+async def test_admin_can_list_deactivate_and_delete_coupons(db):
+    from bot_package.models import Config, Coupon, CouponRedemption, CouponTarget, Purchase, User
+    from bot_package.services.coupon_service import CouponError, CouponService
+
+    async with db.async_session() as session:
+        user = User(telegram_id=1001, first_name="User")
+        config = Config(volume_gb=1, sub_link="vless://one", is_sold=True, sold_to_user_id=1001)
+        session.add_all([user, config])
+        active = await CouponService.create_coupon(
+            session,
+            code="active",
+            discount_type="percent",
+            amount=20,
+            created_by=123456,
+        )
+        deleted = await CouponService.create_coupon(
+            session,
+            code="delete-me",
+            discount_type="fixed",
+            amount=5_000,
+            created_by=123456,
+            target_user_ids=[1001],
+        )
+        purchase = Purchase(
+            user_id=1001,
+            config_id=config.id,
+            volume_gb=1,
+            price=10_000,
+            original_price=15_000,
+            discount_amount=5_000,
+            coupon_id=deleted.id,
+        )
+        session.add(purchase)
+        await session.commit()
+
+        coupons = await CouponService.list_coupons(session)
+        assert [coupon.code for coupon in coupons] == ["DELETE-ME", "ACTIVE"]
+
+        deactivated = await CouponService.deactivate_coupon(session, active.code)
+        assert deactivated.code == "ACTIVE"
+        with pytest.raises(CouponError):
+            await CouponService.apply_coupon(session, 1001, active.code)
+
+        removed = await CouponService.delete_coupon(session, deleted.code)
+        assert removed.code == "DELETE-ME"
+
+        assert (await session.execute(select(Coupon).where(Coupon.code == "DELETE-ME"))).scalar_one_or_none() is None
+        assert (await session.execute(select(CouponTarget))).scalar_one_or_none() is None
+        assert (await session.execute(select(CouponRedemption))).scalar_one_or_none() is None
+        saved_purchase = (await session.execute(select(Purchase).where(Purchase.id == purchase.id))).scalar_one()
+
+    assert saved_purchase.coupon_id is None
+
+
 def test_new_keyboard_labels_are_persian():
     from bot_package.utils import keyboards
 
     assert keyboards.APPLY_COUPON == "🎁 کد تخفیف"
     assert keyboards.REFERRALS == "👥 دعوت دوستان"
     assert keyboards.ADMIN_COUPONS == "🎟 مدیریت تخفیف‌ها"
+    assert keyboards.ADMIN_VIEW_COUPONS == "📋 مشاهده تخفیف‌ها"
+    assert keyboards.ADMIN_DEACTIVATE_COUPON == "⏸ غیرفعال‌سازی تخفیف"
+    assert keyboards.ADMIN_DELETE_COUPON == "🗑 حذف تخفیف"
 
 
 @pytest.mark.asyncio
