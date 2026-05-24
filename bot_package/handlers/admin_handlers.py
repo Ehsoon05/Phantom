@@ -24,6 +24,7 @@ from ..utils.keyboards import (
     ADMIN_CREATE_COUPON,
     ADMIN_DEACTIVATE_COUPON,
     ADMIN_DELETE_COUPON,
+    ADMIN_EDIT_COUPON,
     ADMIN_EDIT_PRICE,
     ADMIN_INVENTORY,
     ADMIN_LOGOUT,
@@ -32,6 +33,7 @@ from ..utils.keyboards import (
     ADMIN_REFRESH_ADMINS,
     ADMIN_REPORTS,
     ADMIN_SEARCH_USER,
+    ADMIN_SET_WALLET,
     ADMIN_STOCK_STATUS,
     ADMIN_USERS,
     ADMIN_USER_STATS,
@@ -100,7 +102,14 @@ from ..utils.validators import extract_links_from_text
     COUPON_TARGET_USERS,
     COUPON_DEACTIVATE_CODE,
     COUPON_DELETE_CODE,
-) = range(14)
+    SET_WALLET_USER_ID,
+    SET_WALLET_AMOUNT,
+    COUPON_EDIT_CODE,
+    COUPON_EDIT_TYPE,
+    COUPON_EDIT_AMOUNT,
+    COUPON_EDIT_TARGET,
+    COUPON_EDIT_TARGET_USERS,
+) = range(21)
 
 
 def _exact_filter(text: str):
@@ -469,6 +478,58 @@ async def charge_wallet_execute(update: Update, context: ContextTypes.DEFAULT_TY
     return ConversationHandler.END
 
 
+@require_auth(permission="users")
+async def set_wallet_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "**تنظیم موجودی کیف پول**\n\nآیدی عددی تلگرام کاربر را ارسال کنید.",
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return SET_WALLET_USER_ID
+
+
+@require_auth(permission="users")
+async def set_wallet_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        context.user_data["set_wallet_user_id"] = int(update.message.text.strip())
+    except ValueError:
+        await update.message.reply_text("آیدی عددی تلگرام باید فقط عدد باشد.")
+        return SET_WALLET_USER_ID
+
+    await update.message.reply_text(
+        "موجودی جدید کیف پول را به تومان ارسال کنید. برای صفر کردن کیف پول عدد `0` را بفرستید.",
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return SET_WALLET_AMOUNT
+
+
+@require_auth(permission="users")
+async def set_wallet_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = context.user_data.get("set_wallet_user_id")
+    try:
+        balance = int(update.message.text.replace(",", "").strip())
+    except ValueError:
+        await update.message.reply_text("موجودی جدید را فقط به صورت عددی ارسال کنید.")
+        return SET_WALLET_AMOUNT
+
+    if balance < 0:
+        await update.message.reply_text("موجودی کیف پول نمی‌تواند منفی باشد.")
+        return SET_WALLET_AMOUNT
+
+    async with async_session() as session:
+        success = await UserService.set_wallet_balance(session, user_id, balance, update.effective_user.id)
+
+    if success:
+        await update.message.reply_text(
+            f"موجودی کیف پول کاربر `{user_id}` روی **{balance:,} تومان** تنظیم شد.",
+            reply_markup=admin_users_keyboard(),
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
+    else:
+        await update.message.reply_text("کاربر پیدا نشد.", reply_markup=admin_users_keyboard())
+
+    return ConversationHandler.END
+
+
 @require_auth(permission="reports")
 async def sales_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     period_map = {
@@ -615,6 +676,148 @@ async def delete_coupon_code(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await update.message.reply_text(
         f"کد تخفیف **{coupon.code}** حذف شد.",
+        reply_markup=admin_coupons_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return ConversationHandler.END
+
+
+@require_auth(permission="coupons")
+async def edit_coupon_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("coupon_edit_draft", None)
+    await update.message.reply_text(
+        "**ویرایش تخفیف**\n\nکد تخفیفی را که می‌خواهید ویرایش شود ارسال کنید.",
+        reply_markup=admin_coupons_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return COUPON_EDIT_CODE
+
+
+@require_auth(permission="coupons")
+async def edit_coupon_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    code = update.message.text.strip()
+    async with async_session() as session:
+        coupon = await CouponService.get_any_coupon_by_code(session, code)
+
+    if not coupon:
+        await update.message.reply_text("کد تخفیف پیدا نشد.", reply_markup=admin_coupons_keyboard())
+        return ConversationHandler.END
+
+    context.user_data["coupon_edit_draft"] = {"code": coupon.code}
+    current_type = "درصدی" if coupon.discount_type == "percent" else "مبلغ ثابت"
+    await update.message.reply_text(
+        f"کد **{coupon.code}** پیدا شد.\nنوع فعلی: **{current_type}**\nمقدار فعلی: **{coupon.amount:,}**\n\nنوع جدید تخفیف را انتخاب کنید.",
+        reply_markup=coupon_type_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return COUPON_EDIT_TYPE
+
+
+@require_auth(permission="coupons")
+async def edit_coupon_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == COUPON_PERCENT:
+        discount_type = "percent"
+        prompt = "درصد تخفیف جدید را به صورت عددی بین ۱ تا ۱۰۰ ارسال کنید. مثال: `25`"
+    elif update.message.text == COUPON_FIXED:
+        discount_type = "fixed"
+        prompt = "مبلغ تخفیف جدید را به تومان ارسال کنید. مثال: `50000`"
+    else:
+        await update.message.reply_text("نوع تخفیف معتبر نیست.", reply_markup=coupon_type_keyboard())
+        return COUPON_EDIT_TYPE
+
+    context.user_data.setdefault("coupon_edit_draft", {})["discount_type"] = discount_type
+    await update.message.reply_text(prompt, parse_mode=constants.ParseMode.MARKDOWN)
+    return COUPON_EDIT_AMOUNT
+
+
+@require_auth(permission="coupons")
+async def edit_coupon_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        amount = int(update.message.text.replace(",", "").strip())
+    except ValueError:
+        await update.message.reply_text("مقدار تخفیف باید عددی باشد.")
+        return COUPON_EDIT_AMOUNT
+
+    draft = context.user_data.setdefault("coupon_edit_draft", {})
+    discount_type = draft.get("discount_type")
+    if discount_type == "percent" and not 1 <= amount <= 100:
+        await update.message.reply_text("درصد تخفیف باید بین ۱ تا ۱۰۰ باشد.")
+        return COUPON_EDIT_AMOUNT
+    if discount_type == "fixed" and amount <= 0:
+        await update.message.reply_text("مبلغ تخفیف باید بیشتر از صفر باشد.")
+        return COUPON_EDIT_AMOUNT
+
+    draft["amount"] = amount
+    await update.message.reply_text(
+        "این کد تخفیف برای چه کسانی فعال باشد؟",
+        reply_markup=coupon_target_keyboard(),
+    )
+    return COUPON_EDIT_TARGET
+
+
+@require_auth(permission="coupons")
+async def edit_coupon_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == COUPON_ALL_USERS:
+        return await save_coupon_edit(update, context, [])
+    if update.message.text == COUPON_SELECTED_USERS:
+        await update.message.reply_text(
+            "آیدی عددی کاربران را با فاصله، ویرگول یا هرکدام در یک خط ارسال کنید.",
+            reply_markup=admin_coupons_keyboard(),
+        )
+        return COUPON_EDIT_TARGET_USERS
+
+    await update.message.reply_text("محدوده کاربران معتبر نیست.", reply_markup=coupon_target_keyboard())
+    return COUPON_EDIT_TARGET
+
+
+@require_auth(permission="coupons")
+async def edit_coupon_target_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    raw_ids = re.split(r"[\s,]+", update.message.text.strip())
+    user_ids = []
+    for raw_id in raw_ids:
+        if not raw_id:
+            continue
+        try:
+            user_ids.append(int(raw_id))
+        except ValueError:
+            await update.message.reply_text("همه آیدی‌ها باید عددی باشند.")
+            return COUPON_EDIT_TARGET_USERS
+
+    if not user_ids:
+        await update.message.reply_text("حداقل یک آیدی کاربر ارسال کنید.")
+        return COUPON_EDIT_TARGET_USERS
+
+    return await save_coupon_edit(update, context, user_ids)
+
+
+async def save_coupon_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, target_user_ids: list[int]):
+    draft = context.user_data.get("coupon_edit_draft", {})
+    async with async_session() as session:
+        try:
+            coupon = await CouponService.update_coupon(
+                session,
+                code=draft["code"],
+                discount_type=draft["discount_type"],
+                amount=draft["amount"],
+                target_user_ids=target_user_ids,
+            )
+        except (KeyError, CouponError):
+            await update.message.reply_text("کد تخفیف ویرایش نشد. اطلاعات واردشده را بررسی کنید.", reply_markup=admin_coupons_keyboard())
+            return ConversationHandler.END
+
+    if not coupon:
+        await update.message.reply_text("کد تخفیف پیدا نشد.", reply_markup=admin_coupons_keyboard())
+        return ConversationHandler.END
+
+    target_text = "همه کاربران" if coupon.applies_to_all else f"{len(target_user_ids)} کاربر"
+    if coupon.discount_type == "percent":
+        amount_text = f"{coupon.amount} درصد"
+    else:
+        amount_text = f"{coupon.amount:,} تومان"
+
+    context.user_data.pop("coupon_edit_draft", None)
+    await update.message.reply_text(
+        f"کد تخفیف **{coupon.code}** ویرایش شد.\nمقدار جدید: **{amount_text}**\nمحدوده جدید: **{target_text}**",
         reply_markup=admin_coupons_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
@@ -928,6 +1131,23 @@ charge_wallet_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
 )
 
+set_wallet_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_SET_WALLET), set_wallet_start)],
+    states={
+        SET_WALLET_USER_ID: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, set_wallet_user),
+        ],
+        SET_WALLET_AMOUNT: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, set_wallet_execute),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
 create_coupon_conv = ConversationHandler(
     entry_points=[MessageHandler(_exact_filter(ADMIN_CREATE_COUPON), create_coupon_start)],
     states={
@@ -958,6 +1178,41 @@ create_coupon_conv = ConversationHandler(
             MessageHandler(_exact_filter(CANCEL), cancel),
             MessageHandler(_exact_filter(ADMIN_BACK), cancel),
             MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_target_users),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+edit_coupon_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_EDIT_COUPON), edit_coupon_start)],
+    states={
+        COUPON_EDIT_CODE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, edit_coupon_code),
+        ],
+        COUPON_EDIT_TYPE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.Regex(f"^({re.escape(COUPON_PERCENT)}|{re.escape(COUPON_FIXED)})$"), edit_coupon_type),
+        ],
+        COUPON_EDIT_AMOUNT: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, edit_coupon_amount),
+        ],
+        COUPON_EDIT_TARGET: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(
+                filters.Regex(f"^({re.escape(COUPON_ALL_USERS)}|{re.escape(COUPON_SELECTED_USERS)})$"),
+                edit_coupon_target,
+            ),
+        ],
+        COUPON_EDIT_TARGET_USERS: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, edit_coupon_target_users),
         ],
     },
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
@@ -997,7 +1252,9 @@ admin_handlers = [
     edit_price_conv,
     search_user_conv,
     charge_wallet_conv,
+    set_wallet_conv,
     create_coupon_conv,
+    edit_coupon_conv,
     deactivate_coupon_conv,
     delete_coupon_conv,
     MessageHandler(_exact_filter(ADMIN_LOGOUT), admin_logout),

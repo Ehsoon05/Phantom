@@ -108,6 +108,44 @@ async def test_negative_wallet_charge_is_rejected(db):
 
 
 @pytest.mark.asyncio
+async def test_wallet_balance_can_be_set_exactly(db):
+    from bot_package.models import Transaction, User
+    from bot_package.services.user_service import UserService
+    from sqlalchemy import select
+
+    async with db.async_session() as session:
+        user = User(telegram_id=1001, first_name="Test", wallet_balance=10_000)
+        session.add(user)
+        await session.commit()
+
+        success = await UserService.set_wallet_balance(session, 1001, 2_500, 123456)
+
+    async with db.async_session() as session:
+        saved_user = (await session.execute(select(User).where(User.telegram_id == 1001))).scalar_one()
+        transaction = (await session.execute(select(Transaction))).scalar_one()
+
+    assert success is True
+    assert saved_user.wallet_balance == 2_500
+    assert transaction.amount == -7_500
+    assert transaction.type == "wallet_set"
+
+
+@pytest.mark.asyncio
+async def test_negative_wallet_balance_set_is_rejected(db):
+    from bot_package.models import User
+    from bot_package.services.user_service import UserService
+
+    async with db.async_session() as session:
+        user = User(telegram_id=1001, first_name="Test", wallet_balance=10_000)
+        session.add(user)
+        await session.commit()
+
+        success = await UserService.set_wallet_balance(session, 1001, -1, 123456)
+
+    assert success is False
+
+
+@pytest.mark.asyncio
 async def test_zero_price_update_is_rejected(db):
     from bot_package.services.price_service import PriceService
 

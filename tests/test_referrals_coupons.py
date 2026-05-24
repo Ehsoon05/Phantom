@@ -197,6 +197,34 @@ async def test_admin_can_list_deactivate_and_delete_coupons(db):
     assert saved_purchase.coupon_id is None
 
 
+@pytest.mark.asyncio
+async def test_admin_can_modify_existing_coupon(db):
+    from bot_package.services.coupon_service import CouponService
+
+    async with db.async_session() as session:
+        coupon = await CouponService.create_coupon(
+            session,
+            code="edit-me",
+            discount_type="percent",
+            amount=10,
+            created_by=123456,
+        )
+        updated = await CouponService.update_coupon(
+            session,
+            code=coupon.code,
+            discount_type="fixed",
+            amount=20_000,
+            target_user_ids=[1001, 1002],
+        )
+
+    assert updated is not None
+    assert updated.code == "EDIT-ME"
+    assert updated.discount_type == "fixed"
+    assert updated.amount == 20_000
+    assert updated.applies_to_all is False
+    assert sorted(target.user_id for target in updated.targets) == [1001, 1002]
+
+
 def test_new_keyboard_labels_are_persian():
     from bot_package.utils import keyboards
 
@@ -204,8 +232,10 @@ def test_new_keyboard_labels_are_persian():
     assert keyboards.REFERRALS == "👥 دعوت دوستان"
     assert keyboards.ADMIN_COUPONS == "🎟 مدیریت تخفیف‌ها"
     assert keyboards.ADMIN_VIEW_COUPONS == "📋 مشاهده تخفیف‌ها"
+    assert keyboards.ADMIN_EDIT_COUPON == "✏️ ویرایش تخفیف"
     assert keyboards.ADMIN_DEACTIVATE_COUPON == "⏸ غیرفعال‌سازی تخفیف"
     assert keyboards.ADMIN_DELETE_COUPON == "🗑 حذف تخفیف"
+    assert keyboards.ADMIN_SET_WALLET == "✏️ تنظیم موجودی کیف پول"
 
 
 @pytest.mark.asyncio

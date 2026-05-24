@@ -39,6 +39,30 @@ class UserService:
         session.add(transaction)
         await session.commit()
         return True
+
+    @staticmethod
+    async def set_wallet_balance(session: AsyncSession, telegram_id: int, balance: int, admin_id: int) -> bool:
+        if balance < 0:
+            return False
+
+        stmt = select(User).where(User.telegram_id == telegram_id)
+        result = await session.execute(stmt)
+        user = result.scalar_one_or_none()
+        if not user:
+            return False
+
+        old_balance = user.wallet_balance or 0
+        difference = balance - old_balance
+        user.wallet_balance = balance
+        transaction = Transaction(
+            user_id=telegram_id,
+            amount=difference,
+            type="wallet_set",
+            description=f"تنظیم موجودی توسط ادمین {admin_id}: {old_balance} -> {balance}",
+        )
+        session.add(transaction)
+        await session.commit()
+        return True
     
     @staticmethod
     async def get_user_stats(session: AsyncSession) -> dict:
