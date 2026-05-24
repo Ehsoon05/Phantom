@@ -25,9 +25,11 @@ ADMIN_VIEW_PRICES = "👁 مشاهده قیمت‌ها"
 ADMIN_EDIT_PRICE = "✏️ ویرایش قیمت"
 ADMIN_SEARCH_USER = "🔎 جستجوی کاربر"
 ADMIN_CHARGE_WALLET = "➕ شارژ کیف پول"
+ADMIN_SET_WALLET = "✏️ تنظیم موجودی کیف پول"
 ADMIN_USER_STATS = "📈 آمار کاربران"
 ADMIN_REFERRAL_REPORT = "👥 گزارش دعوت‌ها"
 ADMIN_CREATE_COUPON = "➕ ساخت کد تخفیف"
+ADMIN_EDIT_COUPON = "✏️ ویرایش تخفیف"
 ADMIN_VIEW_COUPONS = "📋 مشاهده تخفیف‌ها"
 ADMIN_DEACTIVATE_COUPON = "⏸ غیرفعال‌سازی تخفیف"
 ADMIN_DELETE_COUPON = "🗑 حذف تخفیف"
@@ -178,6 +180,7 @@ def admin_users_keyboard() -> ReplyKeyboardMarkup:
     return _keyboard(
         [
             [_button(ADMIN_SEARCH_USER), _button(ADMIN_CHARGE_WALLET)],
+            [_button(ADMIN_SET_WALLET)],
             [_button(ADMIN_USER_STATS), _button(ADMIN_REFERRAL_REPORT)],
             [_button(ADMIN_BACK)],
         ]
@@ -197,6 +200,7 @@ def admin_coupons_keyboard() -> ReplyKeyboardMarkup:
     return _keyboard(
         [
             [_button(ADMIN_CREATE_COUPON), _button(ADMIN_VIEW_COUPONS)],
+            [_button(ADMIN_EDIT_COUPON)],
             [_button(ADMIN_DEACTIVATE_COUPON), _button(ADMIN_DELETE_COUPON)],
             [_button(ADMIN_BACK)],
         ]

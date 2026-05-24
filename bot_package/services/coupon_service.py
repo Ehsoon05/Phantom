@@ -71,6 +71,43 @@ class CouponService:
         return coupon
 
     @staticmethod
+    def validate_discount(discount_type: str, amount: int) -> None:
+        if discount_type not in {"percent", "fixed"}:
+            raise CouponError("discount type must be percent or fixed")
+        if discount_type == "percent" and not 1 <= amount <= 100:
+            raise CouponError("percent amount must be between 1 and 100")
+        if discount_type == "fixed" and amount <= 0:
+            raise CouponError("fixed amount must be positive")
+
+    @staticmethod
+    async def update_coupon(
+        session: AsyncSession,
+        *,
+        code: str,
+        discount_type: str,
+        amount: int,
+        target_user_ids: list[int] | None = None,
+    ) -> Coupon | None:
+        coupon = await CouponService.get_any_coupon_by_code(session, code)
+        if not coupon:
+            return None
+
+        discount_type = discount_type.strip().lower()
+        target_user_ids = list(dict.fromkeys(target_user_ids or []))
+        CouponService.validate_discount(discount_type, amount)
+
+        coupon.discount_type = discount_type
+        coupon.amount = amount
+        coupon.applies_to_all = not target_user_ids
+        coupon.targets.clear()
+        await session.flush()
+        for user_id in target_user_ids:
+            coupon.targets.append(CouponTarget(user_id=user_id))
+
+        await session.commit()
+        return coupon
+
+    @staticmethod
     async def list_coupons(session: AsyncSession) -> list[Coupon]:
         result = await session.execute(
             select(Coupon)

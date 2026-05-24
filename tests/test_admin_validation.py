@@ -108,6 +108,96 @@ async def test_negative_wallet_charge_is_rejected(db):
 
 
 @pytest.mark.asyncio
+async def test_wallet_balance_can_be_set_exactly(db):
+    from bot_package.models import Transaction, User
+    from bot_package.services.user_service import UserService
+    from sqlalchemy import select
+
+    async with db.async_session() as session:
+        user = User(telegram_id=1001, first_name="Test", wallet_balance=10_000)
+        session.add(user)
+        await session.commit()
+
+        success = await UserService.set_wallet_balance(session, 1001, 2_500, 123456)
+
+    async with db.async_session() as session:
+        saved_user = (await session.execute(select(User).where(User.telegram_id == 1001))).scalar_one()
+        transaction = (await session.execute(select(Transaction))).scalar_one()
+
+    assert success is True
+    assert saved_user.wallet_balance == 2_500
+    assert transaction.amount == -7_500
+    assert transaction.type == "wallet_set"
+
+
+@pytest.mark.asyncio
+async def test_negative_wallet_balance_set_is_rejected(db):
+    from bot_package.models import User
+    from bot_package.services.user_service import UserService
+
+    async with db.async_session() as session:
+        user = User(telegram_id=1001, first_name="Test", wallet_balance=10_000)
+        session.add(user)
+        await session.commit()
+
+        success = await UserService.set_wallet_balance(session, 1001, -1, 123456)
+
+    assert success is False
+
+
+@pytest.mark.asyncio
+async def test_user_stats_include_purchase_totals(db):
+    from bot_package.models import Config, Purchase, User
+    from bot_package.services.user_service import UserService
+
+    async with db.async_session() as session:
+        user = User(telegram_id=1001, first_name="Test", wallet_balance=10_000)
+        config_one = Config(volume_gb=5, sub_link="vless://one", is_sold=True, sold_to_user_id=1001)
+        config_two = Config(volume_gb=10, sub_link="vless://two", is_sold=True, sold_to_user_id=1001)
+        session.add_all([user, config_one, config_two])
+        await session.flush()
+        session.add_all(
+            [
+                Purchase(user_id=1001, config_id=config_one.id, volume_gb=5, price=50_000),
+                Purchase(user_id=1001, config_id=config_two.id, volume_gb=10, price=90_000),
+            ]
+        )
+        await session.commit()
+
+        stats = await UserService.get_user_stats(session)
+
+    assert stats["total_purchased_gb"] == 15
+    assert stats["total_spent"] == 140_000
+
+
+@pytest.mark.asyncio
+async def test_user_purchase_summary_includes_history_and_totals(db):
+    from bot_package.models import Config, Purchase, User
+    from bot_package.services.user_service import UserService
+
+    async with db.async_session() as session:
+        user = User(telegram_id=1001, first_name="Test")
+        config_one = Config(volume_gb=1, sub_link="vless://one", is_sold=True, sold_to_user_id=1001)
+        config_two = Config(volume_gb=2, sub_link="vless://two", is_sold=True, sold_to_user_id=1001)
+        session.add_all([user, config_one, config_two])
+        await session.flush()
+        session.add_all(
+            [
+                Purchase(user_id=1001, config_id=config_one.id, volume_gb=1, price=15_000),
+                Purchase(user_id=1001, config_id=config_two.id, volume_gb=2, price=28_000),
+            ]
+        )
+        await session.commit()
+
+        summary = await UserService.get_user_purchase_summary(session, 1001)
+
+    assert summary["total_count"] == 2
+    assert summary["total_gb"] == 3
+    assert summary["total_spent"] == 43_000
+    assert len(summary["purchases"]) == 2
+
+
+@pytest.mark.asyncio
 async def test_zero_price_update_is_rejected(db):
     from bot_package.services.price_service import PriceService
 
