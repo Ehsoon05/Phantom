@@ -13,8 +13,16 @@ class User(Base):
     first_name = Column(String, nullable=False)
     wallet_balance = Column(Integer, default=0)
     is_blocked = Column(Boolean, default=False)
+    referral_code = Column(String, unique=True, nullable=True)
+    referred_by_user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=True)
+    referred_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     purchases = relationship("Purchase", back_populates="user")
+    referrals = relationship(
+        "User",
+        primaryjoin="User.telegram_id == foreign(User.referred_by_user_id)",
+        viewonly=True,
+    )
 
 class Config(Base):
     __tablename__ = "configs"
@@ -34,9 +42,13 @@ class Purchase(Base):
     config_id = Column(Integer, ForeignKey("configs.id"), nullable=False)
     volume_gb = Column(Integer, nullable=False)
     price = Column(Integer, nullable=False)
+    original_price = Column(Integer, nullable=True)
+    discount_amount = Column(Integer, nullable=False, default=0)
+    coupon_id = Column(Integer, ForeignKey("coupons.id"), nullable=True)
     purchased_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     user = relationship("User", back_populates="purchases")
     config = relationship("Config", back_populates="purchases")
+    coupon = relationship("Coupon", back_populates="purchases")
 
 class Transaction(Base):
     __tablename__ = "transactions"
@@ -65,3 +77,38 @@ class Admin(Base):
     created_by = Column(BigInteger, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class Coupon(Base):
+    __tablename__ = "coupons"
+    id = Column(Integer, primary_key=True)
+    code = Column(String, unique=True, nullable=False)
+    discount_type = Column(String, nullable=False)
+    amount = Column(Integer, nullable=False)
+    applies_to_all = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=True)
+    created_by = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    targets = relationship("CouponTarget", back_populates="coupon", cascade="all, delete-orphan")
+    redemptions = relationship("CouponRedemption", back_populates="coupon", cascade="all, delete-orphan")
+    purchases = relationship("Purchase", back_populates="coupon")
+
+
+class CouponTarget(Base):
+    __tablename__ = "coupon_targets"
+    id = Column(Integer, primary_key=True)
+    coupon_id = Column(Integer, ForeignKey("coupons.id"), nullable=False)
+    user_id = Column(BigInteger, nullable=False)
+    coupon = relationship("Coupon", back_populates="targets")
+
+
+class CouponRedemption(Base):
+    __tablename__ = "coupon_redemptions"
+    id = Column(Integer, primary_key=True)
+    coupon_id = Column(Integer, ForeignKey("coupons.id"), nullable=False)
+    user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
+    is_active = Column(Boolean, default=True)
+    applied_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    redeemed_at = Column(DateTime, nullable=True)
+    purchase_id = Column(Integer, ForeignKey("purchases.id"), nullable=True)
+    coupon = relationship("Coupon", back_populates="redemptions")
