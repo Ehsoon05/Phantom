@@ -1,4 +1,5 @@
 import re
+from urllib.parse import quote
 
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -11,8 +12,10 @@ from ..services.coupon_service import CouponError, CouponService
 from ..services.inventory_service import InventoryService
 from ..services.price_service import PriceService
 from ..services.referral_service import ReferralService
+from ..services.user_service import UserService
 from ..utils.keyboards import (
     APPLY_COUPON,
+    ACCOUNT_INFO,
     BACK_TO_MAIN,
     BUY_SUBSCRIPTION,
     HELP,
@@ -23,6 +26,7 @@ from ..utils.keyboards import (
     back_to_main,
     buy_volume_keyboard,
     main_menu_keyboard,
+    referral_share_keyboard,
     wallet_keyboard,
 )
 from ..utils.messages import (
@@ -127,12 +131,56 @@ async def referral_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         count = await ReferralService.count_referrals(session, user.telegram_id)
 
     link = f"https://t.me/{bot_username}?start=ref_{user.referral_code}"
+    share_text = (
+        "سلام، من از فانتوم VPN استفاده می‌کنم. "
+        "از این لینک وارد شو و سرویس‌هات رو راحت‌تر تهیه کن:"
+    )
+    share_url = f"https://t.me/share/url?url={quote(link)}&text={quote(share_text)}"
     text = (
         "**دعوت دوستان**\n\n"
-        f"لینک اختصاصی شما:\n`{link}`\n\n"
-        f"تعداد کاربرانی که با لینک شما عضو شده‌اند: **{count}**"
+        "لینک اختصاصی شما آماده است. هر کسی با این لینک وارد ربات شود به عنوان دعوت‌شده شما ثبت می‌شود.\n\n"
+        f"لینک قابل کلیک:\n[دعوت به فانتوم VPN]({link})\n\n"
+        f"لینک مستقیم:\n`{link}`\n\n"
+        f"تعداد ثبت‌نام با لینک شما: **{count} نفر**"
     )
-    await update.message.reply_text(text, reply_markup=wallet_keyboard(), parse_mode=constants.ParseMode.MARKDOWN)
+    await update.message.reply_text(
+        text,
+        reply_markup=referral_share_keyboard(share_url),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    await update.message.reply_text(
+        "از منوی پایین می‌توانید به بخش‌های دیگر بروید.",
+        reply_markup=main_menu_keyboard(),
+    )
+
+
+async def account_info_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = await get_or_create_user(
+        update.effective_user.id,
+        update.effective_user.first_name,
+        update.effective_user.username,
+    )
+    async with async_session() as session:
+        purchase_summary = await UserService.get_user_purchase_summary(session, user.telegram_id, limit=0)
+        referral_count = await ReferralService.count_referrals(session, user.telegram_id)
+
+    username = f"@{user.username}" if user.username else "ثبت نشده"
+    text = (
+        "**اطلاعات حساب**\n\n"
+        f"آیدی عددی: `{user.telegram_id}`\n"
+        f"نام: {user.first_name}\n"
+        f"یوزرنیم: {username}\n"
+        f"موجودی کیف پول: **{user.wallet_balance:,} تومان**\n\n"
+        f"تعداد خریدها: **{purchase_summary['total_count']}**\n"
+        f"حجم خریداری‌شده: **{purchase_summary['total_gb']:,} گیگ**\n"
+        f"مبلغ کل خریدها: **{purchase_summary['total_spent']:,} تومان**\n"
+        f"ثبت‌نام با لینک دعوت شما: **{referral_count} نفر**"
+    )
+    await update.message.reply_text(
+        text,
+        reply_markup=back_to_main(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
 
 
 async def apply_coupon_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -331,6 +379,7 @@ user_handlers = [
     MessageHandler(filters.Regex(r"^📦 \d+ گیگ \|"), process_purchase),
     MessageHandler(_exact_filter(WALLET), wallet_menu),
     MessageHandler(_exact_filter(REFERRALS), referral_menu),
+    MessageHandler(_exact_filter(ACCOUNT_INFO), account_info_menu),
     MessageHandler(_exact_filter(PURCHASE_HISTORY), history_menu),
     MessageHandler(_exact_filter(SUPPORT), support_menu),
     MessageHandler(_exact_filter(HELP), help_menu),

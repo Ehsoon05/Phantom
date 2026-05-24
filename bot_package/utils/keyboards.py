@@ -1,4 +1,4 @@
-from telegram import KeyboardButton, ReplyKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
 
 BUY_SUBSCRIPTION = "🛒 خرید سرویس"
@@ -7,6 +7,7 @@ PURCHASE_HISTORY = "📜 خریدهای من"
 SUPPORT = "💬 پشتیبانی"
 HELP = "ℹ️ راهنما"
 REFERRALS = "👥 دعوت دوستان"
+ACCOUNT_INFO = "👤 اطلاعات حساب"
 APPLY_COUPON = "🎁 کد تخفیف"
 BACK_TO_MAIN = "⬅️ بازگشت به منوی اصلی"
 
@@ -46,6 +47,8 @@ REPORT_MONTH = "ماه جاری"
 
 DONE_ADDING_CONFIGS = "✅ ثبت لینک‌ها"
 CANCEL = "❌ لغو"
+CONFIRM_USER = "✅ تایید کاربر"
+CHANGE_USER = "🔄 تغییر کاربر"
 
 VOLUMES = (1, 2, 3, 5, 10, 20)
 
@@ -84,6 +87,7 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
         [
             [_shop_button(BUY_SUBSCRIPTION, style=STYLE_SUCCESS)],
             [_shop_button(WALLET), _shop_button(PURCHASE_HISTORY)],
+            [_shop_button(REFERRALS, style=STYLE_SUCCESS), _shop_button(ACCOUNT_INFO)],
             [_shop_button(SUPPORT), _shop_button(HELP)],
         ]
     )
@@ -116,6 +120,22 @@ def wallet_keyboard() -> ReplyKeyboardMarkup:
             [_shop_button(SUPPORT, style=STYLE_SUCCESS)],
             [_shop_button(BACK_TO_MAIN, style=STYLE_DANGER)],
         ]
+    )
+
+
+def referral_share_keyboard(share_url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("👥 دعوت دوستان", url=share_url)]]
+    )
+
+
+def admin_user_confirm_keyboard() -> ReplyKeyboardMarkup:
+    return _keyboard(
+        [
+            [_button(CONFIRM_USER), _button(CHANGE_USER)],
+            [_button(CANCEL), _button(ADMIN_BACK)],
+        ],
+        one_time_keyboard=True,
     )
 
 
