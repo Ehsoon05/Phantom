@@ -409,6 +409,9 @@ async def search_user_result(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query_text = update.message.text.strip()
     async with async_session() as session:
         user = await UserService.search_user(session, query_text)
+        purchase_summary = None
+        if user:
+            purchase_summary = await UserService.get_user_purchase_summary(session, user.telegram_id)
 
     if user:
         status = "مسدود" if user.is_blocked else "فعال"
@@ -419,8 +422,22 @@ async def search_user_result(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"یوزرنیم: @{user.username or 'ندارد'}\n"
             f"موجودی کیف پول: **{user.wallet_balance:,} تومان**\n"
             f"تاریخ عضویت: {user.created_at.strftime('%Y-%m-%d')}\n"
-            f"وضعیت: {status}"
+            f"وضعیت: {status}\n\n"
+            "**خلاصه خرید**\n"
+            f"تعداد خرید: **{purchase_summary['total_count']}**\n"
+            f"حجم خریداری‌شده: **{purchase_summary['total_gb']:,} گیگ**\n"
+            f"مبلغ کل خریدها: **{purchase_summary['total_spent']:,} تومان**"
         )
+        if purchase_summary["purchases"]:
+            message += "\n\n**آخرین خریدها**\n"
+            for purchase in purchase_summary["purchases"]:
+                message += (
+                    f"{purchase.purchased_at.strftime('%Y-%m-%d %H:%M')} | "
+                    f"{purchase.volume_gb} گیگ | {purchase.price:,} تومان\n"
+                )
+        else:
+            message += "\n\nخریدی برای این کاربر ثبت نشده است."
+
         await update.message.reply_text(
             message,
             reply_markup=admin_users_keyboard(),
@@ -574,6 +591,8 @@ async def user_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"کل کاربران: {stats['total_users']}\n"
         f"کاربران جدید امروز: {stats['new_today']}\n"
         f"جمع موجودی کیف پول‌ها: **{stats['total_balance']:,} تومان**\n"
+        f"حجم کل خریداری‌شده: **{stats['total_purchased_gb']:,} گیگ**\n"
+        f"مبلغ کل خریدها: **{stats['total_spent']:,} تومان**\n"
     )
 
     await update.message.reply_text(

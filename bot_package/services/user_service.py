@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from ..models import User, Transaction
+from ..models import User, Transaction, Purchase
 from typing import Optional
 
 class UserService:
@@ -79,9 +79,49 @@ class UserService:
         
         total_balance = await session.execute(select(func.sum(User.wallet_balance)))
         total_balance = total_balance.scalar() or 0
+
+        total_purchased_gb = await session.execute(select(func.sum(Purchase.volume_gb)))
+        total_purchased_gb = total_purchased_gb.scalar() or 0
+
+        total_spent = await session.execute(select(func.sum(Purchase.price)))
+        total_spent = total_spent.scalar() or 0
         
         return {
             "total_users": total_users,
             "new_today": new_today,
-            "total_balance": total_balance
+            "total_balance": total_balance,
+            "total_purchased_gb": total_purchased_gb,
+            "total_spent": total_spent,
+        }
+
+    @staticmethod
+    async def get_user_purchase_summary(session: AsyncSession, telegram_id: int, limit: int = 10) -> dict:
+        total_count = await session.execute(
+            select(func.count(Purchase.id)).where(Purchase.user_id == telegram_id)
+        )
+        total_count = total_count.scalar() or 0
+
+        total_gb = await session.execute(
+            select(func.sum(Purchase.volume_gb)).where(Purchase.user_id == telegram_id)
+        )
+        total_gb = total_gb.scalar() or 0
+
+        total_spent = await session.execute(
+            select(func.sum(Purchase.price)).where(Purchase.user_id == telegram_id)
+        )
+        total_spent = total_spent.scalar() or 0
+
+        result = await session.execute(
+            select(Purchase)
+            .where(Purchase.user_id == telegram_id)
+            .order_by(Purchase.purchased_at.desc())
+            .limit(limit)
+        )
+        purchases = list(result.scalars().all())
+
+        return {
+            "total_count": total_count,
+            "total_gb": total_gb,
+            "total_spent": total_spent,
+            "purchases": purchases,
         }
