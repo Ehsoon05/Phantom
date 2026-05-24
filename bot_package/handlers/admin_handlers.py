@@ -1,25 +1,40 @@
+import re
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
-from telegram import Update
-from telegram.ext import (
-    CallbackQueryHandler,
-    CommandHandler,
-    ContextTypes,
-    ConversationHandler,
-    MessageHandler,
-    filters,
-)
+from telegram import ReplyKeyboardRemove, Update, constants
+from telegram.ext import CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
 from ..auth import AuthManager
 from ..config_loader import BotConfig
 from ..database import async_session
 from ..models import Purchase
-from ..services.inventory_service import InventoryService
 from ..services.admin_service import ALL_PERMISSIONS, AdminService, normalize_permissions
+from ..services.inventory_service import InventoryService
 from ..services.price_service import PriceService
 from ..services.user_service import UserService
 from ..utils.keyboards import (
+    ADMIN_ADMINS,
+    ADMIN_ADD_CONFIG,
+    ADMIN_BACK,
+    ADMIN_CHARGE_WALLET,
+    ADMIN_EDIT_PRICE,
+    ADMIN_INVENTORY,
+    ADMIN_LOGOUT,
+    ADMIN_PRICES,
+    ADMIN_REFRESH_ADMINS,
+    ADMIN_REPORTS,
+    ADMIN_SEARCH_USER,
+    ADMIN_STOCK_STATUS,
+    ADMIN_USERS,
+    ADMIN_USER_STATS,
+    ADMIN_VIEW_PRICES,
+    CANCEL,
+    DONE_ADDING_CONFIGS,
+    REPORT_MONTH,
+    REPORT_TODAY,
+    REPORT_WEEK,
+    add_links_collecting_keyboard,
     admin_inventory_keyboard,
     admin_main_keyboard,
     admin_management_keyboard,
@@ -30,7 +45,12 @@ from ..utils.keyboards import (
 )
 from ..utils.messages import (
     ADD_CONFIG_VOLUME,
+    ADMIN_INVENTORY_MENU,
     ADMIN_MAIN_MENU,
+    ADMIN_MANAGEMENT_MENU,
+    ADMIN_PRICES_MENU,
+    ADMIN_REPORTS_MENU,
+    ADMIN_USERS_MENU,
     AUTH_ENTER_PASSWORD,
     AUTH_EXPIRED,
     AUTH_FAILED,
@@ -53,6 +73,15 @@ from ..utils.validators import extract_links_from_text
 (CHOOSE_VOLUME_ADD, COLLECT_LINKS, CHOOSE_VOLUME_PRICE, ENTER_NEW_PRICE, SEARCH_USER, CHARGE_USER_ID, CHARGE_AMOUNT) = range(7)
 
 
+def _exact_filter(text: str):
+    return filters.Regex(f"^{re.escape(text)}$")
+
+
+def _extract_volume(text: str) -> int | None:
+    match = re.search(r"(\d+)\s*گیگ", text)
+    return int(match.group(1)) if match else None
+
+
 def require_auth(func=None, *, permission: str | None = None, owner_only: bool = False):
     def decorator(handler_func):
         async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -63,12 +92,12 @@ def require_auth(func=None, *, permission: str | None = None, owner_only: bool =
                     is_allowed = await AdminService.can_access(session, update.effective_user.id, permission)
 
             if not is_allowed:
-                await update.effective_message.reply_text("Access denied.")
+                await update.effective_message.reply_text("دسترسی شما به این بخش مجاز نیست.")
                 return ConversationHandler.END
 
             if not AuthManager.is_authenticated(update.effective_user.id):
                 context.user_data["awaiting_password"] = True
-                await update.effective_message.reply_text(AUTH_EXPIRED)
+                await update.effective_message.reply_text(AUTH_EXPIRED, parse_mode=constants.ParseMode.MARKDOWN)
                 return ConversationHandler.END
 
             AuthManager.refresh_session(update.effective_user.id)
@@ -86,25 +115,10 @@ async def is_known_admin(user_id: int) -> bool:
         return await AdminService.can_access(session, user_id)
 
 
-async def is_owner(user_id: int) -> bool:
-    async with async_session() as session:
-        return await AdminService.is_owner(session, user_id)
-
-
-async def require_owner_message(update: Update) -> bool:
-    if not await is_owner(update.effective_user.id):
-        await update.effective_message.reply_text("Access denied. Owner permissions are required.")
-        return False
-    if not AuthManager.is_authenticated(update.effective_user.id):
-        await update.effective_message.reply_text(AUTH_EXPIRED)
-        return False
-    return True
-
-
 async def admin_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_known_admin(update.effective_user.id):
         if not BotConfig.is_admin(update.effective_user.id):
-            await update.effective_message.reply_text("Access denied.")
+            await update.effective_message.reply_text("دسترسی شما به پنل مدیریت مجاز نیست.")
             return
         async with async_session() as session:
             await AdminService.sync_configured_admins(session)
@@ -113,11 +127,12 @@ async def admin_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             ADMIN_MAIN_MENU.format(update.effective_user.first_name),
             reply_markup=admin_main_keyboard(),
+            parse_mode=constants.ParseMode.MARKDOWN,
         )
         return
 
     context.user_data["awaiting_password"] = True
-    await update.message.reply_text(AUTH_ENTER_PASSWORD)
+    await update.message.reply_text(AUTH_ENTER_PASSWORD, parse_mode=constants.ParseMode.MARKDOWN)
 
 
 async def check_admin_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -135,15 +150,16 @@ async def check_admin_password(update: Update, context: ContextTypes.DEFAULT_TYP
     if password == BotConfig.ADMIN_PASSWORD:
         AuthManager.authenticate(update.effective_user.id)
         context.user_data["awaiting_password"] = False
-        success_msg = await update.message.reply_text(AUTH_SUCCESS)
+        success_msg = await update.message.reply_text(AUTH_SUCCESS, parse_mode=constants.ParseMode.MARKDOWN)
         context.job_queue.run_once(delete_later, 3, data=success_msg)
         await update.message.reply_text(
             ADMIN_MAIN_MENU.format(update.effective_user.first_name),
             reply_markup=admin_main_keyboard(),
+            parse_mode=constants.ParseMode.MARKDOWN,
         )
         return
 
-    fail_msg = await update.message.reply_text(AUTH_FAILED)
+    fail_msg = await update.message.reply_text(AUTH_FAILED, parse_mode=constants.ParseMode.MARKDOWN)
     context.job_queue.run_once(delete_later, 5, data=fail_msg)
 
 
@@ -157,60 +173,59 @@ async def delete_later(context: ContextTypes.DEFAULT_TYPE):
 
 @require_auth
 async def admin_menu_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
     nav_map = {
-        "admin_main": (ADMIN_MAIN_MENU.format(query.from_user.first_name), admin_main_keyboard()),
-        "admin_inventory_menu": ("Inventory management", admin_inventory_keyboard()),
-        "admin_prices_menu": ("Price management", admin_prices_keyboard()),
-        "admin_users_menu": ("User management", admin_users_keyboard()),
-        "admin_reports_menu": ("Sales reports", admin_reports_keyboard()),
+        ADMIN_BACK: (ADMIN_MAIN_MENU.format(update.effective_user.first_name), admin_main_keyboard()),
+        ADMIN_INVENTORY: (ADMIN_INVENTORY_MENU, admin_inventory_keyboard()),
+        ADMIN_PRICES: (ADMIN_PRICES_MENU, admin_prices_keyboard()),
+        ADMIN_USERS: (ADMIN_USERS_MENU, admin_users_keyboard()),
+        ADMIN_REPORTS: (ADMIN_REPORTS_MENU, admin_reports_keyboard()),
     }
-
-    text, keyboard = nav_map[query.data]
-    await query.edit_message_text(text, reply_markup=keyboard)
+    text, keyboard = nav_map[update.message.text]
+    await update.message.reply_text(text, reply_markup=keyboard, parse_mode=constants.ParseMode.MARKDOWN)
 
 
 @require_auth(owner_only=True)
 async def admin_management_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text(
-        "Admin management\n\n"
-        "Commands:\n"
-        "/admins\n"
-        "/addadmin <telegram_id> <permissions>\n"
-        "/removeadmin <telegram_id>\n"
-        "/setadminperms <telegram_id> <permissions>\n\n"
-        f"Permissions: {', '.join(ALL_PERMISSIONS)} or all",
+    await update.message.reply_text(
+        ADMIN_MANAGEMENT_MENU,
         reply_markup=admin_management_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
     )
 
 
 @require_auth
 async def admin_logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    AuthManager.logout(query.from_user.id)
-    await query.edit_message_text("Logged out. Send /start to log in again.")
+    AuthManager.logout(update.effective_user.id)
+    await update.message.reply_text(
+        "از پنل مدیریت خارج شدید. برای ورود دوباره /start را ارسال کنید.",
+        reply_markup=ReplyKeyboardRemove(),
+    )
 
 
 @require_auth(permission="inventory")
 async def add_config_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text(ADD_CONFIG_VOLUME, reply_markup=volume_selection_keyboard("add_vol"))
+    await update.message.reply_text(
+        ADD_CONFIG_VOLUME,
+        reply_markup=volume_selection_keyboard("add"),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
     return CHOOSE_VOLUME_ADD
 
 
 @require_auth(permission="inventory")
 async def add_config_volume(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    context.user_data["adding_volume"] = int(query.data.split("_")[2])
+    volume = _extract_volume(update.message.text)
+    if volume is None:
+        await update.message.reply_text("حجم انتخاب‌شده معتبر نیست.", reply_markup=admin_inventory_keyboard())
+        return ConversationHandler.END
+
+    context.user_data["adding_volume"] = volume
     context.user_data["collected_links"] = []
-    await query.edit_message_text(SEND_LINKS_PROMPT)
+    await update.message.reply_text(
+        SEND_LINKS_PROMPT,
+        reply_markup=add_links_collecting_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
     return COLLECT_LINKS
 
 
@@ -219,9 +234,12 @@ async def collect_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_links = extract_links_from_text(update.message.text)
     if new_links:
         context.user_data.setdefault("collected_links", []).extend(new_links)
-        await update.message.reply_text(LINKS_DETECTED.format(len(new_links), len(context.user_data["collected_links"])))
+        await update.message.reply_text(
+            LINKS_DETECTED.format(len(new_links), len(context.user_data["collected_links"])),
+            reply_markup=add_links_collecting_keyboard(),
+        )
     else:
-        await update.message.reply_text(NO_LINKS_FOUND)
+        await update.message.reply_text(NO_LINKS_FOUND, reply_markup=add_links_collecting_keyboard())
     return COLLECT_LINKS
 
 
@@ -230,14 +248,14 @@ async def done_collecting(update: Update, context: ContextTypes.DEFAULT_TYPE):
     volume = context.user_data.get("adding_volume")
     links = context.user_data.get("collected_links", [])
     if not volume or not links:
-        await update.message.reply_text("No links were collected.", reply_markup=admin_inventory_keyboard())
+        await update.message.reply_text("لینکی برای ثبت وجود ندارد.", reply_markup=admin_inventory_keyboard())
         return ConversationHandler.END
 
     async with async_session() as session:
         count = await InventoryService.add_configs(session, volume, links)
 
     await update.message.reply_text(
-        f"Added {count} config links for {volume}GB.",
+        f"{count} لینک برای پلن {volume} گیگ ثبت شد.",
         reply_markup=admin_inventory_keyboard(),
     )
     return ConversationHandler.END
@@ -245,59 +263,66 @@ async def done_collecting(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @require_auth(permission="inventory")
 async def stock_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
     async with async_session() as session:
         stock = await InventoryService.get_stock_status(session)
 
     message = STOCK_STATUS_HEADER
     for volume, count in stock.items():
         if count < 5:
-            status = "critical"
+            status = "بحرانی"
         elif count <= 10:
-            status = "medium"
+            status = "متوسط"
         else:
-            status = "healthy"
-        message += f"{volume}GB: {count} ({status})\n"
+            status = "مناسب"
+        message += f"{volume} گیگ: {count} عدد ({status})\n"
 
-    await query.edit_message_text(message, reply_markup=admin_inventory_keyboard())
+    await update.message.reply_text(
+        message,
+        reply_markup=admin_inventory_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
 
 
 @require_auth(permission="prices")
 async def view_prices(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
     async with async_session() as session:
         prices = await PriceService.get_all_prices(session)
 
     message = PRICE_LIST_HEADER.format(datetime.now().strftime("%Y-%m-%d %H:%M"))
     for volume, price in prices.items():
-        message += f"{volume}GB: {price:,} toman\n"
+        message += f"{volume} گیگ: {price:,} تومان\n"
 
-    await query.edit_message_text(message, reply_markup=admin_prices_keyboard())
+    await update.message.reply_text(
+        message,
+        reply_markup=admin_prices_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
 
 
 @require_auth(permission="prices")
 async def edit_price_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text("Choose the volume to edit:", reply_markup=volume_selection_keyboard("edit_price"))
+    await update.message.reply_text(
+        "حجم پلنی که می‌خواهید قیمتش را تغییر دهید انتخاب کنید:",
+        reply_markup=volume_selection_keyboard("edit_price"),
+    )
     return CHOOSE_VOLUME_PRICE
 
 
 @require_auth(permission="prices")
 async def edit_price_enter(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    volume = int(query.data.split("_")[2])
-    context.user_data["editing_volume"] = volume
+    volume = _extract_volume(update.message.text)
+    if volume is None:
+        await update.message.reply_text("حجم انتخاب‌شده معتبر نیست.", reply_markup=admin_prices_keyboard())
+        return ConversationHandler.END
 
+    context.user_data["editing_volume"] = volume
     async with async_session() as session:
         current_price = await PriceService.get_price(session, volume)
 
-    await query.edit_message_text(EDIT_PRICE_PROMPT.format(volume, f"{current_price:,}"))
+    await update.message.reply_text(
+        EDIT_PRICE_PROMPT.format(volume, f"{current_price:,}"),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
     return ENTER_NEW_PRICE
 
 
@@ -307,11 +332,11 @@ async def save_new_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         new_price = int(update.message.text.replace(",", "").strip())
     except ValueError:
-        await update.message.reply_text("Enter a valid numeric price.")
+        await update.message.reply_text("لطفا قیمت را فقط به صورت عددی ارسال کنید.")
         return ENTER_NEW_PRICE
 
     if new_price <= 0:
-        await update.message.reply_text("Price must be greater than zero.")
+        await update.message.reply_text("قیمت باید بیشتر از صفر باشد.")
         return ENTER_NEW_PRICE
 
     async with async_session() as session:
@@ -321,18 +346,17 @@ async def save_new_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             PRICE_UPDATED.format(volume, f"{new_price:,}", datetime.now().strftime("%H:%M:%S")),
             reply_markup=admin_prices_keyboard(),
+            parse_mode=constants.ParseMode.MARKDOWN,
         )
     else:
-        await update.message.reply_text("Could not update price.", reply_markup=admin_prices_keyboard())
+        await update.message.reply_text("قیمت بروزرسانی نشد.", reply_markup=admin_prices_keyboard())
 
     return ConversationHandler.END
 
 
 @require_auth(permission="users")
 async def search_user_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text(SEARCH_USER_PROMPT)
+    await update.message.reply_text(SEARCH_USER_PROMPT, parse_mode=constants.ParseMode.MARKDOWN)
     return SEARCH_USER
 
 
@@ -343,28 +367,30 @@ async def search_user_result(update: Update, context: ContextTypes.DEFAULT_TYPE)
         user = await UserService.search_user(session, query_text)
 
     if user:
-        status = "blocked" if user.is_blocked else "active"
+        status = "مسدود" if user.is_blocked else "فعال"
         message = (
-            "User information\n\n"
-            f"ID: {user.telegram_id}\n"
-            f"Name: {user.first_name}\n"
-            f"Username: @{user.username or 'none'}\n"
-            f"Wallet: {user.wallet_balance:,} toman\n"
-            f"Joined: {user.created_at.strftime('%Y-%m-%d')}\n"
-            f"Status: {status}"
+            "**اطلاعات کاربر**\n\n"
+            f"آیدی عددی: `{user.telegram_id}`\n"
+            f"نام: {user.first_name}\n"
+            f"یوزرنیم: @{user.username or 'ندارد'}\n"
+            f"موجودی کیف پول: **{user.wallet_balance:,} تومان**\n"
+            f"تاریخ عضویت: {user.created_at.strftime('%Y-%m-%d')}\n"
+            f"وضعیت: {status}"
         )
-        await update.message.reply_text(message, reply_markup=admin_users_keyboard())
+        await update.message.reply_text(
+            message,
+            reply_markup=admin_users_keyboard(),
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
     else:
-        await update.message.reply_text("User not found.", reply_markup=admin_users_keyboard())
+        await update.message.reply_text("کاربر پیدا نشد.", reply_markup=admin_users_keyboard())
 
     return ConversationHandler.END
 
 
 @require_auth(permission="users")
 async def charge_wallet_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text(CHARGE_WALLET_PROMPT)
+    await update.message.reply_text(CHARGE_WALLET_PROMPT, parse_mode=constants.ParseMode.MARKDOWN)
     return CHARGE_USER_ID
 
 
@@ -373,10 +399,10 @@ async def charge_wallet_user(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         context.user_data["charge_user_id"] = int(update.message.text.strip())
     except ValueError:
-        await update.message.reply_text("Enter a valid numeric Telegram user ID.")
+        await update.message.reply_text("آیدی عددی تلگرام باید فقط عدد باشد.")
         return CHARGE_USER_ID
 
-    await update.message.reply_text(CHARGE_AMOUNT_PROMPT)
+    await update.message.reply_text(CHARGE_AMOUNT_PROMPT, parse_mode=constants.ParseMode.MARKDOWN)
     return CHARGE_AMOUNT
 
 
@@ -386,11 +412,11 @@ async def charge_wallet_execute(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         amount = int(update.message.text.replace(",", "").strip())
     except ValueError:
-        await update.message.reply_text("Enter a valid numeric amount.")
+        await update.message.reply_text("مبلغ شارژ را فقط به صورت عددی ارسال کنید.")
         return CHARGE_AMOUNT
 
     if amount <= 0:
-        await update.message.reply_text("Charge amount must be greater than zero.")
+        await update.message.reply_text("مبلغ شارژ باید بیشتر از صفر باشد.")
         return CHARGE_AMOUNT
 
     async with async_session() as session:
@@ -400,20 +426,22 @@ async def charge_wallet_execute(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(
             CHARGE_SUCCESS.format(user_id, f"{amount:,}", datetime.now().strftime("%H:%M:%S")),
             reply_markup=admin_users_keyboard(),
+            parse_mode=constants.ParseMode.MARKDOWN,
         )
     else:
-        await update.message.reply_text("User not found.", reply_markup=admin_users_keyboard())
+        await update.message.reply_text("کاربر پیدا نشد.", reply_markup=admin_users_keyboard())
 
     return ConversationHandler.END
 
 
 @require_auth(permission="reports")
 async def sales_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    days = int(query.data.split("_")[1])
-    period_names = {1: "today", 7: "this week", 30: "this month"}
+    period_map = {
+        REPORT_TODAY: (1, "امروز"),
+        REPORT_WEEK: (7, "هفته جاری"),
+        REPORT_MONTH: (30, "ماه جاری"),
+    }
+    days, period_name = period_map[update.message.text]
     since = datetime.now(timezone.utc) - timedelta(days=days)
 
     async with async_session() as session:
@@ -425,33 +453,38 @@ async def sales_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for purchase in purchases:
         volume_stats[purchase.volume_gb] = volume_stats.get(purchase.volume_gb, 0) + 1
 
-    message = f"Sales report for {period_names.get(days, f'{days} days')}\n\n"
-    message += f"Sales count: {len(purchases)}\n"
-    message += f"Total revenue: {total_revenue:,} toman\n\n"
+    message = f"**گزارش فروش {period_name}**\n\n"
+    message += f"تعداد فروش: {len(purchases)}\n"
+    message += f"درآمد کل: **{total_revenue:,} تومان**\n\n"
     if volume_stats:
-        message += "By volume:\n"
+        message += "تفکیک بر اساس حجم:\n"
         for volume, count in sorted(volume_stats.items()):
-            message += f"{volume}GB: {count}\n"
+            message += f"{volume} گیگ: {count} فروش\n"
 
-    await query.edit_message_text(message, reply_markup=admin_reports_keyboard())
+    await update.message.reply_text(
+        message,
+        reply_markup=admin_reports_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
 
 
 @require_auth(permission="users")
 async def user_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
     async with async_session() as session:
         stats = await UserService.get_user_stats(session)
 
     message = (
-        "User stats\n\n"
-        f"Total users: {stats['total_users']}\n"
-        f"New today: {stats['new_today']}\n"
-        f"Total wallet balance: {stats['total_balance']:,} toman\n"
+        "**آمار کاربران**\n\n"
+        f"کل کاربران: {stats['total_users']}\n"
+        f"کاربران جدید امروز: {stats['new_today']}\n"
+        f"جمع موجودی کیف پول‌ها: **{stats['total_balance']:,} تومان**\n"
     )
 
-    await query.edit_message_text(message, reply_markup=admin_users_keyboard())
+    await update.message.reply_text(
+        message,
+        reply_markup=admin_users_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
 
 
 @require_auth(owner_only=True)
@@ -459,33 +492,34 @@ async def list_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with async_session() as session:
         admins = await AdminService.list_admins(session)
 
-    lines = ["Active admins\n"]
+    lines = ["**ادمین‌های فعال**\n"]
     for admin in admins:
-        role = "owner" if admin.is_owner else "admin"
+        role = "مالک" if admin.is_owner else "ادمین"
         permissions = "all" if admin.is_owner else admin.permissions
-        lines.append(f"{admin.telegram_id} | {role} | {permissions}")
+        lines.append(f"`{admin.telegram_id}` | {role} | `{permissions}`")
 
-    await update.effective_message.reply_text("\n".join(lines))
+    await update.effective_message.reply_text("\n".join(lines), parse_mode=constants.ParseMode.MARKDOWN)
 
 
 @require_auth(owner_only=True)
 async def add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.effective_message.reply_text(
-            f"Usage: /addadmin <telegram_id> <permissions>\nPermissions: {', '.join(ALL_PERMISSIONS)} or all"
+            f"فرمت درست:\n`/addadmin <telegram_id> <permissions>`\n\nسطح دسترسی‌ها: {', '.join(ALL_PERMISSIONS)} یا all",
+            parse_mode=constants.ParseMode.MARKDOWN,
         )
         return
 
     try:
         telegram_id = int(context.args[0])
     except ValueError:
-        await update.effective_message.reply_text("Telegram ID must be numeric.")
+        await update.effective_message.reply_text("آیدی تلگرام باید عددی باشد.")
         return
 
     permissions = normalize_permissions(context.args[1:] or "reports")
     if not permissions:
         await update.effective_message.reply_text(
-            f"Provide at least one valid permission: {', '.join(ALL_PERMISSIONS)} or all"
+            f"حداقل یک سطح دسترسی معتبر وارد کنید: {', '.join(ALL_PERMISSIONS)} یا all"
         )
         return
 
@@ -499,23 +533,23 @@ async def add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await session.commit()
 
-    await update.effective_message.reply_text(f"Admin {admin.telegram_id} saved with permissions: {admin.permissions}")
+    await update.effective_message.reply_text(f"ادمین `{admin.telegram_id}` با دسترسی `{admin.permissions}` ذخیره شد.", parse_mode=constants.ParseMode.MARKDOWN)
 
 
 @require_auth(owner_only=True)
 async def remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.effective_message.reply_text("Usage: /removeadmin <telegram_id>")
+        await update.effective_message.reply_text("فرمت درست: `/removeadmin <telegram_id>`", parse_mode=constants.ParseMode.MARKDOWN)
         return
 
     try:
         telegram_id = int(context.args[0])
     except ValueError:
-        await update.effective_message.reply_text("Telegram ID must be numeric.")
+        await update.effective_message.reply_text("آیدی تلگرام باید عددی باشد.")
         return
 
     if telegram_id == update.effective_user.id:
-        await update.effective_message.reply_text("Owners cannot remove themselves.")
+        await update.effective_message.reply_text("مالک نمی‌تواند خودش را حذف کند.")
         return
 
     async with async_session() as session:
@@ -523,86 +557,107 @@ async def remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await session.commit()
 
     if removed:
-        await update.effective_message.reply_text(f"Admin {telegram_id} removed.")
+        await update.effective_message.reply_text(f"ادمین `{telegram_id}` غیرفعال شد.", parse_mode=constants.ParseMode.MARKDOWN)
     else:
-        await update.effective_message.reply_text("Admin was not found or is an owner.")
+        await update.effective_message.reply_text("ادمین پیدا نشد یا مالک است.")
 
 
 @require_auth(owner_only=True)
 async def set_admin_permissions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 2:
         await update.effective_message.reply_text(
-            f"Usage: /setadminperms <telegram_id> <permissions>\nPermissions: {', '.join(ALL_PERMISSIONS)} or all"
+            f"فرمت درست:\n`/setadminperms <telegram_id> <permissions>`\n\nسطح دسترسی‌ها: {', '.join(ALL_PERMISSIONS)} یا all",
+            parse_mode=constants.ParseMode.MARKDOWN,
         )
         return
 
     try:
         telegram_id = int(context.args[0])
     except ValueError:
-        await update.effective_message.reply_text("Telegram ID must be numeric.")
+        await update.effective_message.reply_text("آیدی تلگرام باید عددی باشد.")
         return
 
     permissions = normalize_permissions(context.args[1:])
     if not permissions:
         await update.effective_message.reply_text(
-            f"Provide at least one valid permission: {', '.join(ALL_PERMISSIONS)} or all"
+            f"حداقل یک سطح دسترسی معتبر وارد کنید: {', '.join(ALL_PERMISSIONS)} یا all"
         )
         return
 
     async with async_session() as session:
         admin = await AdminService.get_admin(session, telegram_id)
         if not admin:
-            await update.effective_message.reply_text("Admin not found.")
+            await update.effective_message.reply_text("ادمین پیدا نشد.")
             return
         if admin.is_owner:
-            await update.effective_message.reply_text("Owner permissions cannot be changed.")
+            await update.effective_message.reply_text("دسترسی مالک قابل تغییر نیست.")
             return
         admin.permissions = permissions
         admin.updated_at = datetime.now(timezone.utc)
         await session.commit()
 
-    await update.effective_message.reply_text(f"Admin {telegram_id} permissions updated: {permissions}")
+    await update.effective_message.reply_text(f"دسترسی ادمین `{telegram_id}` به `{permissions}` تغییر کرد.", parse_mode=constants.ParseMode.MARKDOWN)
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Operation cancelled.", reply_markup=admin_main_keyboard())
+    await update.message.reply_text("عملیات لغو شد.", reply_markup=admin_main_keyboard())
     return ConversationHandler.END
 
 
 add_config_conv = ConversationHandler(
-    entry_points=[CallbackQueryHandler(add_config_start, pattern="^admin_add_config$")],
+    entry_points=[MessageHandler(_exact_filter(ADMIN_ADD_CONFIG), add_config_start)],
     states={
-        CHOOSE_VOLUME_ADD: [CallbackQueryHandler(add_config_volume, pattern="^add_vol_")],
+        CHOOSE_VOLUME_ADD: [MessageHandler(filters.Regex(r"^📦 \d+ گیگ$"), add_config_volume)],
         COLLECT_LINKS: [
+            MessageHandler(_exact_filter(DONE_ADDING_CONFIGS), done_collecting),
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
             MessageHandler(filters.TEXT & ~filters.COMMAND, collect_links),
-            CommandHandler("done", done_collecting),
         ],
     },
-    fallbacks=[CommandHandler("cancel", cancel)],
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
 )
 
 edit_price_conv = ConversationHandler(
-    entry_points=[CallbackQueryHandler(edit_price_select, pattern="^admin_edit_price_select$")],
+    entry_points=[MessageHandler(_exact_filter(ADMIN_EDIT_PRICE), edit_price_select)],
     states={
-        CHOOSE_VOLUME_PRICE: [CallbackQueryHandler(edit_price_enter, pattern="^edit_price_")],
-        ENTER_NEW_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_new_price)],
+        CHOOSE_VOLUME_PRICE: [MessageHandler(filters.Regex(r"^✏️ قیمت \d+ گیگ$"), edit_price_enter)],
+        ENTER_NEW_PRICE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, save_new_price),
+        ],
     },
-    fallbacks=[CommandHandler("cancel", cancel)],
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
 )
 
 search_user_conv = ConversationHandler(
-    entry_points=[CallbackQueryHandler(search_user_start, pattern="^admin_search_user$")],
-    states={SEARCH_USER: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_user_result)]},
-    fallbacks=[CommandHandler("cancel", cancel)],
+    entry_points=[MessageHandler(_exact_filter(ADMIN_SEARCH_USER), search_user_start)],
+    states={
+        SEARCH_USER: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, search_user_result),
+        ]
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
 )
 
 charge_wallet_conv = ConversationHandler(
-    entry_points=[CallbackQueryHandler(charge_wallet_start, pattern="^admin_charge_wallet$")],
+    entry_points=[MessageHandler(_exact_filter(ADMIN_CHARGE_WALLET), charge_wallet_start)],
     states={
-        CHARGE_USER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, charge_wallet_user)],
-        CHARGE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, charge_wallet_execute)],
+        CHARGE_USER_ID: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, charge_wallet_user),
+        ],
+        CHARGE_AMOUNT: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, charge_wallet_execute),
+        ],
     },
-    fallbacks=[CommandHandler("cancel", cancel)],
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
 )
 
 admin_handlers = [
@@ -611,16 +666,26 @@ admin_handlers = [
     CommandHandler("addadmin", add_admin),
     CommandHandler("removeadmin", remove_admin),
     CommandHandler("setadminperms", set_admin_permissions),
-    CallbackQueryHandler(admin_logout, pattern="^admin_logout$"),
-    CallbackQueryHandler(admin_management_menu, pattern="^admin_admins_menu$"),
-    CallbackQueryHandler(admin_menu_navigation, pattern="^(admin_main|admin_inventory_menu|admin_prices_menu|admin_users_menu|admin_reports_menu)$"),
-    CallbackQueryHandler(stock_status, pattern="^admin_stock_status$"),
-    CallbackQueryHandler(view_prices, pattern="^admin_view_prices$"),
-    CallbackQueryHandler(sales_report, pattern="^report_"),
-    CallbackQueryHandler(user_stats, pattern="^admin_user_stats$"),
     add_config_conv,
     edit_price_conv,
     search_user_conv,
     charge_wallet_conv,
+    MessageHandler(_exact_filter(ADMIN_LOGOUT), admin_logout),
+    MessageHandler(_exact_filter(ADMIN_ADMINS), admin_management_menu),
+    MessageHandler(_exact_filter(ADMIN_REFRESH_ADMINS), admin_management_menu),
+    MessageHandler(
+        filters.Regex(
+            f"^({re.escape(ADMIN_BACK)}|{re.escape(ADMIN_INVENTORY)}|{re.escape(ADMIN_PRICES)}|"
+            f"{re.escape(ADMIN_USERS)}|{re.escape(ADMIN_REPORTS)})$"
+        ),
+        admin_menu_navigation,
+    ),
+    MessageHandler(_exact_filter(ADMIN_STOCK_STATUS), stock_status),
+    MessageHandler(_exact_filter(ADMIN_VIEW_PRICES), view_prices),
+    MessageHandler(
+        filters.Regex(f"^({re.escape(REPORT_TODAY)}|{re.escape(REPORT_WEEK)}|{re.escape(REPORT_MONTH)})$"),
+        sales_report,
+    ),
+    MessageHandler(_exact_filter(ADMIN_USER_STATS), user_stats),
     MessageHandler(filters.TEXT & ~filters.COMMAND, check_admin_password),
 ]
