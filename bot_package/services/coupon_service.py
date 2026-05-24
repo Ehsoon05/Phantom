@@ -4,7 +4,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from ..models import Coupon, CouponRedemption, CouponTarget
+from ..models import Coupon, CouponRedemption, CouponTarget, Purchase
 
 
 class CouponError(ValueError):
@@ -71,6 +71,15 @@ class CouponService:
         return coupon
 
     @staticmethod
+    async def list_coupons(session: AsyncSession) -> list[Coupon]:
+        result = await session.execute(
+            select(Coupon)
+            .options(selectinload(Coupon.targets))
+            .order_by(Coupon.is_active.desc(), Coupon.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
     async def get_coupon_by_code(session: AsyncSession, code: str) -> Coupon | None:
         result = await session.execute(
             select(Coupon)
@@ -78,6 +87,39 @@ class CouponService:
             .where(func.upper(Coupon.code) == CouponService.normalize_code(code), Coupon.is_active == True)
         )
         return result.scalar_one_or_none()
+
+    @staticmethod
+    async def get_any_coupon_by_code(session: AsyncSession, code: str) -> Coupon | None:
+        result = await session.execute(
+            select(Coupon)
+            .options(selectinload(Coupon.targets))
+            .where(func.upper(Coupon.code) == CouponService.normalize_code(code))
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def deactivate_coupon(session: AsyncSession, code: str) -> Coupon | None:
+        coupon = await CouponService.get_any_coupon_by_code(session, code)
+        if not coupon:
+            return None
+        coupon.is_active = False
+        await session.execute(
+            update(CouponRedemption)
+            .where(CouponRedemption.coupon_id == coupon.id, CouponRedemption.is_active == True)
+            .values(is_active=False)
+        )
+        await session.commit()
+        return coupon
+
+    @staticmethod
+    async def delete_coupon(session: AsyncSession, code: str) -> Coupon | None:
+        coupon = await CouponService.get_any_coupon_by_code(session, code)
+        if not coupon:
+            return None
+        await session.execute(update(Purchase).where(Purchase.coupon_id == coupon.id).values(coupon_id=None))
+        await session.delete(coupon)
+        await session.commit()
+        return coupon
 
     @staticmethod
     def is_targeted_to_user(coupon: Coupon, user_id: int) -> bool:

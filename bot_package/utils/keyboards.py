@@ -28,6 +28,9 @@ ADMIN_CHARGE_WALLET = "➕ شارژ کیف پول"
 ADMIN_USER_STATS = "📈 آمار کاربران"
 ADMIN_REFERRAL_REPORT = "👥 گزارش دعوت‌ها"
 ADMIN_CREATE_COUPON = "➕ ساخت کد تخفیف"
+ADMIN_VIEW_COUPONS = "📋 مشاهده تخفیف‌ها"
+ADMIN_DEACTIVATE_COUPON = "⏸ غیرفعال‌سازی تخفیف"
+ADMIN_DELETE_COUPON = "🗑 حذف تخفیف"
 ADMIN_REFRESH_ADMINS = "🔄 بروزرسانی لیست ادمین‌ها"
 
 COUPON_PERCENT = "درصدی"
@@ -193,7 +196,8 @@ def admin_reports_keyboard() -> ReplyKeyboardMarkup:
 def admin_coupons_keyboard() -> ReplyKeyboardMarkup:
     return _keyboard(
         [
-            [_button(ADMIN_CREATE_COUPON)],
+            [_button(ADMIN_CREATE_COUPON), _button(ADMIN_VIEW_COUPONS)],
+            [_button(ADMIN_DEACTIVATE_COUPON), _button(ADMIN_DELETE_COUPON)],
             [_button(ADMIN_BACK)],
         ]
     )
