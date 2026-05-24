@@ -45,6 +45,8 @@ from ..utils.keyboards import (
     COUPON_PERCENT,
     COUPON_SELECTED_USERS,
     DONE_ADDING_CONFIGS,
+    CHANGE_USER,
+    CONFIRM_USER,
     REPORT_MONTH,
     REPORT_TODAY,
     REPORT_WEEK,
@@ -55,6 +57,7 @@ from ..utils.keyboards import (
     admin_management_keyboard,
     admin_prices_keyboard,
     admin_reports_keyboard,
+    admin_user_confirm_keyboard,
     admin_users_keyboard,
     coupon_target_keyboard,
     coupon_type_keyboard,
@@ -94,6 +97,7 @@ from ..utils.validators import extract_links_from_text
     ENTER_NEW_PRICE,
     SEARCH_USER,
     CHARGE_USER_ID,
+    CHARGE_CONFIRM_USER,
     CHARGE_AMOUNT,
     COUPON_CODE,
     COUPON_TYPE,
@@ -103,13 +107,14 @@ from ..utils.validators import extract_links_from_text
     COUPON_DEACTIVATE_CODE,
     COUPON_DELETE_CODE,
     SET_WALLET_USER_ID,
+    SET_WALLET_CONFIRM_USER,
     SET_WALLET_AMOUNT,
     COUPON_EDIT_CODE,
     COUPON_EDIT_TYPE,
     COUPON_EDIT_AMOUNT,
     COUPON_EDIT_TARGET,
     COUPON_EDIT_TARGET_USERS,
-) = range(21)
+) = range(23)
 
 
 def _exact_filter(text: str):
@@ -119,6 +124,20 @@ def _exact_filter(text: str):
 def _extract_volume(text: str) -> int | None:
     match = re.search(r"(\d+)\s*گیگ", text)
     return int(match.group(1)) if match else None
+
+
+def _admin_user_preview(user) -> str:
+    username = f"@{user.username}" if user.username else "ندارد"
+    status = "مسدود" if user.is_blocked else "فعال"
+    return (
+        "**تایید کاربر**\n\n"
+        f"آیدی عددی: `{user.telegram_id}`\n"
+        f"نام: {user.first_name}\n"
+        f"یوزرنیم: {username}\n"
+        f"موجودی کیف پول: **{user.wallet_balance:,} تومان**\n"
+        f"وضعیت: {status}\n\n"
+        "اگر کاربر درست است، دکمه تایید کاربر را بزنید."
+    )
 
 
 def require_auth(func=None, *, permission: str | None = None, owner_only: bool = False):
@@ -459,10 +478,37 @@ async def charge_wallet_start(update: Update, context: ContextTypes.DEFAULT_TYPE
 @require_auth(permission="users")
 async def charge_wallet_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        context.user_data["charge_user_id"] = int(update.message.text.strip())
+        user_id = int(update.message.text.strip())
     except ValueError:
         await update.message.reply_text("آیدی عددی تلگرام باید فقط عدد باشد.")
         return CHARGE_USER_ID
+
+    async with async_session() as session:
+        user = await UserService.search_user(session, str(user_id))
+
+    if not user:
+        await update.message.reply_text("کاربری با این آیدی پیدا نشد. دوباره آیدی عددی را ارسال کنید.")
+        return CHARGE_USER_ID
+
+    context.user_data["charge_user_id"] = user.telegram_id
+    await update.message.reply_text(
+        _admin_user_preview(user),
+        reply_markup=admin_user_confirm_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return CHARGE_CONFIRM_USER
+
+
+@require_auth(permission="users")
+async def charge_wallet_confirm_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == CHANGE_USER:
+        context.user_data.pop("charge_user_id", None)
+        await update.message.reply_text(CHARGE_WALLET_PROMPT, parse_mode=constants.ParseMode.MARKDOWN)
+        return CHARGE_USER_ID
+
+    if update.message.text != CONFIRM_USER:
+        await update.message.reply_text("لطفا تایید کاربر یا تغییر کاربر را انتخاب کنید.", reply_markup=admin_user_confirm_keyboard())
+        return CHARGE_CONFIRM_USER
 
     await update.message.reply_text(CHARGE_AMOUNT_PROMPT, parse_mode=constants.ParseMode.MARKDOWN)
     return CHARGE_AMOUNT
@@ -508,10 +554,40 @@ async def set_wallet_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @require_auth(permission="users")
 async def set_wallet_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        context.user_data["set_wallet_user_id"] = int(update.message.text.strip())
+        user_id = int(update.message.text.strip())
     except ValueError:
         await update.message.reply_text("آیدی عددی تلگرام باید فقط عدد باشد.")
         return SET_WALLET_USER_ID
+
+    async with async_session() as session:
+        user = await UserService.search_user(session, str(user_id))
+
+    if not user:
+        await update.message.reply_text("کاربری با این آیدی پیدا نشد. دوباره آیدی عددی را ارسال کنید.")
+        return SET_WALLET_USER_ID
+
+    context.user_data["set_wallet_user_id"] = user.telegram_id
+    await update.message.reply_text(
+        _admin_user_preview(user),
+        reply_markup=admin_user_confirm_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return SET_WALLET_CONFIRM_USER
+
+
+@require_auth(permission="users")
+async def set_wallet_confirm_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == CHANGE_USER:
+        context.user_data.pop("set_wallet_user_id", None)
+        await update.message.reply_text(
+            "**تنظیم موجودی کیف پول**\n\nآیدی عددی تلگرام کاربر را ارسال کنید.",
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
+        return SET_WALLET_USER_ID
+
+    if update.message.text != CONFIRM_USER:
+        await update.message.reply_text("لطفا تایید کاربر یا تغییر کاربر را انتخاب کنید.", reply_markup=admin_user_confirm_keyboard())
+        return SET_WALLET_CONFIRM_USER
 
     await update.message.reply_text(
         "موجودی جدید کیف پول را به تومان ارسال کنید. برای صفر کردن کیف پول عدد `0` را بفرستید.",
@@ -1142,6 +1218,15 @@ charge_wallet_conv = ConversationHandler(
             MessageHandler(_exact_filter(ADMIN_BACK), cancel),
             MessageHandler(filters.TEXT & ~filters.COMMAND, charge_wallet_user),
         ],
+        CHARGE_CONFIRM_USER: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(
+                filters.Regex(f"^({re.escape(CONFIRM_USER)}|{re.escape(CHANGE_USER)})$"),
+                charge_wallet_confirm_user,
+            ),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, charge_wallet_confirm_user),
+        ],
         CHARGE_AMOUNT: [
             MessageHandler(_exact_filter(CANCEL), cancel),
             MessageHandler(_exact_filter(ADMIN_BACK), cancel),
@@ -1158,6 +1243,15 @@ set_wallet_conv = ConversationHandler(
             MessageHandler(_exact_filter(CANCEL), cancel),
             MessageHandler(_exact_filter(ADMIN_BACK), cancel),
             MessageHandler(filters.TEXT & ~filters.COMMAND, set_wallet_user),
+        ],
+        SET_WALLET_CONFIRM_USER: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(
+                filters.Regex(f"^({re.escape(CONFIRM_USER)}|{re.escape(CHANGE_USER)})$"),
+                set_wallet_confirm_user,
+            ),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, set_wallet_confirm_user),
         ],
         SET_WALLET_AMOUNT: [
             MessageHandler(_exact_filter(CANCEL), cancel),
