@@ -235,7 +235,15 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     async with async_session() as session:
-        user_result = await session.execute(select(User).where(User.telegram_id == update.effective_user.id))
+        # Lock the user row for the duration of the purchase transaction so that
+        # two concurrent buy clicks cannot both observe the pre-deduction balance
+        # and double-spend. SQLAlchemy emits FOR UPDATE on PostgreSQL and silently
+        # omits it on SQLite (which serializes writes via BEGIN IMMEDIATE anyway).
+        user_result = await session.execute(
+            select(User)
+            .where(User.telegram_id == update.effective_user.id)
+            .with_for_update()
+        )
         db_user = user_result.scalar_one()
 
         if db_user.is_blocked:
