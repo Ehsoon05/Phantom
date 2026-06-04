@@ -6,9 +6,9 @@ from string import Formatter
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from telegram import KeyboardButton, ReplyKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
-from ..models import Price, ShopButton, ShopMessage, ShopPlan
+from ..models import Price, ShopButton, ShopMessage, ShopPlan, ShopPlanCategory
 from ..utils import messages as default_messages
 from ..utils.keyboards import (
     ACCOUNT_INFO,
@@ -40,6 +40,7 @@ class ButtonDefinition:
     row: int
     col: int
     premium_emoji_id: str | None = None
+    emoji_position: str = "left"
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,19 @@ class PlanDefinition:
     style: str | None
     display_order: int
     premium_emoji_id: str | None = None
+    category_key: str = "default"
+    emoji_position: str = "left"
+
+
+@dataclass(frozen=True)
+class CategoryDefinition:
+    key: str
+    title: str
+    emoji: str | None
+    style: str | None
+    display_order: int
+    premium_emoji_id: str | None = None
+    emoji_position: str = "left"
 
 
 def _split_label(label: str) -> tuple[str | None, str]:
@@ -151,6 +165,11 @@ DEFAULT_MESSAGES: dict[str, str] = {
 }
 
 
+DEFAULT_CATEGORIES: tuple[CategoryDefinition, ...] = (
+    CategoryDefinition("default", "سرویس‌های VPN", "🛡", STYLE_PRIMARY, 0, SHOP_BUTTON_CUSTOM_EMOJI_ID),
+)
+
+
 DEFAULT_PLANS: tuple[PlanDefinition, ...] = (
     PlanDefinition(1, "1 گیگ", "📦", STYLE_SUCCESS, 0, SHOP_BUTTON_CUSTOM_EMOJI_ID),
     PlanDefinition(2, "2 گیگ", "📦", STYLE_SUCCESS, 1, SHOP_BUTTON_CUSTOM_EMOJI_ID),
@@ -185,6 +204,21 @@ class ShopCustomizationService:
                     )
                 )
 
+        for definition in DEFAULT_CATEGORIES:
+            result = await session.execute(select(ShopPlanCategory).where(ShopPlanCategory.key == definition.key))
+            if result.scalar_one_or_none() is None:
+                session.add(
+                    ShopPlanCategory(
+                        key=definition.key,
+                        title=definition.title,
+                        emoji=definition.emoji,
+                        premium_emoji_id=definition.premium_emoji_id,
+                        emoji_position=definition.emoji_position,
+                        style=definition.style,
+                        display_order=definition.display_order,
+                    )
+                )
+
         for definition in DEFAULT_PLANS:
             result = await session.execute(select(ShopPlan).where(ShopPlan.volume_gb == definition.volume_gb))
             if result.scalar_one_or_none() is None:
@@ -194,6 +228,8 @@ class ShopCustomizationService:
                         title=definition.title,
                         emoji=definition.emoji,
                         premium_emoji_id=definition.premium_emoji_id,
+                        category_key=definition.category_key,
+                        emoji_position=definition.emoji_position,
                         style=definition.style,
                         display_order=definition.display_order,
                     )
@@ -213,6 +249,10 @@ class ShopCustomizationService:
         plans = await session.execute(select(ShopPlan))
         for plan in plans.scalars().all():
             await session.delete(plan)
+
+        categories = await session.execute(select(ShopPlanCategory))
+        for category in categories.scalars().all():
+            await session.delete(category)
 
         await session.flush()
         await ShopCustomizationService.init_defaults(session)
@@ -238,6 +278,19 @@ class ShopCustomizationService:
         return message
 
     @staticmethod
+    async def update_message_settings(session: AsyncSession, key: str, **values) -> ShopMessage | None:
+        message = await ShopCustomizationService.get_message_row(session, key)
+        if not message:
+            return None
+        allowed = {"premium_emoji_id", "premium_emoji_position", "response_button_type", "response_button_text"}
+        for field, value in values.items():
+            if field in allowed:
+                setattr(message, field, value)
+        message.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+        return message
+
+    @staticmethod
     async def list_buttons(session: AsyncSession, menu: str | None = None) -> list[ShopButton]:
         stmt = select(ShopButton)
         if menu:
@@ -256,7 +309,7 @@ class ShopCustomizationService:
         if not button:
             return None
 
-        allowed = {"text", "emoji", "premium_emoji_id", "style", "row", "col", "is_enabled"}
+        allowed = {"text", "emoji", "premium_emoji_id", "emoji_position", "style", "row", "col", "is_enabled"}
         for key, value in values.items():
             if key in allowed:
                 setattr(button, key, value)
@@ -288,8 +341,41 @@ class ShopCustomizationService:
 
     @staticmethod
     async def list_plans(session: AsyncSession) -> list[ShopPlan]:
-        result = await session.execute(select(ShopPlan).order_by(ShopPlan.display_order, ShopPlan.volume_gb))
+        result = await session.execute(select(ShopPlan).order_by(ShopPlan.category_key, ShopPlan.display_order, ShopPlan.volume_gb))
         return list(result.scalars().all())
+
+    @staticmethod
+    async def list_categories(session: AsyncSession, active_only: bool = False) -> list[ShopPlanCategory]:
+        stmt = select(ShopPlanCategory)
+        if active_only:
+            stmt = stmt.where(ShopPlanCategory.is_active == True)
+        result = await session.execute(stmt.order_by(ShopPlanCategory.display_order, ShopPlanCategory.key))
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def get_category(session: AsyncSession, key: str) -> ShopPlanCategory | None:
+        result = await session.execute(select(ShopPlanCategory).where(ShopPlanCategory.key == key))
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def ensure_category(session: AsyncSession, key: str, title: str | None = None) -> ShopPlanCategory:
+        key = _clean_key(key)
+        category = await ShopCustomizationService.get_category(session, key)
+        if category:
+            return category
+        current = await ShopCustomizationService.list_categories(session)
+        category = ShopPlanCategory(
+            key=key,
+            title=title or key,
+            emoji="🧩",
+            premium_emoji_id=SHOP_BUTTON_CUSTOM_EMOJI_ID,
+            style=STYLE_PRIMARY,
+            display_order=len(current),
+            is_active=True,
+        )
+        session.add(category)
+        await session.flush()
+        return category
 
     @staticmethod
     async def get_plan(session: AsyncSession, volume_gb: int) -> ShopPlan | None:
@@ -314,6 +400,7 @@ class ShopCustomizationService:
                 title=title,
                 emoji=emoji,
                 premium_emoji_id=SHOP_BUTTON_CUSTOM_EMOJI_ID,
+                category_key="default",
                 style=style,
                 display_order=len(current),
                 is_active=True,
@@ -344,9 +431,15 @@ class ShopCustomizationService:
         if not plan:
             return None
 
-        allowed = {"title", "emoji", "premium_emoji_id", "style", "display_order", "is_active"}
+        allowed = {"title", "emoji", "premium_emoji_id", "emoji_position", "category_key", "style", "display_order", "is_active"}
+        category_title = values.get("category_title")
         for key, value in values.items():
+            if key == "category_title":
+                continue
             if key in allowed:
+                if key == "category_key":
+                    value = _clean_key(value)
+                    await ShopCustomizationService.ensure_category(session, value, category_title)
                 setattr(plan, key, value)
         plan.updated_at = datetime.now(timezone.utc)
         await session.commit()
@@ -377,10 +470,31 @@ class ShopCustomizationService:
 
     @staticmethod
     async def buy_volume_keyboard(session: AsyncSession, prices: dict | None = None) -> ReplyKeyboardMarkup:
+        categories = await ShopCustomizationService.active_categories_with_plans(session)
+        if len(categories) > 1:
+            rows: dict[int, list[KeyboardButton]] = {}
+            for category in categories:
+                rows.setdefault(category.display_order, []).append(
+                    ShopCustomizationService._keyboard_button(
+                        ShopCustomizationService.category_label(category),
+                        style=category.style,
+                        premium_emoji_id=category.premium_emoji_id,
+                    )
+                )
+            back_buttons = await ShopCustomizationService._buttons_for_menu(session, "shop_buy")
+            if back_buttons:
+                rows[max(rows.keys(), default=-1) + 1] = [ShopCustomizationService._button_from_model(button) for button in back_buttons]
+            return _reply_keyboard([rows[key] for key in sorted(rows)])
+
+        category_key = categories[0].key if categories else "default"
+        return await ShopCustomizationService.buy_category_keyboard(session, category_key, prices)
+
+    @staticmethod
+    async def buy_category_keyboard(session: AsyncSession, category_key: str, prices: dict | None = None) -> ReplyKeyboardMarkup:
         if not prices:
             prices = {1: 15000, 2: 28000, 3: 40000, 5: 65000, 10: 120000, 20: 220000}
 
-        plans = await ShopCustomizationService.get_active_plans(session)
+        plans = await ShopCustomizationService.get_active_plans(session, category_key)
         rows: dict[int, list[KeyboardButton]] = {}
         for index, plan in enumerate(plans):
             if plan.volume_gb not in prices:
@@ -397,6 +511,25 @@ class ShopCustomizationService:
             rows[max(rows.keys(), default=-1) + 1] = [ShopCustomizationService._button_from_model(button) for button in back_buttons]
 
         return _reply_keyboard([rows[key] for key in sorted(rows)])
+
+    @staticmethod
+    async def active_categories_with_plans(session: AsyncSession) -> list[ShopPlanCategory]:
+        categories = await ShopCustomizationService.list_categories(session, active_only=True)
+        plans = await ShopCustomizationService.get_active_plans(session)
+        plan_categories = {plan.category_key for plan in plans}
+        filtered = [category for category in categories if category.key in plan_categories]
+        if filtered:
+            return filtered
+        default = await ShopCustomizationService.ensure_category(session, "default", "سرویس‌های VPN")
+        await session.commit()
+        return [default]
+
+    @staticmethod
+    async def category_for_text(session: AsyncSession, text: str) -> str | None:
+        for category in await ShopCustomizationService.active_categories_with_plans(session):
+            if ShopCustomizationService.category_label(category) == text:
+                return category.key
+        return None
 
     @staticmethod
     async def action_for_text(session: AsyncSession, text: str) -> str | None:
@@ -425,10 +558,11 @@ class ShopCustomizationService:
         return None
 
     @staticmethod
-    async def get_active_plans(session: AsyncSession) -> list[ShopPlan]:
-        result = await session.execute(
-            select(ShopPlan).where(ShopPlan.is_active == True).order_by(ShopPlan.display_order, ShopPlan.volume_gb)
-        )
+    async def get_active_plans(session: AsyncSession, category_key: str | None = None) -> list[ShopPlan]:
+        stmt = select(ShopPlan).where(ShopPlan.is_active == True)
+        if category_key:
+            stmt = stmt.where(ShopPlan.category_key == category_key)
+        result = await session.execute(stmt.order_by(ShopPlan.display_order, ShopPlan.volume_gb))
         plans = list(result.scalars().all())
         if plans:
             return plans
@@ -514,21 +648,40 @@ class ShopCustomizationService:
 
     @staticmethod
     def button_label(button: ShopButton) -> str:
-        return _join_emoji(button.emoji, button.text)
+        return _join_emoji(button.emoji, button.text, button.emoji_position)
 
     @staticmethod
     def definition_label(definition: ButtonDefinition) -> str:
-        return _join_emoji(definition.emoji, definition.text)
+        return _join_emoji(definition.emoji, definition.text, definition.emoji_position)
 
     @staticmethod
     def plan_label(plan: ShopPlan, price_value) -> str:
         if isinstance(price_value, tuple):
             final_price, discount = price_value
-            label = f"{_join_emoji(plan.emoji, plan.title)} | {final_price:,} تومان"
+            label = f"{_join_emoji(plan.emoji, plan.title, plan.emoji_position)} | {final_price:,} تومان"
             if discount:
                 label += f" | تخفیف {discount:,}"
             return label
-        return f"{_join_emoji(plan.emoji, plan.title)} | {price_value:,} تومان"
+        return f"{_join_emoji(plan.emoji, plan.title, plan.emoji_position)} | {price_value:,} تومان"
+
+    @staticmethod
+    def category_label(category: ShopPlanCategory) -> str:
+        return _join_emoji(category.emoji, category.title, category.emoji_position)
+
+    @staticmethod
+    async def purchase_success_reply_markup(session: AsyncSession, sub_link: str):
+        message = await ShopCustomizationService.get_message_row(session, "purchase_success")
+        button_type = (message.response_button_type if message else "text") or "text"
+        button_text = (message.response_button_text if message else None) or "دریافت لینک اشتراک"
+        if button_type == "inline_copy":
+            return InlineKeyboardMarkup(
+                [[InlineKeyboardButton(button_text, api_kwargs={"copy_text": {"text": sub_link}})]]
+            )
+        if button_type == "inline_url" and sub_link.startswith(("http://", "https://", "tg://")):
+            return InlineKeyboardMarkup([[InlineKeyboardButton(button_text, url=sub_link)]])
+        if button_type == "reply_keyboard":
+            return await ShopCustomizationService.back_keyboard(session)
+        return None
 
 
 def _reply_keyboard(rows: list[list[KeyboardButton]]) -> ReplyKeyboardMarkup:
@@ -539,10 +692,18 @@ def _reply_keyboard(rows: list[list[KeyboardButton]]) -> ReplyKeyboardMarkup:
     )
 
 
-def _join_emoji(emoji: str | None, text: str) -> str:
+def _join_emoji(emoji: str | None, text: str, position: str = "left") -> str:
     if emoji:
+        if position == "right":
+            return f"{text} {emoji}"
         return f"{emoji} {text}"
     return text
+
+
+def _clean_key(value: str | None) -> str:
+    value = (value or "default").strip().lower()
+    value = "".join(char if char.isalnum() or char in {"_", "-"} else "_" for char in value)
+    return value or "default"
 
 
 def _is_valid_custom_emoji_id(value: str | None) -> bool:

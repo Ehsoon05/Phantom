@@ -31,10 +31,13 @@ from ..utils.keyboards import (
     ADMIN_DELETE_COUPON,
     ADMIN_EDIT_COUPON,
     ADMIN_EDIT_EMOJI,
+    ADMIN_EDIT_EMOJI_POSITION,
+    ADMIN_EDIT_CATEGORY,
     ADMIN_EDIT_ORDER,
     ADMIN_EDIT_POSITION,
     ADMIN_EDIT_PRICE,
     ADMIN_EDIT_PREMIUM_EMOJI,
+    ADMIN_EDIT_RESPONSE_BUTTON,
     ADMIN_EDIT_STYLE,
     ADMIN_EDIT_TEXT,
     ADMIN_EDIT_TITLE,
@@ -45,6 +48,10 @@ from ..utils.keyboards import (
     ADMIN_REFRESH_ADMINS,
     ADMIN_REMOVE_ADMIN,
     ADMIN_REPORTS,
+    ADMIN_RESPONSE_INLINE_COPY,
+    ADMIN_RESPONSE_INLINE_URL,
+    ADMIN_RESPONSE_REPLY_KEYBOARD,
+    ADMIN_RESPONSE_TEXT,
     ADMIN_SEARCH_USER,
     ADMIN_SET_WALLET,
     ADMIN_SHOP_BUTTONS,
@@ -60,6 +67,8 @@ from ..utils.keyboards import (
     ADMIN_TOGGLE_ENABLED,
     ADMIN_USERS,
     ADMIN_USER_STATS,
+    ADMIN_EMOJI_LEFT,
+    ADMIN_EMOJI_RIGHT,
     ADMIN_VIEW_COUPONS,
     ADMIN_VIEW_PRICES,
     CANCEL,
@@ -84,6 +93,8 @@ from ..utils.keyboards import (
     admin_shop_menus_keyboard,
     admin_shop_plan_edit_keyboard,
     admin_shop_settings_keyboard,
+    admin_emoji_position_keyboard,
+    admin_response_button_keyboard,
     admin_style_keyboard,
     admin_user_confirm_keyboard,
     admin_users_keyboard,
@@ -171,6 +182,13 @@ SHOP_MENU_LABELS = {
 }
 
 STYLE_VALUES = {"primary", "success", "danger", "default"}
+EMOJI_POSITION_VALUES = {ADMIN_EMOJI_LEFT: "left", ADMIN_EMOJI_RIGHT: "right", "left": "left", "right": "right"}
+RESPONSE_BUTTON_VALUES = {
+    ADMIN_RESPONSE_TEXT: "text",
+    ADMIN_RESPONSE_INLINE_COPY: "inline_copy",
+    ADMIN_RESPONSE_INLINE_URL: "inline_url",
+    ADMIN_RESPONSE_REPLY_KEYBOARD: "reply_keyboard",
+}
 
 
 def _exact_filter(text: str):
@@ -1504,8 +1522,16 @@ async def shop_message_select(update: Update, context: ContextTypes.DEFAULT_TYPE
         return ConversationHandler.END
 
     context.user_data["shop_message_key"] = key
+    extra_keyboard = admin_response_button_keyboard() if key == "purchase_success" else None
+    extra_note = ""
+    if key == "purchase_success":
+        extra_note = (
+            "\n\nبرای تغییر نوع ارسال لینک، یکی از گزینه‌های کیبورد را بزنید.\n"
+            "برای تغییر متن دکمه جواب بنویسید: `متن دکمه: دریافت لینک`"
+        )
     await update.message.reply_text(
-        f"**ویرایش پیام `{key}`**\n\nمتن فعلی:\n\n{message.text}\n\nمتن جدید را ارسال کنید.",
+        f"**ویرایش پیام `{key}`**\n\nمتن فعلی:\n\n{message.text}{extra_note}\n\nمتن جدید را ارسال کنید.",
+        reply_markup=extra_keyboard,
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     return SHOP_MESSAGE_TEXT
@@ -1514,6 +1540,29 @@ async def shop_message_select(update: Update, context: ContextTypes.DEFAULT_TYPE
 @require_auth(permission="shop")
 async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = context.user_data.get("shop_message_key")
+    raw_value = update.message.text.strip()
+    if key == "purchase_success":
+        if raw_value in RESPONSE_BUTTON_VALUES:
+            async with async_session() as session:
+                await ShopCustomizationService.update_message_settings(
+                    session,
+                    key,
+                    response_button_type=RESPONSE_BUTTON_VALUES[raw_value],
+                )
+            await update.message.reply_text("نوع دکمه جواب خرید ذخیره شد.", reply_markup=admin_shop_settings_keyboard())
+            context.user_data.pop("shop_message_key", None)
+            return ConversationHandler.END
+        if raw_value.startswith("متن دکمه:"):
+            button_text = raw_value.split(":", 1)[1].strip()
+            if not button_text:
+                await update.message.reply_text("بعد از `متن دکمه:` یک عنوان بنویسید.", parse_mode=constants.ParseMode.MARKDOWN)
+                return SHOP_MESSAGE_TEXT
+            async with async_session() as session:
+                await ShopCustomizationService.update_message_settings(session, key, response_button_text=button_text)
+            await update.message.reply_text("متن دکمه جواب خرید ذخیره شد.", reply_markup=admin_shop_settings_keyboard())
+            context.user_data.pop("shop_message_key", None)
+            return ConversationHandler.END
+
     async with async_session() as session:
         message = await ShopCustomizationService.update_message(session, key, update.message.text)
 
@@ -1586,6 +1635,7 @@ async def _show_shop_button_options(update: Update, context: ContextTypes.DEFAUL
         f"اکشن: `{button.action}`\n"
         f"متن: {button.text}\n"
         f"ایموجی: {button.emoji or '-'}\n"
+        f"جای ایموجی: {'راست' if button.emoji_position == 'right' else 'چپ'}\n"
         f"ایموجی پریمیوم: `{button.premium_emoji_id or '-'}`\n"
         f"رنگ: `{button.style or 'default'}`\n"
         f"چینش: ردیف {button.row}، ستون {button.col}\n"
@@ -1666,6 +1716,7 @@ async def shop_button_option(update: Update, context: ContextTypes.DEFAULT_TYPE)
         ADMIN_EDIT_TEXT: ("text", "متن جدید دکمه را ارسال کنید."),
         ADMIN_EDIT_EMOJI: ("emoji", "ایموجی جدید را ارسال کنید. برای حذف، `-` بفرستید."),
         ADMIN_EDIT_PREMIUM_EMOJI: ("premium_emoji_id", "خود ایموجی پریمیوم را ارسال کنید تا آیدی‌اش خودکار خوانده شود. اگر آیدی عددی را دارید می‌توانید همان را بفرستید. برای حذف، `-` بفرستید."),
+        ADMIN_EDIT_EMOJI_POSITION: ("emoji_position", "جای ایموجی کنار متن را انتخاب کنید."),
         ADMIN_EDIT_STYLE: ("style", "رنگ دکمه را انتخاب کنید."),
         ADMIN_EDIT_POSITION: ("position", "چینش جدید را با فرمت `row,col` ارسال کنید. مثال: `1,0`"),
     }
@@ -1677,7 +1728,7 @@ async def shop_button_option(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data["shop_button_field"] = field
     await update.message.reply_text(
         prompt,
-        reply_markup=admin_style_keyboard() if field == "style" else None,
+        reply_markup=admin_style_keyboard() if field == "style" else admin_emoji_position_keyboard() if field == "emoji_position" else None,
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     return SHOP_BUTTON_VALUE
@@ -1700,6 +1751,12 @@ async def shop_button_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif field == "style":
         value = raw_value if raw_value in STYLE_VALUES else None
         updates = {"style": None if value == "default" else value}
+    elif field == "emoji_position":
+        value = EMOJI_POSITION_VALUES.get(raw_value)
+        if not value:
+            await update.message.reply_text("جای ایموجی را از بین چپ یا راست انتخاب کنید.", reply_markup=admin_emoji_position_keyboard())
+            return SHOP_BUTTON_VALUE
+        updates = {"emoji_position": value}
     elif field in {"emoji", "premium_emoji_id"}:
         if field == "premium_emoji_id":
             value = _read_custom_emoji_id(update.message, raw_value)
@@ -1770,8 +1827,10 @@ async def _show_shop_plan_options(update: Update, context: ContextTypes.DEFAULT_
         "**ویرایش سرویس**\n\n"
         f"حجم: **{plan.volume_gb} گیگ**\n"
         f"عنوان: {plan.title}\n"
+        f"دسته‌بندی: `{plan.category_key}`\n"
         f"قیمت: **{price or 0:,} تومان**\n"
         f"ایموجی: {plan.emoji or '-'}\n"
+        f"جای ایموجی: {'راست' if plan.emoji_position == 'right' else 'چپ'}\n"
         f"ایموجی پریمیوم: `{plan.premium_emoji_id or '-'}`\n"
         f"رنگ: `{plan.style or 'default'}`\n"
         f"ترتیب: {plan.display_order}\n"
@@ -1800,7 +1859,9 @@ async def shop_plan_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ADMIN_EDIT_PRICE: ("price", "قیمت جدید را به تومان ارسال کنید. مثال: `250000`"),
         ADMIN_EDIT_EMOJI: ("emoji", "ایموجی جدید را ارسال کنید. برای حذف، `-` بفرستید."),
         ADMIN_EDIT_PREMIUM_EMOJI: ("premium_emoji_id", "خود ایموجی پریمیوم را ارسال کنید تا آیدی‌اش خودکار خوانده شود. اگر آیدی عددی را دارید می‌توانید همان را بفرستید. برای حذف، `-` بفرستید."),
+        ADMIN_EDIT_EMOJI_POSITION: ("emoji_position", "جای ایموجی کنار متن سرویس را انتخاب کنید."),
         ADMIN_EDIT_STYLE: ("style", "رنگ دکمه سرویس را انتخاب کنید."),
+        ADMIN_EDIT_CATEGORY: ("category_key", "دسته‌بندی سرویس را ارسال کنید. مثال: `reality|سرویس‌های Reality` یا فقط `vip`"),
         ADMIN_EDIT_ORDER: ("display_order", "ترتیب نمایش را عددی ارسال کنید. مثال: `2`"),
     }
     if option not in field_map:
@@ -1811,7 +1872,7 @@ async def shop_plan_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["shop_plan_field"] = field
     await update.message.reply_text(
         prompt,
-        reply_markup=admin_style_keyboard() if field == "style" else None,
+        reply_markup=admin_style_keyboard() if field == "style" else admin_emoji_position_keyboard() if field == "emoji_position" else None,
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     return SHOP_PLAN_VALUE
@@ -1848,6 +1909,21 @@ async def shop_plan_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif field == "style":
         value = raw_value if raw_value in STYLE_VALUES else None
         updates = {"style": None if value == "default" else value}
+    elif field == "emoji_position":
+        value = EMOJI_POSITION_VALUES.get(raw_value)
+        if not value:
+            await update.message.reply_text("جای ایموجی را از بین چپ یا راست انتخاب کنید.", reply_markup=admin_emoji_position_keyboard())
+            return SHOP_PLAN_VALUE
+        updates = {"emoji_position": value}
+    elif field == "category_key":
+        if not raw_value:
+            await update.message.reply_text("کلید دسته‌بندی نمی‌تواند خالی باشد.")
+            return SHOP_PLAN_VALUE
+        if "|" in raw_value:
+            category_key, category_title = [part.strip() for part in raw_value.split("|", 1)]
+            updates = {"category_key": category_key, "category_title": category_title or category_key}
+        else:
+            updates = {"category_key": raw_value}
     elif field in {"emoji", "premium_emoji_id"}:
         if field == "premium_emoji_id":
             value = _read_custom_emoji_id(update.message, raw_value)

@@ -76,6 +76,7 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def buy_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("selected_plan_category", None)
     await get_or_create_user(
         update.effective_user.id,
         update.effective_user.first_name,
@@ -86,6 +87,21 @@ async def buy_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         discounted_prices = await CouponService.prices_with_active_discount(session, update.effective_user.id, prices)
         text = await ShopCustomizationService.get_message(session, "buy_menu")
         keyboard = await ShopCustomizationService.buy_volume_keyboard(session, discounted_prices)
+
+    await update.message.reply_text(
+        text,
+        reply_markup=keyboard,
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+
+
+async def buy_category_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, category_key: str):
+    context.user_data["selected_plan_category"] = category_key
+    async with async_session() as session:
+        prices = await PriceService.get_all_prices(session)
+        discounted_prices = await CouponService.prices_with_active_discount(session, update.effective_user.id, prices)
+        text = await ShopCustomizationService.get_message(session, "buy_menu")
+        keyboard = await ShopCustomizationService.buy_category_keyboard(session, category_key, discounted_prices)
 
     await update.message.reply_text(
         text,
@@ -336,7 +352,9 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE, s
             price=f"{final_price:,}",
             sub_link=config.sub_link,
         )
-        keyboard = await ShopCustomizationService.back_keyboard(session)
+        keyboard = await ShopCustomizationService.purchase_success_reply_markup(session, config.sub_link)
+        if keyboard is None:
+            keyboard = await ShopCustomizationService.back_keyboard(session)
         await update.message.reply_text(
             text,
             reply_markup=keyboard,
@@ -424,6 +442,7 @@ async def shop_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         prices = await PriceService.get_all_prices(session)
         discounted_prices = await CouponService.prices_with_active_discount(session, update.effective_user.id, prices)
         action = await ShopCustomizationService.action_for_text(session, text)
+        category_key = await ShopCustomizationService.category_for_text(session, text)
         volume = await ShopCustomizationService.volume_for_text(session, text, discounted_prices)
 
     if context.user_data.get("awaiting_coupon_code"):
@@ -431,6 +450,10 @@ async def shop_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await cancel_coupon(update, context)
             return
         await apply_coupon_code(update, context)
+        return
+
+    if category_key:
+        await buy_category_menu(update, context, category_key)
         return
 
     if volume is not None:

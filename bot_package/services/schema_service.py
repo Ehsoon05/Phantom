@@ -31,6 +31,34 @@ class SchemaService:
                         "coupon_code": "VARCHAR",
                     },
                 )
+            if "shop_messages" in tables:
+                await SchemaService._add_missing_columns(
+                    conn,
+                    "shop_messages",
+                    {
+                        "premium_emoji_id": "VARCHAR",
+                        "premium_emoji_position": "VARCHAR DEFAULT 'none' NOT NULL",
+                        "response_button_type": "VARCHAR DEFAULT 'text' NOT NULL",
+                        "response_button_text": "VARCHAR",
+                    },
+                )
+            if "shop_buttons" in tables:
+                await SchemaService._add_missing_columns(
+                    conn,
+                    "shop_buttons",
+                    {
+                        "emoji_position": "VARCHAR DEFAULT 'left' NOT NULL",
+                    },
+                )
+            if "shop_plans" in tables:
+                await SchemaService._add_missing_columns(
+                    conn,
+                    "shop_plans",
+                    {
+                        "category_key": "VARCHAR DEFAULT 'default' NOT NULL",
+                        "emoji_position": "VARCHAR DEFAULT 'left' NOT NULL",
+                    },
+                )
 
     @staticmethod
     async def _add_missing_columns(conn, table_name: str, columns: dict[str, str]) -> None:

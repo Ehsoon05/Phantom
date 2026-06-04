@@ -121,6 +121,10 @@ class ShopMessage(Base):
     key = Column(String, unique=True, nullable=False)
     text = Column(Text, nullable=False)
     parse_mode = Column(String, nullable=True, default="Markdown")
+    premium_emoji_id = Column(String, nullable=True)
+    premium_emoji_position = Column(String, nullable=False, default="none")
+    response_button_type = Column(String, nullable=False, default="text")
+    response_button_text = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -133,6 +137,7 @@ class ShopButton(Base):
     text = Column(String, nullable=False)
     emoji = Column(String, nullable=True)
     premium_emoji_id = Column(String, nullable=True)
+    emoji_position = Column(String, nullable=False, default="left")
     style = Column(String, nullable=True)
     row = Column(Integer, nullable=False, default=0)
     col = Column(Integer, nullable=False, default=0)
@@ -144,10 +149,26 @@ class ShopPlan(Base):
     __tablename__ = "shop_plans"
     id = Column(Integer, primary_key=True)
     volume_gb = Column(Integer, unique=True, nullable=False)
+    category_key = Column(String, nullable=False, default="default")
     title = Column(String, nullable=False)
     emoji = Column(String, nullable=True)
     premium_emoji_id = Column(String, nullable=True)
+    emoji_position = Column(String, nullable=False, default="left")
     style = Column(String, nullable=True, default="success")
+    display_order = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, default=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ShopPlanCategory(Base):
+    __tablename__ = "shop_plan_categories"
+    id = Column(Integer, primary_key=True)
+    key = Column(String, unique=True, nullable=False)
+    title = Column(String, nullable=False)
+    emoji = Column(String, nullable=True)
+    premium_emoji_id = Column(String, nullable=True)
+    emoji_position = Column(String, nullable=False, default="left")
+    style = Column(String, nullable=True, default="primary")
     display_order = Column(Integer, nullable=False, default=0)
     is_active = Column(Boolean, default=True)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
