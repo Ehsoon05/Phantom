@@ -505,8 +505,8 @@ class ShopCustomizationService:
         api_kwargs = {}
         if style:
             api_kwargs["style"] = style
-        if premium_emoji_id:
-            api_kwargs["icon_custom_emoji_id"] = premium_emoji_id
+        if _is_valid_custom_emoji_id(premium_emoji_id):
+            api_kwargs["icon_custom_emoji_id"] = str(premium_emoji_id).strip()
         try:
             return KeyboardButton(text=text, api_kwargs=api_kwargs or None)
         except TypeError:
@@ -543,6 +543,13 @@ def _join_emoji(emoji: str | None, text: str) -> str:
     if emoji:
         return f"{emoji} {text}"
     return text
+
+
+def _is_valid_custom_emoji_id(value: str | None) -> bool:
+    if value is None:
+        return False
+    value = str(value).strip()
+    return bool(value and value.isdigit())
 
 
 def _safe_format(template: str, values: dict) -> str:

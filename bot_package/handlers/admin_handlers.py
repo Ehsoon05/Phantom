@@ -220,6 +220,15 @@ def _normalize_nullable(text: str) -> str | None:
     return value
 
 
+def _normalize_custom_emoji_id(text: str) -> str | None:
+    value = _normalize_nullable(text)
+    if value is None:
+        return None
+    if not value.isdigit():
+        return ""
+    return value
+
+
 def _admin_user_preview(user) -> str:
     username = f"@{user.username}" if user.username else "ندارد"
     status = "مسدود" if user.is_blocked else "فعال"
@@ -1483,7 +1492,14 @@ async def shop_button_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
         value = raw_value if raw_value in STYLE_VALUES else None
         updates = {"style": None if value == "default" else value}
     elif field in {"emoji", "premium_emoji_id"}:
-        updates = {field: _normalize_nullable(raw_value)}
+        if field == "premium_emoji_id":
+            value = _normalize_custom_emoji_id(raw_value)
+            if value == "":
+                await update.message.reply_text("آیدی ایموجی پریمیوم باید فقط عدد باشد. برای حذف، `-` بفرستید.", parse_mode=constants.ParseMode.MARKDOWN)
+                return SHOP_BUTTON_VALUE
+            updates = {field: value}
+        else:
+            updates = {field: _normalize_nullable(raw_value)}
     elif field == "text":
         if not raw_value:
             await update.message.reply_text("متن دکمه نمی‌تواند خالی باشد.")
@@ -1619,7 +1635,14 @@ async def shop_plan_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
         value = raw_value if raw_value in STYLE_VALUES else None
         updates = {"style": None if value == "default" else value}
     elif field in {"emoji", "premium_emoji_id"}:
-        updates = {field: _normalize_nullable(raw_value)}
+        if field == "premium_emoji_id":
+            value = _normalize_custom_emoji_id(raw_value)
+            if value == "":
+                await update.message.reply_text("آیدی ایموجی پریمیوم باید فقط عدد باشد. برای حذف، `-` بفرستید.", parse_mode=constants.ParseMode.MARKDOWN)
+                return SHOP_PLAN_VALUE
+            updates = {field: value}
+        else:
+            updates = {field: _normalize_nullable(raw_value)}
     elif field == "title":
         if not raw_value:
             await update.message.reply_text("عنوان نمی‌تواند خالی باشد.")
