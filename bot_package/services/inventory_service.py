@@ -1,7 +1,7 @@
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update
-from ..models import Config
+from ..models import Config, Price
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 
@@ -28,9 +28,9 @@ class InventoryService:
         )
         result = await session.execute(stmt)
         stock = {row[0]: row[1] for row in result.fetchall()}
-        for vol in [1, 2, 3, 5, 10, 20]:
-            if vol not in stock:
-                stock[vol] = 0
+        price_result = await session.execute(select(Price.volume_gb).order_by(Price.volume_gb))
+        for vol in price_result.scalars().all():
+            stock.setdefault(vol, 0)
         return dict(sorted(stock.items()))
     
     @staticmethod

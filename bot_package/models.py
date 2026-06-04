@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, ForeignKey, Text
 from sqlalchemy.orm import DeclarativeBase, relationship
 from datetime import datetime, timezone
 
@@ -113,3 +113,41 @@ class CouponRedemption(Base):
     redeemed_at = Column(DateTime, nullable=True)
     purchase_id = Column(Integer, ForeignKey("purchases.id"), nullable=True)
     coupon = relationship("Coupon", back_populates="redemptions")
+
+
+class ShopMessage(Base):
+    __tablename__ = "shop_messages"
+    id = Column(Integer, primary_key=True)
+    key = Column(String, unique=True, nullable=False)
+    text = Column(Text, nullable=False)
+    parse_mode = Column(String, nullable=True, default="Markdown")
+    is_active = Column(Boolean, default=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ShopButton(Base):
+    __tablename__ = "shop_buttons"
+    id = Column(Integer, primary_key=True)
+    action = Column(String, nullable=False)
+    menu = Column(String, nullable=False)
+    text = Column(String, nullable=False)
+    emoji = Column(String, nullable=True)
+    premium_emoji_id = Column(String, nullable=True)
+    style = Column(String, nullable=True)
+    row = Column(Integer, nullable=False, default=0)
+    col = Column(Integer, nullable=False, default=0)
+    is_enabled = Column(Boolean, default=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ShopPlan(Base):
+    __tablename__ = "shop_plans"
+    id = Column(Integer, primary_key=True)
+    volume_gb = Column(Integer, unique=True, nullable=False)
+    title = Column(String, nullable=False)
+    emoji = Column(String, nullable=True)
+    premium_emoji_id = Column(String, nullable=True)
+    style = Column(String, nullable=True, default="success")
+    display_order = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, default=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

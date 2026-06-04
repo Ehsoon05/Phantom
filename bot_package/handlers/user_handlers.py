@@ -4,7 +4,7 @@ from urllib.parse import quote
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from telegram import Update, constants
-from telegram.ext import CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
+from telegram.ext import CommandHandler, ContextTypes, MessageHandler, filters
 
 from ..database import async_session
 from ..models import Purchase, Transaction, User
@@ -12,36 +12,14 @@ from ..services.coupon_service import CouponError, CouponService
 from ..services.inventory_service import InventoryService
 from ..services.price_service import PriceService
 from ..services.referral_service import ReferralService
+from ..services.shop_customization_service import ShopCustomizationService
 from ..services.user_service import UserService
 from ..utils.keyboards import (
-    APPLY_COUPON,
-    ACCOUNT_INFO,
-    BACK_TO_MAIN,
-    BUY_SUBSCRIPTION,
-    HELP,
-    PURCHASE_HISTORY,
-    REFERRALS,
-    SUPPORT,
-    WALLET,
-    back_to_main,
-    buy_volume_keyboard,
-    main_menu_keyboard,
     referral_share_keyboard,
-    wallet_keyboard,
 )
 from ..utils.messages import (
-    BUY_MENU_TEXT,
-    HELP_TEXT,
-    MAIN_MENU_TEXT,
-    NO_PURCHASE,
-    PURCHASE_SUCCESS,
     SUPPORT_HANDLE,
-    SUPPORT_TEXT,
-    WALLET_TEXT,
 )
-
-
-ENTER_COUPON_CODE = 0
 
 
 async def get_or_create_user(telegram_id: int, name: str, username: str | None, payload: str | None = None):
@@ -75,17 +53,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     payload = context.args[0] if context.args else None
     await get_or_create_user(user.id, user.first_name, user.username, payload)
+    async with async_session() as session:
+        text = await ShopCustomizationService.get_message(session, "main_menu")
+        keyboard = await ShopCustomizationService.main_menu_keyboard(session)
     await update.message.reply_text(
-        MAIN_MENU_TEXT,
-        reply_markup=main_menu_keyboard(),
+        text,
+        reply_markup=keyboard,
         parse_mode=constants.ParseMode.MARKDOWN,
     )
 
 
 async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("awaiting_coupon_code", None)
+    async with async_session() as session:
+        text = await ShopCustomizationService.get_message(session, "main_menu")
+        keyboard = await ShopCustomizationService.main_menu_keyboard(session)
     await update.message.reply_text(
-        MAIN_MENU_TEXT,
-        reply_markup=main_menu_keyboard(),
+        text,
+        reply_markup=keyboard,
         parse_mode=constants.ParseMode.MARKDOWN,
     )
 
@@ -99,10 +84,12 @@ async def buy_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with async_session() as session:
         prices = await PriceService.get_all_prices(session)
         discounted_prices = await CouponService.prices_with_active_discount(session, update.effective_user.id, prices)
+        text = await ShopCustomizationService.get_message(session, "buy_menu")
+        keyboard = await ShopCustomizationService.buy_volume_keyboard(session, discounted_prices)
 
     await update.message.reply_text(
-        BUY_MENU_TEXT,
-        reply_markup=buy_volume_keyboard(discounted_prices),
+        text,
+        reply_markup=keyboard,
         parse_mode=constants.ParseMode.MARKDOWN,
     )
 
@@ -113,9 +100,17 @@ async def wallet_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update.effective_user.first_name,
         update.effective_user.username,
     )
+    async with async_session() as session:
+        text = await ShopCustomizationService.get_message(
+            session,
+            "wallet",
+            wallet_balance=f"{user.wallet_balance:,}",
+            support_handle=SUPPORT_HANDLE,
+        )
+        keyboard = await ShopCustomizationService.wallet_keyboard(session)
     await update.message.reply_text(
-        WALLET_TEXT.format(f"{user.wallet_balance:,}", SUPPORT_HANDLE),
-        reply_markup=wallet_keyboard(),
+        text,
+        reply_markup=keyboard,
         parse_mode=constants.ParseMode.MARKDOWN,
     )
 
@@ -127,30 +122,26 @@ async def referral_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update.effective_user.username,
     )
     bot_username = context.bot.username or "PhantomHubs_bot"
+    link = f"https://t.me/{bot_username}?start=ref_{user.referral_code}"
     async with async_session() as session:
         count = await ReferralService.count_referrals(session, user.telegram_id)
+        text = await ShopCustomizationService.get_message(session, "referral", link=link, count=count)
+        followup = await ShopCustomizationService.get_message(session, "referral_followup")
+        keyboard = await ShopCustomizationService.main_menu_keyboard(session)
 
-    link = f"https://t.me/{bot_username}?start=ref_{user.referral_code}"
     share_text = (
         "سلام، من از فانتوم VPN استفاده می‌کنم. "
         "از این لینک وارد شو و سرویس‌هات رو راحت‌تر تهیه کن:"
     )
     share_url = f"https://t.me/share/url?url={quote(link)}&text={quote(share_text)}"
-    text = (
-        "**دعوت دوستان**\n\n"
-        "لینک اختصاصی شما آماده است. هر کسی با این لینک وارد ربات شود به عنوان دعوت‌شده شما ثبت می‌شود.\n\n"
-        f"لینک قابل کلیک:\n[دعوت به فانتوم VPN]({link})\n\n"
-        f"لینک مستقیم:\n`{link}`\n\n"
-        f"تعداد ثبت‌نام با لینک شما: **{count} نفر**"
-    )
     await update.message.reply_text(
         text,
         reply_markup=referral_share_keyboard(share_url),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     await update.message.reply_text(
-        "از منوی پایین می‌توانید به بخش‌های دیگر بروید.",
-        reply_markup=main_menu_keyboard(),
+        followup,
+        reply_markup=keyboard,
     )
 
 
@@ -163,32 +154,36 @@ async def account_info_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with async_session() as session:
         purchase_summary = await UserService.get_user_purchase_summary(session, user.telegram_id, limit=0)
         referral_count = await ReferralService.count_referrals(session, user.telegram_id)
+        text = await ShopCustomizationService.get_message(
+            session,
+            "account_info",
+            telegram_id=user.telegram_id,
+            first_name=user.first_name,
+            username=f"@{user.username}" if user.username else "ثبت نشده",
+            wallet_balance=f"{user.wallet_balance:,}",
+            total_count=purchase_summary["total_count"],
+            total_gb=f"{purchase_summary['total_gb']:,}",
+            total_spent=f"{purchase_summary['total_spent']:,}",
+            referral_count=referral_count,
+        )
+        keyboard = await ShopCustomizationService.back_keyboard(session)
 
-    username = f"@{user.username}" if user.username else "ثبت نشده"
-    text = (
-        "**اطلاعات حساب**\n\n"
-        f"آیدی عددی: `{user.telegram_id}`\n"
-        f"نام: {user.first_name}\n"
-        f"یوزرنیم: {username}\n"
-        f"موجودی کیف پول: **{user.wallet_balance:,} تومان**\n\n"
-        f"تعداد خریدها: **{purchase_summary['total_count']}**\n"
-        f"حجم خریداری‌شده: **{purchase_summary['total_gb']:,} گیگ**\n"
-        f"مبلغ کل خریدها: **{purchase_summary['total_spent']:,} تومان**\n"
-        f"ثبت‌نام با لینک دعوت شما: **{referral_count} نفر**"
-    )
     await update.message.reply_text(
         text,
-        reply_markup=back_to_main(),
+        reply_markup=keyboard,
         parse_mode=constants.ParseMode.MARKDOWN,
     )
 
 
 async def apply_coupon_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["awaiting_coupon_code"] = True
+    async with async_session() as session:
+        text = await ShopCustomizationService.get_message(session, "coupon_prompt")
+        keyboard = await ShopCustomizationService.back_keyboard(session)
     await update.message.reply_text(
-        "کد تخفیف را ارسال کنید.",
-        reply_markup=back_to_main(),
+        text,
+        reply_markup=keyboard,
     )
-    return ENTER_COUPON_CODE
 
 
 async def apply_coupon_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -201,30 +196,44 @@ async def apply_coupon_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             coupon = await CouponService.apply_coupon(session, update.effective_user.id, update.message.text)
         except CouponError:
+            text = await ShopCustomizationService.get_message(session, "coupon_invalid")
+            keyboard = await ShopCustomizationService.wallet_keyboard(session)
             await update.message.reply_text(
-                "این کد تخفیف معتبر نیست یا برای حساب شما فعال نشده است.",
-                reply_markup=wallet_keyboard(),
+                text,
+                reply_markup=keyboard,
             )
-            return ConversationHandler.END
+            context.user_data.pop("awaiting_coupon_code", None)
+            return
 
-    if coupon.discount_type == "percent":
-        discount_text = f"{coupon.amount} درصد"
-    else:
-        discount_text = f"{coupon.amount:,} تومان"
+        if coupon.discount_type == "percent":
+            discount_text = f"{coupon.amount} درصد"
+        else:
+            discount_text = f"{coupon.amount:,} تومان"
+        text = await ShopCustomizationService.get_message(
+            session,
+            "coupon_applied",
+            code=coupon.code,
+            discount_text=discount_text,
+        )
+        keyboard = await ShopCustomizationService.wallet_keyboard(session)
+
+    context.user_data.pop("awaiting_coupon_code", None)
     await update.message.reply_text(
-        f"کد تخفیف **{coupon.code}** با مقدار **{discount_text}** فعال شد.\nقیمت‌ها در منوی خرید با تخفیف نمایش داده می‌شوند.",
-        reply_markup=wallet_keyboard(),
+        text,
+        reply_markup=keyboard,
         parse_mode=constants.ParseMode.MARKDOWN,
     )
-    return ConversationHandler.END
 
 
-async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    volume = _extract_volume(update.message.text)
+async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE, selected_volume: int | None = None):
+    volume = selected_volume or _extract_volume(update.message.text)
     if volume is None:
+        async with async_session() as session:
+            text = await ShopCustomizationService.get_message(session, "invalid_plan")
+            keyboard = await ShopCustomizationService.main_menu_keyboard(session)
         await update.message.reply_text(
-            "پلن انتخاب‌شده معتبر نیست. لطفا دوباره از منوی خرید انتخاب کنید.",
-            reply_markup=main_menu_keyboard(),
+            text,
+            reply_markup=keyboard,
         )
         return
 
@@ -247,29 +256,41 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db_user = user_result.scalar_one()
 
         if db_user.is_blocked:
-            await update.message.reply_text("حساب شما مسدود شده است.", reply_markup=main_menu_keyboard())
+            text = await ShopCustomizationService.get_message(session, "blocked_user")
+            keyboard = await ShopCustomizationService.main_menu_keyboard(session)
+            await update.message.reply_text(text, reply_markup=keyboard)
             return
 
         original_price = await PriceService.get_price(session, volume)
         if not original_price:
-            await update.message.reply_text("این پلن در حال حاضر فعال نیست.", reply_markup=main_menu_keyboard())
+            text = await ShopCustomizationService.get_message(session, "inactive_plan")
+            keyboard = await ShopCustomizationService.main_menu_keyboard(session)
+            await update.message.reply_text(text, reply_markup=keyboard)
             return
 
         coupon = await CouponService.get_active_coupon(session, db_user.telegram_id)
         final_price, discount_amount = CouponService.calculate_discount(original_price, coupon)
 
         if db_user.wallet_balance < final_price:
+            text = await ShopCustomizationService.get_message(
+                session,
+                "insufficient_balance",
+                required_price=f"{final_price:,}",
+            )
+            keyboard = await ShopCustomizationService.wallet_keyboard(session)
             await update.message.reply_text(
-                f"موجودی کیف پول کافی نیست.\nمبلغ موردنیاز: {final_price:,} تومان",
-                reply_markup=wallet_keyboard(),
+                text,
+                reply_markup=keyboard,
             )
             return
 
         config = await InventoryService.get_available_config(session, volume)
         if not config:
+            text = await ShopCustomizationService.get_message(session, "plan_unavailable", volume=volume)
+            keyboard = await ShopCustomizationService.main_menu_keyboard(session)
             await update.message.reply_text(
-                f"پلن {volume} گیگ فعلا ناموجود است.",
-                reply_markup=main_menu_keyboard(),
+                text,
+                reply_markup=keyboard,
             )
             return
 
@@ -277,9 +298,11 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sold = await InventoryService.sell_config(session, config, db_user.telegram_id)
         if not sold:
             await session.rollback()
+            text = await ShopCustomizationService.get_message(session, "plan_sold_out", volume=volume)
+            keyboard = await ShopCustomizationService.main_menu_keyboard(session)
             await update.message.reply_text(
-                f"پلن {volume} گیگ همین الان ناموجود شد. لطفا دوباره تلاش کنید.",
-                reply_markup=main_menu_keyboard(),
+                text,
+                reply_markup=keyboard,
             )
             return
 
@@ -306,25 +329,39 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await session.commit()
 
+        text = await ShopCustomizationService.get_message(
+            session,
+            "purchase_success",
+            volume=volume,
+            price=f"{final_price:,}",
+            sub_link=config.sub_link,
+        )
+        keyboard = await ShopCustomizationService.back_keyboard(session)
         await update.message.reply_text(
-            PURCHASE_SUCCESS.format(volume, f"{final_price:,}", config.sub_link),
-            reply_markup=back_to_main(),
+            text,
+            reply_markup=keyboard,
             parse_mode=constants.ParseMode.MARKDOWN,
         )
 
 
 async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        text = await ShopCustomizationService.get_message(session, "help")
+        keyboard = await ShopCustomizationService.back_keyboard(session)
     await update.message.reply_text(
-        HELP_TEXT,
-        reply_markup=back_to_main(),
+        text,
+        reply_markup=keyboard,
         parse_mode=constants.ParseMode.MARKDOWN,
     )
 
 
 async def support_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        text = await ShopCustomizationService.get_message(session, "support")
+        keyboard = await ShopCustomizationService.back_keyboard(session)
     await update.message.reply_text(
-        SUPPORT_TEXT,
-        reply_markup=back_to_main(),
+        text,
+        reply_markup=keyboard,
         parse_mode=constants.ParseMode.MARKDOWN,
     )
 
@@ -342,53 +379,97 @@ async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         purchases = result.scalars().all()
 
     if not purchases:
-        await update.message.reply_text(NO_PURCHASE, reply_markup=back_to_main(), parse_mode=constants.ParseMode.MARKDOWN)
+        async with async_session() as session:
+            text = await ShopCustomizationService.get_message(session, "no_purchase")
+            keyboard = await ShopCustomizationService.back_keyboard(session)
+        await update.message.reply_text(text, reply_markup=keyboard, parse_mode=constants.ParseMode.MARKDOWN)
         return
 
-    text = "**آخرین خریدهای شما**\n\n"
-    for purchase in purchases:
-        discount = f" | تخفیف: {purchase.discount_amount:,} تومان" if purchase.discount_amount else ""
-        coupon = f" | کد: {purchase.coupon_code}" if purchase.coupon_code else ""
-        text += (
-            f"حجم: {purchase.volume_gb} گیگ | مبلغ: {purchase.price:,} تومان{discount}{coupon}\n"
-            f"زمان: {purchase.purchased_at.strftime('%Y-%m-%d %H:%M')}\n"
-            f"`{purchase.config.sub_link}`\n\n"
-        )
+    async with async_session() as session:
+        text = await ShopCustomizationService.get_message(session, "purchase_history_header")
+        keyboard = await ShopCustomizationService.back_keyboard(session)
+
+        for purchase in purchases:
+            discount = f" | تخفیف: {purchase.discount_amount:,} تومان" if purchase.discount_amount else ""
+            coupon = f" | کد: {purchase.coupon_code}" if purchase.coupon_code else ""
+            text += await ShopCustomizationService.get_message(
+                session,
+                "purchase_history_item",
+                volume=purchase.volume_gb,
+                price=f"{purchase.price:,}",
+                discount=discount,
+                coupon=coupon,
+                purchased_at=purchase.purchased_at.strftime("%Y-%m-%d %H:%M"),
+                sub_link=purchase.config.sub_link,
+            )
 
     await update.message.reply_text(
         text,
-        reply_markup=back_to_main(),
+        reply_markup=keyboard,
         parse_mode=constants.ParseMode.MARKDOWN,
     )
 
 
 async def cancel_coupon(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("عملیات لغو شد.", reply_markup=wallet_keyboard())
-    return ConversationHandler.END
+    context.user_data.pop("awaiting_coupon_code", None)
+    async with async_session() as session:
+        text = await ShopCustomizationService.get_message(session, "coupon_cancelled")
+        keyboard = await ShopCustomizationService.wallet_keyboard(session)
+    await update.message.reply_text(text, reply_markup=keyboard)
 
 
-coupon_conv = ConversationHandler(
-    entry_points=[MessageHandler(_exact_filter(APPLY_COUPON), apply_coupon_start)],
-    states={
-        ENTER_COUPON_CODE: [
-            MessageHandler(_exact_filter(BACK_TO_MAIN), cancel_coupon),
-            MessageHandler(filters.TEXT & ~filters.COMMAND, apply_coupon_code),
-        ]
-    },
-    fallbacks=[CommandHandler("cancel", cancel_coupon), MessageHandler(_exact_filter(BACK_TO_MAIN), cancel_coupon)],
-)
+async def shop_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    async with async_session() as session:
+        prices = await PriceService.get_all_prices(session)
+        discounted_prices = await CouponService.prices_with_active_discount(session, update.effective_user.id, prices)
+        action = await ShopCustomizationService.action_for_text(session, text)
+        volume = await ShopCustomizationService.volume_for_text(session, text, discounted_prices)
+
+    if context.user_data.get("awaiting_coupon_code"):
+        if action == "back_to_main":
+            await cancel_coupon(update, context)
+            return
+        await apply_coupon_code(update, context)
+        return
+
+    if volume is not None:
+        await process_purchase(update, context, selected_volume=volume)
+        return
+
+    if action == "back_to_main":
+        await main_menu(update, context)
+    elif action == "buy_subscription":
+        await buy_menu(update, context)
+    elif action == "wallet":
+        await wallet_menu(update, context)
+    elif action == "purchase_history":
+        await history_menu(update, context)
+    elif action == "referrals":
+        await referral_menu(update, context)
+    elif action == "account_info":
+        await account_info_menu(update, context)
+    elif action == "support":
+        await support_menu(update, context)
+    elif action == "help":
+        await help_menu(update, context)
+    elif action == "apply_coupon":
+        await apply_coupon_start(update, context)
+    elif action and action.startswith("custom_message:"):
+        async with async_session() as session:
+            message = await ShopCustomizationService.get_message(session, action)
+            keyboard = await ShopCustomizationService.main_menu_keyboard(session)
+        await update.message.reply_text(
+            message,
+            reply_markup=keyboard,
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
+    else:
+        await main_menu(update, context)
 
 
 user_handlers = [
     CommandHandler("start", start),
-    coupon_conv,
-    MessageHandler(_exact_filter(BACK_TO_MAIN), main_menu),
-    MessageHandler(_exact_filter(BUY_SUBSCRIPTION), buy_menu),
-    MessageHandler(filters.Regex(r"^📦 \d+ گیگ \|"), process_purchase),
-    MessageHandler(_exact_filter(WALLET), wallet_menu),
-    MessageHandler(_exact_filter(REFERRALS), referral_menu),
-    MessageHandler(_exact_filter(ACCOUNT_INFO), account_info_menu),
-    MessageHandler(_exact_filter(PURCHASE_HISTORY), history_menu),
-    MessageHandler(_exact_filter(SUPPORT), support_menu),
-    MessageHandler(_exact_filter(HELP), help_menu),
+    CommandHandler("cancel", cancel_coupon),
+    MessageHandler(filters.TEXT & ~filters.COMMAND, shop_text_router),
 ]

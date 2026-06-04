@@ -7,7 +7,7 @@ from ..config_loader import BotConfig
 from ..models import Admin
 
 
-ALL_PERMISSIONS = ("inventory", "prices", "users", "reports", "coupons")
+ALL_PERMISSIONS = ("inventory", "prices", "users", "reports", "coupons", "shop")
 
 
 def normalize_permissions(raw_permissions: str | list[str] | tuple[str, ...] | set[str]) -> str:

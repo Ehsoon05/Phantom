@@ -17,6 +17,7 @@ ADMIN_USERS = "👤 مدیریت کاربران"
 ADMIN_REPORTS = "📊 گزارش فروش"
 ADMIN_COUPONS = "🎟 مدیریت تخفیف‌ها"
 ADMIN_ADMINS = "🛡 مدیریت ادمین‌ها"
+ADMIN_SHOP_SETTINGS = "⚙️ تنظیمات ربات فروش"
 ADMIN_LOGOUT = "🚪 خروج"
 ADMIN_BACK = "⬅️ بازگشت به پنل"
 
@@ -35,6 +36,24 @@ ADMIN_VIEW_COUPONS = "📋 مشاهده تخفیف‌ها"
 ADMIN_DEACTIVATE_COUPON = "⏸ غیرفعال‌سازی تخفیف"
 ADMIN_DELETE_COUPON = "🗑 حذف تخفیف"
 ADMIN_REFRESH_ADMINS = "🔄 بروزرسانی لیست ادمین‌ها"
+ADMIN_SHOP_MESSAGES = "📝 مدیریت پیام‌ها"
+ADMIN_SHOP_BUTTONS = "🔘 مدیریت دکمه‌ها"
+ADMIN_SHOP_PLANS = "📦 مدیریت سرویس‌ها"
+ADMIN_SHOP_RESET_DEFAULTS = "↩️ بازگشت فروشگاه به پیش‌فرض"
+ADMIN_SHOP_MENU_MAIN = "منوی اصلی فروش"
+ADMIN_SHOP_MENU_WALLET = "منوی کیف پول"
+ADMIN_SHOP_MENU_BUY = "منوی خرید"
+ADMIN_SHOP_MENU_BACK = "دکمه بازگشت"
+ADMIN_EDIT_TEXT = "✏️ تغییر متن"
+ADMIN_EDIT_EMOJI = "😀 تغییر ایموجی"
+ADMIN_EDIT_PREMIUM_EMOJI = "💎 تغییر ایموجی پریمیوم"
+ADMIN_EDIT_STYLE = "🎨 تغییر رنگ"
+ADMIN_EDIT_POSITION = "↕️ تغییر چینش"
+ADMIN_TOGGLE_ENABLED = "⏯ فعال/غیرفعال"
+ADMIN_ADD_BUTTON = "➕ افزودن دکمه سفارشی"
+ADMIN_ADD_PLAN = "➕ افزودن سرویس"
+ADMIN_EDIT_TITLE = "✏️ تغییر عنوان"
+ADMIN_EDIT_ORDER = "↕️ تغییر ترتیب"
 
 COUPON_PERCENT = "درصدی"
 COUPON_FIXED = "مبلغ ثابت"
@@ -55,6 +74,7 @@ VOLUMES = (1, 2, 3, 5, 10, 20)
 STYLE_PRIMARY = "primary"
 STYLE_SUCCESS = "success"
 STYLE_DANGER = "danger"
+STYLE_DEFAULT = "default"
 
 # Replace this with your own Telegram custom/premium emoji ID.
 # It is intentionally one fixed icon for every user-facing shop button.
@@ -168,7 +188,8 @@ def admin_main_keyboard() -> ReplyKeyboardMarkup:
         [
             [_button(ADMIN_INVENTORY), _button(ADMIN_PRICES)],
             [_button(ADMIN_USERS), _button(ADMIN_REPORTS)],
-            [_button(ADMIN_COUPONS), _button(ADMIN_ADMINS)],
+            [_button(ADMIN_COUPONS), _button(ADMIN_SHOP_SETTINGS)],
+            [_button(ADMIN_ADMINS)],
             [_button(ADMIN_LOGOUT)],
         ]
     )
@@ -249,4 +270,62 @@ def admin_management_keyboard() -> ReplyKeyboardMarkup:
             [_button(ADMIN_REFRESH_ADMINS)],
             [_button(ADMIN_BACK)],
         ]
+    )
+
+
+def admin_shop_settings_keyboard() -> ReplyKeyboardMarkup:
+    return _keyboard(
+        [
+            [_button(ADMIN_SHOP_MESSAGES), _button(ADMIN_SHOP_BUTTONS)],
+            [_button(ADMIN_SHOP_PLANS)],
+            [_button(ADMIN_SHOP_RESET_DEFAULTS)],
+            [_button(ADMIN_BACK)],
+        ]
+    )
+
+
+def admin_shop_menus_keyboard() -> ReplyKeyboardMarkup:
+    return _keyboard(
+        [
+            [_button(ADMIN_SHOP_MENU_MAIN), _button(ADMIN_SHOP_MENU_WALLET)],
+            [_button(ADMIN_SHOP_MENU_BUY), _button(ADMIN_SHOP_MENU_BACK)],
+            [_button(CANCEL), _button(ADMIN_BACK)],
+        ],
+        one_time_keyboard=True,
+    )
+
+
+def admin_shop_button_edit_keyboard() -> ReplyKeyboardMarkup:
+    return _keyboard(
+        [
+            [_button(ADMIN_EDIT_TEXT), _button(ADMIN_EDIT_EMOJI)],
+            [_button(ADMIN_EDIT_PREMIUM_EMOJI), _button(ADMIN_EDIT_STYLE)],
+            [_button(ADMIN_EDIT_POSITION), _button(ADMIN_TOGGLE_ENABLED)],
+            [_button(CANCEL), _button(ADMIN_BACK)],
+        ],
+        one_time_keyboard=True,
+    )
+
+
+def admin_shop_plan_edit_keyboard() -> ReplyKeyboardMarkup:
+    return _keyboard(
+        [
+            [_button(ADMIN_EDIT_TITLE), _button(ADMIN_EDIT_PRICE)],
+            [_button(ADMIN_EDIT_EMOJI), _button(ADMIN_EDIT_PREMIUM_EMOJI)],
+            [_button(ADMIN_EDIT_STYLE), _button(ADMIN_EDIT_ORDER)],
+            [_button(ADMIN_TOGGLE_ENABLED)],
+            [_button(CANCEL), _button(ADMIN_BACK)],
+        ],
+        one_time_keyboard=True,
+    )
+
+
+def admin_style_keyboard() -> ReplyKeyboardMarkup:
+    return _keyboard(
+        [
+            [_button(STYLE_PRIMARY), _button(STYLE_SUCCESS)],
+            [_button(STYLE_DANGER), _button(STYLE_DEFAULT)],
+            [_button(CANCEL), _button(ADMIN_BACK)],
+        ],
+        one_time_keyboard=True,
     )

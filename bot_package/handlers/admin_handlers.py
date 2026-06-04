@@ -2,7 +2,7 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
-from telegram import ReplyKeyboardRemove, Update, constants
+from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, Update, constants
 from telegram.ext import CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
 from ..auth import AuthManager
@@ -14,9 +14,12 @@ from ..services.coupon_service import CouponError, CouponService
 from ..services.inventory_service import InventoryService
 from ..services.price_service import PriceService
 from ..services.referral_service import ReferralService
+from ..services.shop_customization_service import ShopCustomizationService
 from ..services.user_service import UserService
 from ..utils.keyboards import (
     ADMIN_ADMINS,
+    ADMIN_ADD_BUTTON,
+    ADMIN_ADD_PLAN,
     ADMIN_ADD_CONFIG,
     ADMIN_BACK,
     ADMIN_CHARGE_WALLET,
@@ -25,7 +28,14 @@ from ..utils.keyboards import (
     ADMIN_DEACTIVATE_COUPON,
     ADMIN_DELETE_COUPON,
     ADMIN_EDIT_COUPON,
+    ADMIN_EDIT_EMOJI,
+    ADMIN_EDIT_ORDER,
+    ADMIN_EDIT_POSITION,
     ADMIN_EDIT_PRICE,
+    ADMIN_EDIT_PREMIUM_EMOJI,
+    ADMIN_EDIT_STYLE,
+    ADMIN_EDIT_TEXT,
+    ADMIN_EDIT_TITLE,
     ADMIN_INVENTORY,
     ADMIN_LOGOUT,
     ADMIN_PRICES,
@@ -34,7 +44,17 @@ from ..utils.keyboards import (
     ADMIN_REPORTS,
     ADMIN_SEARCH_USER,
     ADMIN_SET_WALLET,
+    ADMIN_SHOP_BUTTONS,
+    ADMIN_SHOP_MENU_BACK,
+    ADMIN_SHOP_MENU_BUY,
+    ADMIN_SHOP_MENU_MAIN,
+    ADMIN_SHOP_MENU_WALLET,
+    ADMIN_SHOP_MESSAGES,
+    ADMIN_SHOP_PLANS,
+    ADMIN_SHOP_RESET_DEFAULTS,
+    ADMIN_SHOP_SETTINGS,
     ADMIN_STOCK_STATUS,
+    ADMIN_TOGGLE_ENABLED,
     ADMIN_USERS,
     ADMIN_USER_STATS,
     ADMIN_VIEW_COUPONS,
@@ -57,11 +77,15 @@ from ..utils.keyboards import (
     admin_management_keyboard,
     admin_prices_keyboard,
     admin_reports_keyboard,
+    admin_shop_button_edit_keyboard,
+    admin_shop_menus_keyboard,
+    admin_shop_plan_edit_keyboard,
+    admin_shop_settings_keyboard,
+    admin_style_keyboard,
     admin_user_confirm_keyboard,
     admin_users_keyboard,
     coupon_target_keyboard,
     coupon_type_keyboard,
-    volume_selection_keyboard,
 )
 from ..utils.messages import (
     ADD_CONFIG_VOLUME,
@@ -114,7 +138,31 @@ from ..utils.validators import extract_links_from_text
     COUPON_EDIT_AMOUNT,
     COUPON_EDIT_TARGET,
     COUPON_EDIT_TARGET_USERS,
-) = range(23)
+    SHOP_MESSAGE_SELECT,
+    SHOP_MESSAGE_TEXT,
+    SHOP_BUTTON_MENU,
+    SHOP_BUTTON_SELECT,
+    SHOP_BUTTON_OPTION,
+    SHOP_BUTTON_VALUE,
+    SHOP_BUTTON_ADD_TEXT,
+    SHOP_BUTTON_ADD_MESSAGE,
+    SHOP_PLAN_SELECT,
+    SHOP_PLAN_OPTION,
+    SHOP_PLAN_VALUE,
+    SHOP_PLAN_ADD_VOLUME,
+    SHOP_PLAN_ADD_TITLE,
+    SHOP_PLAN_ADD_PRICE,
+) = range(37)
+
+
+SHOP_MENU_LABELS = {
+    ADMIN_SHOP_MENU_MAIN: "shop_main",
+    ADMIN_SHOP_MENU_WALLET: "shop_wallet",
+    ADMIN_SHOP_MENU_BUY: "shop_buy",
+    ADMIN_SHOP_MENU_BACK: "shop_back",
+}
+
+STYLE_VALUES = {"primary", "success", "danger", "default"}
 
 
 def _exact_filter(text: str):
@@ -124,6 +172,52 @@ def _exact_filter(text: str):
 def _extract_volume(text: str) -> int | None:
     match = re.search(r"(\d+)\s*گیگ", text)
     return int(match.group(1)) if match else None
+
+
+def _rows(labels: list[str], *, width: int = 2) -> ReplyKeyboardMarkup:
+    rows = [labels[index : index + width] for index in range(0, len(labels), width)]
+    rows.append([CANCEL, ADMIN_BACK])
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True, one_time_keyboard=True)
+
+
+def _message_label(key: str) -> str:
+    return f"📝 {key}"
+
+
+def _button_label(button) -> str:
+    status = "فعال" if button.is_enabled else "غیرفعال"
+    emoji = f"{button.emoji} " if button.emoji else ""
+    return f"#{button.id} {emoji}{button.text} ({status})"
+
+
+def _plan_label(plan) -> str:
+    status = "فعال" if plan.is_active else "غیرفعال"
+    emoji = f"{plan.emoji} " if plan.emoji else ""
+    return f"#{plan.volume_gb} {emoji}{plan.title} ({status})"
+
+
+def _parse_hash_id(text: str) -> int | None:
+    match = re.match(r"#(\d+)\b", text.strip())
+    return int(match.group(1)) if match else None
+
+
+async def _admin_volume_keyboard(session, action: str) -> ReplyKeyboardMarkup:
+    plans = await ShopCustomizationService.list_plans(session)
+    active_plans = [plan for plan in plans if plan.is_active]
+    if action == "edit_price":
+        labels = [f"✏️ قیمت {plan.volume_gb} گیگ" for plan in active_plans]
+    else:
+        labels = [f"📦 {plan.volume_gb} گیگ" for plan in active_plans]
+    if not labels:
+        labels = [f"📦 {volume} گیگ" for volume in (1, 2, 3, 5, 10, 20)]
+    return _rows(labels, width=2)
+
+
+def _normalize_nullable(text: str) -> str | None:
+    value = text.strip()
+    if value in {"-", "none", "None", "حذف", "خالی"}:
+        return None
+    return value
 
 
 def _admin_user_preview(user) -> str:
@@ -267,9 +361,11 @@ async def admin_logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @require_auth(permission="inventory")
 async def add_config_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        keyboard = await _admin_volume_keyboard(session, "add")
     await update.message.reply_text(
         ADD_CONFIG_VOLUME,
-        reply_markup=volume_selection_keyboard("add"),
+        reply_markup=keyboard,
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     return CHOOSE_VOLUME_ADD
@@ -364,9 +460,11 @@ async def view_prices(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @require_auth(permission="prices")
 async def edit_price_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        keyboard = await _admin_volume_keyboard(session, "edit_price")
     await update.message.reply_text(
         "حجم پلنی که می‌خواهید قیمتش را تغییر دهید انتخاب کنید:",
-        reply_markup=volume_selection_keyboard("edit_price"),
+        reply_markup=keyboard,
     )
     return CHOOSE_VOLUME_PRICE
 
@@ -1165,6 +1263,437 @@ async def set_admin_permissions(update: Update, context: ContextTypes.DEFAULT_TY
     await update.effective_message.reply_text(f"دسترسی ادمین `{telegram_id}` به `{permissions}` تغییر کرد.", parse_mode=constants.ParseMode.MARKDOWN)
 
 
+@require_auth(permission="shop")
+async def shop_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "**تنظیمات ربات فروش**\n\n"
+        "از این بخش می‌توانید متن پیام‌ها، ظاهر و چینش دکمه‌ها، رنگ‌ها، ایموجی پریمیوم و سرویس‌های قابل فروش را مدیریت کنید.",
+        reply_markup=admin_shop_settings_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+
+
+@require_auth(permission="shop")
+async def shop_reset_defaults(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        await ShopCustomizationService.reset_defaults(session)
+    await update.message.reply_text(
+        "تنظیمات ربات فروش به حالت پیش‌فرض برگشت.",
+        reply_markup=admin_shop_settings_keyboard(),
+    )
+
+
+@require_auth(permission="shop")
+async def shop_messages_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        messages = await ShopCustomizationService.list_messages(session)
+    await update.message.reply_text(
+        "**مدیریت پیام‌ها**\n\nپیامی را که می‌خواهید تغییر دهید انتخاب کنید.",
+        reply_markup=_rows([_message_label(message.key) for message in messages], width=2),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return SHOP_MESSAGE_SELECT
+
+
+@require_auth(permission="shop")
+async def shop_message_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = update.message.text.removeprefix("📝").strip()
+    async with async_session() as session:
+        message = await ShopCustomizationService.get_message_row(session, key)
+
+    if not message:
+        await update.message.reply_text("این پیام پیدا نشد.", reply_markup=admin_shop_settings_keyboard())
+        return ConversationHandler.END
+
+    context.user_data["shop_message_key"] = key
+    await update.message.reply_text(
+        f"**ویرایش پیام `{key}`**\n\nمتن فعلی:\n\n{message.text}\n\nمتن جدید را ارسال کنید.",
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return SHOP_MESSAGE_TEXT
+
+
+@require_auth(permission="shop")
+async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = context.user_data.get("shop_message_key")
+    async with async_session() as session:
+        message = await ShopCustomizationService.update_message(session, key, update.message.text)
+
+    context.user_data.pop("shop_message_key", None)
+    if not message:
+        await update.message.reply_text("پیام ذخیره نشد.", reply_markup=admin_shop_settings_keyboard())
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        f"پیام `{key}` ذخیره شد.",
+        reply_markup=admin_shop_settings_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return ConversationHandler.END
+
+
+@require_auth(permission="shop")
+async def shop_buttons_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "**مدیریت دکمه‌ها**\n\nمنویی را که می‌خواهید ویرایش کنید انتخاب کنید.",
+        reply_markup=admin_shop_menus_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return SHOP_BUTTON_MENU
+
+
+@require_auth(permission="shop")
+async def shop_button_menu_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    menu = SHOP_MENU_LABELS.get(update.message.text)
+    if not menu:
+        await update.message.reply_text("منوی انتخاب‌شده معتبر نیست.", reply_markup=admin_shop_menus_keyboard())
+        return SHOP_BUTTON_MENU
+
+    context.user_data["shop_button_menu"] = menu
+    async with async_session() as session:
+        buttons = await ShopCustomizationService.list_buttons(session, menu)
+
+    if not buttons:
+        labels = [ADMIN_ADD_BUTTON]
+    else:
+        labels = [_button_label(button) for button in buttons]
+        labels.append(ADMIN_ADD_BUTTON)
+
+    await update.message.reply_text(
+        "دکمه موردنظر را انتخاب کنید.",
+        reply_markup=_rows(labels, width=1),
+    )
+    return SHOP_BUTTON_SELECT
+
+
+@require_auth(permission="shop")
+async def shop_button_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == ADMIN_ADD_BUTTON:
+        await update.message.reply_text("متن دکمه سفارشی جدید را ارسال کنید.")
+        return SHOP_BUTTON_ADD_TEXT
+
+    button_id = _parse_hash_id(update.message.text)
+    if button_id is None:
+        await update.message.reply_text("دکمه معتبر نیست.")
+        return SHOP_BUTTON_SELECT
+
+    async with async_session() as session:
+        button = await ShopCustomizationService.get_button(session, button_id)
+
+    if not button:
+        await update.message.reply_text("دکمه پیدا نشد.", reply_markup=admin_shop_settings_keyboard())
+        return ConversationHandler.END
+
+    context.user_data["shop_button_id"] = button_id
+    await update.message.reply_text(
+        "**ویرایش دکمه**\n\n"
+        f"اکشن: `{button.action}`\n"
+        f"متن: {button.text}\n"
+        f"ایموجی: {button.emoji or '-'}\n"
+        f"ایموجی پریمیوم: `{button.premium_emoji_id or '-'}`\n"
+        f"رنگ: `{button.style or 'default'}`\n"
+        f"چینش: ردیف {button.row}، ستون {button.col}\n"
+        f"وضعیت: {'فعال' if button.is_enabled else 'غیرفعال'}",
+        reply_markup=admin_shop_button_edit_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return SHOP_BUTTON_OPTION
+
+
+@require_auth(permission="shop")
+async def shop_button_add_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    if not text:
+        await update.message.reply_text("متن دکمه نمی‌تواند خالی باشد.")
+        return SHOP_BUTTON_ADD_TEXT
+    context.user_data["shop_custom_button_text"] = text
+    await update.message.reply_text("متن جوابی که با زدن این دکمه نمایش داده شود را ارسال کنید.")
+    return SHOP_BUTTON_ADD_MESSAGE
+
+
+@require_auth(permission="shop")
+async def shop_button_add_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    menu = context.user_data.get("shop_button_menu")
+    text = context.user_data.get("shop_custom_button_text")
+    if not menu or not text:
+        await update.message.reply_text("اطلاعات دکمه کامل نیست.", reply_markup=admin_shop_settings_keyboard())
+        return ConversationHandler.END
+
+    async with async_session() as session:
+        button = await ShopCustomizationService.create_custom_button(session, menu, text, update.message.text)
+
+    context.user_data.pop("shop_custom_button_text", None)
+    await update.message.reply_text(
+        f"دکمه سفارشی **{button.text}** ساخته شد.",
+        reply_markup=admin_shop_settings_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return ConversationHandler.END
+
+
+@require_auth(permission="shop")
+async def shop_button_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    option = update.message.text
+    button_id = context.user_data.get("shop_button_id")
+
+    if option == ADMIN_TOGGLE_ENABLED:
+        async with async_session() as session:
+            button = await ShopCustomizationService.get_button(session, button_id)
+            if button:
+                await ShopCustomizationService.update_button(session, button_id, is_enabled=not button.is_enabled)
+        await update.message.reply_text("وضعیت دکمه تغییر کرد.", reply_markup=admin_shop_settings_keyboard())
+        return ConversationHandler.END
+
+    field_map = {
+        ADMIN_EDIT_TEXT: ("text", "متن جدید دکمه را ارسال کنید."),
+        ADMIN_EDIT_EMOJI: ("emoji", "ایموجی جدید را ارسال کنید. برای حذف، `-` بفرستید."),
+        ADMIN_EDIT_PREMIUM_EMOJI: ("premium_emoji_id", "آیدی ایموجی پریمیوم را ارسال کنید. برای حذف، `-` بفرستید."),
+        ADMIN_EDIT_STYLE: ("style", "رنگ دکمه را انتخاب کنید."),
+        ADMIN_EDIT_POSITION: ("position", "چینش جدید را با فرمت `row,col` ارسال کنید. مثال: `1,0`"),
+    }
+    if option not in field_map:
+        await update.message.reply_text("گزینه معتبر نیست.", reply_markup=admin_shop_button_edit_keyboard())
+        return SHOP_BUTTON_OPTION
+
+    field, prompt = field_map[option]
+    context.user_data["shop_button_field"] = field
+    await update.message.reply_text(
+        prompt,
+        reply_markup=admin_style_keyboard() if field == "style" else None,
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return SHOP_BUTTON_VALUE
+
+
+@require_auth(permission="shop")
+async def shop_button_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    button_id = context.user_data.get("shop_button_id")
+    field = context.user_data.get("shop_button_field")
+    raw_value = update.message.text.strip()
+    updates = {}
+
+    if field == "position":
+        try:
+            row_raw, col_raw = re.split(r"\s*,\s*", raw_value, maxsplit=1)
+            updates = {"row": int(row_raw), "col": int(col_raw)}
+        except (ValueError, TypeError):
+            await update.message.reply_text("فرمت چینش درست نیست. مثال: `1,0`", parse_mode=constants.ParseMode.MARKDOWN)
+            return SHOP_BUTTON_VALUE
+    elif field == "style":
+        value = raw_value if raw_value in STYLE_VALUES else None
+        updates = {"style": None if value == "default" else value}
+    elif field in {"emoji", "premium_emoji_id"}:
+        updates = {field: _normalize_nullable(raw_value)}
+    elif field == "text":
+        if not raw_value:
+            await update.message.reply_text("متن دکمه نمی‌تواند خالی باشد.")
+            return SHOP_BUTTON_VALUE
+        updates = {"text": raw_value}
+
+    async with async_session() as session:
+        button = await ShopCustomizationService.update_button(session, button_id, **updates)
+
+    context.user_data.pop("shop_button_field", None)
+    if not button:
+        await update.message.reply_text("دکمه ذخیره نشد.", reply_markup=admin_shop_settings_keyboard())
+        return ConversationHandler.END
+
+    await update.message.reply_text("دکمه ذخیره شد.", reply_markup=admin_shop_settings_keyboard())
+    return ConversationHandler.END
+
+
+@require_auth(permission="shop")
+async def shop_plans_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        plans = await ShopCustomizationService.list_plans(session)
+    labels = [_plan_label(plan) for plan in plans]
+    labels.append(ADMIN_ADD_PLAN)
+    await update.message.reply_text(
+        "**مدیریت سرویس‌ها**\n\nپلن موردنظر را انتخاب کنید یا سرویس جدید بسازید.",
+        reply_markup=_rows(labels, width=1),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return SHOP_PLAN_SELECT
+
+
+@require_auth(permission="shop")
+async def shop_plan_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == ADMIN_ADD_PLAN:
+        await update.message.reply_text("حجم سرویس جدید را به گیگ ارسال کنید. مثال: `30`", parse_mode=constants.ParseMode.MARKDOWN)
+        return SHOP_PLAN_ADD_VOLUME
+
+    volume = _parse_hash_id(update.message.text)
+    if volume is None:
+        await update.message.reply_text("پلن معتبر نیست.")
+        return SHOP_PLAN_SELECT
+
+    async with async_session() as session:
+        plan = await ShopCustomizationService.get_plan(session, volume)
+        price = await PriceService.get_price(session, volume)
+
+    if not plan:
+        await update.message.reply_text("پلن پیدا نشد.", reply_markup=admin_shop_settings_keyboard())
+        return ConversationHandler.END
+
+    context.user_data["shop_plan_volume"] = volume
+    await update.message.reply_text(
+        "**ویرایش سرویس**\n\n"
+        f"حجم: **{plan.volume_gb} گیگ**\n"
+        f"عنوان: {plan.title}\n"
+        f"قیمت: **{price or 0:,} تومان**\n"
+        f"ایموجی: {plan.emoji or '-'}\n"
+        f"ایموجی پریمیوم: `{plan.premium_emoji_id or '-'}`\n"
+        f"رنگ: `{plan.style or 'default'}`\n"
+        f"ترتیب: {plan.display_order}\n"
+        f"وضعیت: {'فعال' if plan.is_active else 'غیرفعال'}",
+        reply_markup=admin_shop_plan_edit_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return SHOP_PLAN_OPTION
+
+
+@require_auth(permission="shop")
+async def shop_plan_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    option = update.message.text
+    volume = context.user_data.get("shop_plan_volume")
+
+    if option == ADMIN_TOGGLE_ENABLED:
+        async with async_session() as session:
+            plan = await ShopCustomizationService.get_plan(session, volume)
+            if plan:
+                await ShopCustomizationService.update_plan(session, volume, is_active=not plan.is_active)
+        await update.message.reply_text("وضعیت سرویس تغییر کرد.", reply_markup=admin_shop_settings_keyboard())
+        return ConversationHandler.END
+
+    field_map = {
+        ADMIN_EDIT_TITLE: ("title", "عنوان جدید سرویس را ارسال کنید. مثال: `۳۰ گیگ ویژه`"),
+        ADMIN_EDIT_PRICE: ("price", "قیمت جدید را به تومان ارسال کنید. مثال: `250000`"),
+        ADMIN_EDIT_EMOJI: ("emoji", "ایموجی جدید را ارسال کنید. برای حذف، `-` بفرستید."),
+        ADMIN_EDIT_PREMIUM_EMOJI: ("premium_emoji_id", "آیدی ایموجی پریمیوم را ارسال کنید. برای حذف، `-` بفرستید."),
+        ADMIN_EDIT_STYLE: ("style", "رنگ دکمه سرویس را انتخاب کنید."),
+        ADMIN_EDIT_ORDER: ("display_order", "ترتیب نمایش را عددی ارسال کنید. مثال: `2`"),
+    }
+    if option not in field_map:
+        await update.message.reply_text("گزینه معتبر نیست.", reply_markup=admin_shop_plan_edit_keyboard())
+        return SHOP_PLAN_OPTION
+
+    field, prompt = field_map[option]
+    context.user_data["shop_plan_field"] = field
+    await update.message.reply_text(
+        prompt,
+        reply_markup=admin_style_keyboard() if field == "style" else None,
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return SHOP_PLAN_VALUE
+
+
+@require_auth(permission="shop")
+async def shop_plan_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    volume = context.user_data.get("shop_plan_volume")
+    field = context.user_data.get("shop_plan_field")
+    raw_value = update.message.text.strip()
+    updates = {}
+
+    if field == "price":
+        try:
+            price = int(raw_value.replace(",", ""))
+        except ValueError:
+            await update.message.reply_text("قیمت باید عددی باشد.")
+            return SHOP_PLAN_VALUE
+        if price <= 0:
+            await update.message.reply_text("قیمت باید بیشتر از صفر باشد.")
+            return SHOP_PLAN_VALUE
+        async with async_session() as session:
+            plan = await ShopCustomizationService.get_plan(session, volume)
+            await ShopCustomizationService.upsert_plan(session, volume_gb=volume, title=plan.title, price=price, emoji=plan.emoji, style=plan.style)
+        await update.message.reply_text("قیمت سرویس ذخیره شد.", reply_markup=admin_shop_settings_keyboard())
+        return ConversationHandler.END
+
+    if field == "display_order":
+        try:
+            updates = {"display_order": int(raw_value)}
+        except ValueError:
+            await update.message.reply_text("ترتیب باید عددی باشد.")
+            return SHOP_PLAN_VALUE
+    elif field == "style":
+        value = raw_value if raw_value in STYLE_VALUES else None
+        updates = {"style": None if value == "default" else value}
+    elif field in {"emoji", "premium_emoji_id"}:
+        updates = {field: _normalize_nullable(raw_value)}
+    elif field == "title":
+        if not raw_value:
+            await update.message.reply_text("عنوان نمی‌تواند خالی باشد.")
+            return SHOP_PLAN_VALUE
+        updates = {"title": raw_value}
+
+    async with async_session() as session:
+        plan = await ShopCustomizationService.update_plan(session, volume, **updates)
+
+    context.user_data.pop("shop_plan_field", None)
+    if not plan:
+        await update.message.reply_text("سرویس ذخیره نشد.", reply_markup=admin_shop_settings_keyboard())
+        return ConversationHandler.END
+
+    await update.message.reply_text("سرویس ذخیره شد.", reply_markup=admin_shop_settings_keyboard())
+    return ConversationHandler.END
+
+
+@require_auth(permission="shop")
+async def shop_plan_add_volume(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        volume = int(update.message.text.strip())
+    except ValueError:
+        await update.message.reply_text("حجم باید عددی باشد.")
+        return SHOP_PLAN_ADD_VOLUME
+    if volume <= 0:
+        await update.message.reply_text("حجم باید بیشتر از صفر باشد.")
+        return SHOP_PLAN_ADD_VOLUME
+
+    context.user_data["shop_new_plan"] = {"volume": volume}
+    await update.message.reply_text("عنوان نمایشی سرویس را ارسال کنید. مثال: `۳۰ گیگ ویژه`")
+    return SHOP_PLAN_ADD_TITLE
+
+
+@require_auth(permission="shop")
+async def shop_plan_add_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    title = update.message.text.strip()
+    if not title:
+        await update.message.reply_text("عنوان نمی‌تواند خالی باشد.")
+        return SHOP_PLAN_ADD_TITLE
+    context.user_data.setdefault("shop_new_plan", {})["title"] = title
+    await update.message.reply_text("قیمت سرویس را به تومان ارسال کنید. مثال: `250000`")
+    return SHOP_PLAN_ADD_PRICE
+
+
+@require_auth(permission="shop")
+async def shop_plan_add_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        price = int(update.message.text.replace(",", "").strip())
+    except ValueError:
+        await update.message.reply_text("قیمت باید عددی باشد.")
+        return SHOP_PLAN_ADD_PRICE
+    if price <= 0:
+        await update.message.reply_text("قیمت باید بیشتر از صفر باشد.")
+        return SHOP_PLAN_ADD_PRICE
+
+    draft = context.user_data.get("shop_new_plan", {})
+    async with async_session() as session:
+        plan = await ShopCustomizationService.upsert_plan(
+            session,
+            volume_gb=draft["volume"],
+            title=draft["title"],
+            price=price,
+        )
+
+    context.user_data.pop("shop_new_plan", None)
+    await update.message.reply_text(
+        f"سرویس **{plan.title}** با حجم **{plan.volume_gb} گیگ** ساخته شد.",
+        reply_markup=admin_shop_settings_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return ConversationHandler.END
+
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("عملیات لغو شد.", reply_markup=admin_main_keyboard())
     return ConversationHandler.END
@@ -1355,6 +1884,97 @@ delete_coupon_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
 )
 
+shop_messages_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_SHOP_MESSAGES), shop_messages_start)],
+    states={
+        SHOP_MESSAGE_SELECT: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_message_select),
+        ],
+        SHOP_MESSAGE_TEXT: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_message_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+shop_buttons_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_SHOP_BUTTONS), shop_buttons_start)],
+    states={
+        SHOP_BUTTON_MENU: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_menu_select),
+        ],
+        SHOP_BUTTON_SELECT: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_select),
+        ],
+        SHOP_BUTTON_OPTION: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_option),
+        ],
+        SHOP_BUTTON_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_value),
+        ],
+        SHOP_BUTTON_ADD_TEXT: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_add_text),
+        ],
+        SHOP_BUTTON_ADD_MESSAGE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_add_message),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+shop_plans_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_SHOP_PLANS), shop_plans_start)],
+    states={
+        SHOP_PLAN_SELECT: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_select),
+        ],
+        SHOP_PLAN_OPTION: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_option),
+        ],
+        SHOP_PLAN_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_value),
+        ],
+        SHOP_PLAN_ADD_VOLUME: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_add_volume),
+        ],
+        SHOP_PLAN_ADD_TITLE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_add_title),
+        ],
+        SHOP_PLAN_ADD_PRICE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_add_price),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
 admin_handlers = [
     CommandHandler("start", admin_start),
     CommandHandler("admins", list_admins),
@@ -1370,13 +1990,19 @@ admin_handlers = [
     edit_coupon_conv,
     deactivate_coupon_conv,
     delete_coupon_conv,
+    shop_messages_conv,
+    shop_buttons_conv,
+    shop_plans_conv,
     MessageHandler(_exact_filter(ADMIN_LOGOUT), admin_logout),
     MessageHandler(_exact_filter(ADMIN_ADMINS), admin_management_menu),
     MessageHandler(_exact_filter(ADMIN_REFRESH_ADMINS), admin_management_menu),
+    MessageHandler(_exact_filter(ADMIN_SHOP_SETTINGS), shop_settings_menu),
+    MessageHandler(_exact_filter(ADMIN_SHOP_RESET_DEFAULTS), shop_reset_defaults),
     MessageHandler(
         filters.Regex(
             f"^({re.escape(ADMIN_BACK)}|{re.escape(ADMIN_INVENTORY)}|{re.escape(ADMIN_PRICES)}|"
-            f"{re.escape(ADMIN_USERS)}|{re.escape(ADMIN_REPORTS)}|{re.escape(ADMIN_COUPONS)})$"
+            f"{re.escape(ADMIN_USERS)}|{re.escape(ADMIN_REPORTS)}|{re.escape(ADMIN_COUPONS)}|"
+            f"{re.escape(ADMIN_SHOP_SETTINGS)})$"
         ),
         admin_menu_navigation,
     ),

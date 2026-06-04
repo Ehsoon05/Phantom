@@ -10,6 +10,7 @@ from bot_package.main_bot import setup_main_bot
 from bot_package.services.admin_service import AdminService
 from bot_package.services.price_service import PriceService
 from bot_package.services.schema_service import SchemaService
+from bot_package.services.shop_customization_service import ShopCustomizationService
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ async def main():
 
     async with async_session() as session:
         await PriceService.init_default_prices(session)
+        await ShopCustomizationService.init_defaults(session)
         await AdminService.sync_configured_admins(session)
 
     main_app = await setup_main_bot()
