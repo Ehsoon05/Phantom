@@ -72,7 +72,7 @@ class BotConfig:
     SUPPORT_URL = os.getenv("SUPPORT_URL", "https://t.me/YourSupport").strip()
     SUPPORT_HANDLE = os.getenv("SUPPORT_HANDLE", "@YourSupport").strip()
     CHANNEL_HANDLE = os.getenv("CHANNEL_HANDLE", "@YourChannel").strip()
-    SESSION_TIMEOUT_MINUTES = _parse_int_env("SESSION_TIMEOUT_MINUTES", 30)
+    SESSION_TIMEOUT_MINUTES = _parse_int_env("SESSION_TIMEOUT_MINUTES", 60)
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().upper()
 
     @classmethod

@@ -36,6 +36,9 @@ ADMIN_VIEW_COUPONS = "📋 مشاهده تخفیف‌ها"
 ADMIN_DEACTIVATE_COUPON = "⏸ غیرفعال‌سازی تخفیف"
 ADMIN_DELETE_COUPON = "🗑 حذف تخفیف"
 ADMIN_REFRESH_ADMINS = "🔄 بروزرسانی لیست ادمین‌ها"
+ADMIN_ADD_ADMIN = "➕ افزودن ادمین"
+ADMIN_REMOVE_ADMIN = "➖ حذف ادمین"
+ADMIN_CHANGE_ADMIN_PERMS = "🔐 تغییر دسترسی ادمین"
 ADMIN_SHOP_MESSAGES = "📝 مدیریت پیام‌ها"
 ADMIN_SHOP_BUTTONS = "🔘 مدیریت دکمه‌ها"
 ADMIN_SHOP_PLANS = "📦 مدیریت سرویس‌ها"
@@ -268,6 +271,8 @@ def admin_management_keyboard() -> ReplyKeyboardMarkup:
     return _keyboard(
         [
             [_button(ADMIN_REFRESH_ADMINS)],
+            [_button(ADMIN_ADD_ADMIN), _button(ADMIN_REMOVE_ADMIN)],
+            [_button(ADMIN_CHANGE_ADMIN_PERMS)],
             [_button(ADMIN_BACK)],
         ]
     )

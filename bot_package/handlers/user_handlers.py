@@ -470,6 +470,12 @@ async def shop_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 user_handlers = [
     CommandHandler("start", start),
+    CommandHandler("buy", buy_menu),
+    CommandHandler("wallet", wallet_menu),
+    CommandHandler("referrals", referral_menu),
+    CommandHandler("account", account_info_menu),
+    CommandHandler("help", help_menu),
+    CommandHandler("support", support_menu),
     CommandHandler("cancel", cancel_coupon),
     MessageHandler(filters.TEXT & ~filters.COMMAND, shop_text_router),
 ]

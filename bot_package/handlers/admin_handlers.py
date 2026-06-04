@@ -18,10 +18,12 @@ from ..services.shop_customization_service import ShopCustomizationService
 from ..services.user_service import UserService
 from ..utils.keyboards import (
     ADMIN_ADMINS,
+    ADMIN_ADD_ADMIN,
     ADMIN_ADD_BUTTON,
     ADMIN_ADD_PLAN,
     ADMIN_ADD_CONFIG,
     ADMIN_BACK,
+    ADMIN_CHANGE_ADMIN_PERMS,
     ADMIN_CHARGE_WALLET,
     ADMIN_COUPONS,
     ADMIN_CREATE_COUPON,
@@ -41,6 +43,7 @@ from ..utils.keyboards import (
     ADMIN_PRICES,
     ADMIN_REFERRAL_REPORT,
     ADMIN_REFRESH_ADMINS,
+    ADMIN_REMOVE_ADMIN,
     ADMIN_REPORTS,
     ADMIN_SEARCH_USER,
     ADMIN_SET_WALLET,
@@ -152,7 +155,12 @@ from ..utils.validators import extract_links_from_text
     SHOP_PLAN_ADD_VOLUME,
     SHOP_PLAN_ADD_TITLE,
     SHOP_PLAN_ADD_PRICE,
-) = range(37)
+    ADMIN_ADD_ID,
+    ADMIN_ADD_PERMS,
+    ADMIN_REMOVE_ID,
+    ADMIN_PERMS_ID,
+    ADMIN_PERMS_VALUE,
+) = range(42)
 
 
 SHOP_MENU_LABELS = {
@@ -227,6 +235,21 @@ def _normalize_custom_emoji_id(text: str) -> str | None:
     if not value.isdigit():
         return ""
     return value
+
+
+def _extract_custom_emoji_id(message) -> str | None:
+    custom_emoji_type = getattr(constants.MessageEntityType, "CUSTOM_EMOJI", "custom_emoji")
+    for entity in message.entities or []:
+        entity_type = getattr(entity, "type", "")
+        if entity_type == custom_emoji_type or str(entity_type) == "custom_emoji":
+            custom_emoji_id = getattr(entity, "custom_emoji_id", None)
+            if custom_emoji_id:
+                return str(custom_emoji_id)
+    return None
+
+
+def _read_custom_emoji_id(message, raw_text: str) -> str | None:
+    return _extract_custom_emoji_id(message) or _normalize_custom_emoji_id(raw_text)
 
 
 def _admin_user_preview(user) -> str:
@@ -1171,7 +1194,11 @@ async def list_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
         permissions = "all" if admin.is_owner else admin.permissions
         lines.append(f"`{admin.telegram_id}` | {role} | `{permissions}`")
 
-    await update.effective_message.reply_text("\n".join(lines), parse_mode=constants.ParseMode.MARKDOWN)
+    await update.effective_message.reply_text(
+        "\n".join(lines),
+        reply_markup=admin_management_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
 
 
 @require_auth(owner_only=True)
@@ -1270,6 +1297,168 @@ async def set_admin_permissions(update: Update, context: ContextTypes.DEFAULT_TY
         await session.commit()
 
     await update.effective_message.reply_text(f"دسترسی ادمین `{telegram_id}` به `{permissions}` تغییر کرد.", parse_mode=constants.ParseMode.MARKDOWN)
+
+
+@require_auth(owner_only=True)
+async def admin_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "**افزودن ادمین**\n\nآیدی عددی تلگرام ادمین جدید را ارسال کنید.",
+        reply_markup=admin_management_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return ADMIN_ADD_ID
+
+
+@require_auth(owner_only=True)
+async def admin_add_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        telegram_id = int(update.message.text.strip())
+    except ValueError:
+        await update.message.reply_text("آیدی تلگرام باید فقط عدد باشد.")
+        return ADMIN_ADD_ID
+
+    context.user_data["admin_target_id"] = telegram_id
+    await update.message.reply_text(
+        "**سطح دسترسی ادمین را ارسال کنید**\n\n"
+        f"گزینه‌ها: `{', '.join(ALL_PERMISSIONS)}` یا `all`\n"
+        "می‌توانید چند مورد را با فاصله یا ویرگول بفرستید. مثال: `users,reports,shop`",
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return ADMIN_ADD_PERMS
+
+
+@require_auth(owner_only=True)
+async def admin_add_permissions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = context.user_data.get("admin_target_id")
+    permissions = normalize_permissions(update.message.text)
+    if not permissions:
+        await update.message.reply_text(
+            f"حداقل یک سطح دسترسی معتبر ارسال کنید: {', '.join(ALL_PERMISSIONS)} یا all"
+        )
+        return ADMIN_ADD_PERMS
+
+    async with async_session() as session:
+        admin = await AdminService.add_or_update_admin(
+            session,
+            telegram_id=telegram_id,
+            permissions=permissions,
+            created_by=update.effective_user.id,
+            is_owner=False,
+        )
+        await session.commit()
+
+    context.user_data.pop("admin_target_id", None)
+    await update.message.reply_text(
+        f"ادمین `{admin.telegram_id}` با دسترسی `{admin.permissions}` ذخیره شد.",
+        reply_markup=admin_management_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return ConversationHandler.END
+
+
+@require_auth(owner_only=True)
+async def admin_remove_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "**حذف ادمین**\n\nآیدی عددی ادمینی که می‌خواهید غیرفعال شود را ارسال کنید.",
+        reply_markup=admin_management_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return ADMIN_REMOVE_ID
+
+
+@require_auth(owner_only=True)
+async def admin_remove_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        telegram_id = int(update.message.text.strip())
+    except ValueError:
+        await update.message.reply_text("آیدی تلگرام باید فقط عدد باشد.")
+        return ADMIN_REMOVE_ID
+
+    if telegram_id == update.effective_user.id:
+        await update.message.reply_text("مالک نمی‌تواند خودش را حذف کند.")
+        return ADMIN_REMOVE_ID
+
+    async with async_session() as session:
+        removed = await AdminService.remove_admin(session, telegram_id)
+        await session.commit()
+
+    if removed:
+        await update.message.reply_text(
+            f"ادمین `{telegram_id}` غیرفعال شد.",
+            reply_markup=admin_management_keyboard(),
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
+    else:
+        await update.message.reply_text("ادمین پیدا نشد یا مالک است.", reply_markup=admin_management_keyboard())
+    return ConversationHandler.END
+
+
+@require_auth(owner_only=True)
+async def admin_perms_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "**تغییر دسترسی ادمین**\n\nآیدی عددی ادمین را ارسال کنید.",
+        reply_markup=admin_management_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return ADMIN_PERMS_ID
+
+
+@require_auth(owner_only=True)
+async def admin_perms_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        telegram_id = int(update.message.text.strip())
+    except ValueError:
+        await update.message.reply_text("آیدی تلگرام باید فقط عدد باشد.")
+        return ADMIN_PERMS_ID
+
+    async with async_session() as session:
+        admin = await AdminService.get_admin(session, telegram_id)
+
+    if not admin:
+        await update.message.reply_text("ادمین فعال پیدا نشد. دوباره آیدی را ارسال کنید.")
+        return ADMIN_PERMS_ID
+    if admin.is_owner:
+        await update.message.reply_text("دسترسی مالک قابل تغییر نیست.", reply_markup=admin_management_keyboard())
+        return ConversationHandler.END
+
+    context.user_data["admin_target_id"] = telegram_id
+    await update.message.reply_text(
+        f"دسترسی فعلی: `{admin.permissions}`\n\n"
+        f"دسترسی جدید را بفرستید: `{', '.join(ALL_PERMISSIONS)}` یا `all`",
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return ADMIN_PERMS_VALUE
+
+
+@require_auth(owner_only=True)
+async def admin_perms_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = context.user_data.get("admin_target_id")
+    permissions = normalize_permissions(update.message.text)
+    if not permissions:
+        await update.message.reply_text(
+            f"حداقل یک سطح دسترسی معتبر ارسال کنید: {', '.join(ALL_PERMISSIONS)} یا all"
+        )
+        return ADMIN_PERMS_VALUE
+
+    async with async_session() as session:
+        admin = await AdminService.get_admin(session, telegram_id)
+        if not admin:
+            await update.message.reply_text("ادمین پیدا نشد.", reply_markup=admin_management_keyboard())
+            return ConversationHandler.END
+        if admin.is_owner:
+            await update.message.reply_text("دسترسی مالک قابل تغییر نیست.", reply_markup=admin_management_keyboard())
+            return ConversationHandler.END
+        admin.permissions = permissions
+        admin.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+
+    context.user_data.pop("admin_target_id", None)
+    await update.message.reply_text(
+        f"دسترسی ادمین `{telegram_id}` به `{permissions}` تغییر کرد.",
+        reply_markup=admin_management_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return ConversationHandler.END
 
 
 @require_auth(permission="shop")
@@ -1456,7 +1645,7 @@ async def shop_button_option(update: Update, context: ContextTypes.DEFAULT_TYPE)
     field_map = {
         ADMIN_EDIT_TEXT: ("text", "متن جدید دکمه را ارسال کنید."),
         ADMIN_EDIT_EMOJI: ("emoji", "ایموجی جدید را ارسال کنید. برای حذف، `-` بفرستید."),
-        ADMIN_EDIT_PREMIUM_EMOJI: ("premium_emoji_id", "آیدی ایموجی پریمیوم را ارسال کنید. برای حذف، `-` بفرستید."),
+        ADMIN_EDIT_PREMIUM_EMOJI: ("premium_emoji_id", "خود ایموجی پریمیوم را ارسال کنید تا آیدی‌اش خودکار خوانده شود. اگر آیدی عددی را دارید می‌توانید همان را بفرستید. برای حذف، `-` بفرستید."),
         ADMIN_EDIT_STYLE: ("style", "رنگ دکمه را انتخاب کنید."),
         ADMIN_EDIT_POSITION: ("position", "چینش جدید را با فرمت `row,col` ارسال کنید. مثال: `1,0`"),
     }
@@ -1493,9 +1682,9 @@ async def shop_button_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
         updates = {"style": None if value == "default" else value}
     elif field in {"emoji", "premium_emoji_id"}:
         if field == "premium_emoji_id":
-            value = _normalize_custom_emoji_id(raw_value)
+            value = _read_custom_emoji_id(update.message, raw_value)
             if value == "":
-                await update.message.reply_text("آیدی ایموجی پریمیوم باید فقط عدد باشد. برای حذف، `-` بفرستید.", parse_mode=constants.ParseMode.MARKDOWN)
+                await update.message.reply_text("ایموجی پریمیوم معتبر یا آیدی عددی آن را بفرستید. برای حذف، `-` بفرستید.", parse_mode=constants.ParseMode.MARKDOWN)
                 return SHOP_BUTTON_VALUE
             updates = {field: value}
         else:
@@ -1585,7 +1774,7 @@ async def shop_plan_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ADMIN_EDIT_TITLE: ("title", "عنوان جدید سرویس را ارسال کنید. مثال: `۳۰ گیگ ویژه`"),
         ADMIN_EDIT_PRICE: ("price", "قیمت جدید را به تومان ارسال کنید. مثال: `250000`"),
         ADMIN_EDIT_EMOJI: ("emoji", "ایموجی جدید را ارسال کنید. برای حذف، `-` بفرستید."),
-        ADMIN_EDIT_PREMIUM_EMOJI: ("premium_emoji_id", "آیدی ایموجی پریمیوم را ارسال کنید. برای حذف، `-` بفرستید."),
+        ADMIN_EDIT_PREMIUM_EMOJI: ("premium_emoji_id", "خود ایموجی پریمیوم را ارسال کنید تا آیدی‌اش خودکار خوانده شود. اگر آیدی عددی را دارید می‌توانید همان را بفرستید. برای حذف، `-` بفرستید."),
         ADMIN_EDIT_STYLE: ("style", "رنگ دکمه سرویس را انتخاب کنید."),
         ADMIN_EDIT_ORDER: ("display_order", "ترتیب نمایش را عددی ارسال کنید. مثال: `2`"),
     }
@@ -1636,9 +1825,9 @@ async def shop_plan_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
         updates = {"style": None if value == "default" else value}
     elif field in {"emoji", "premium_emoji_id"}:
         if field == "premium_emoji_id":
-            value = _normalize_custom_emoji_id(raw_value)
+            value = _read_custom_emoji_id(update.message, raw_value)
             if value == "":
-                await update.message.reply_text("آیدی ایموجی پریمیوم باید فقط عدد باشد. برای حذف، `-` بفرستید.", parse_mode=constants.ParseMode.MARKDOWN)
+                await update.message.reply_text("ایموجی پریمیوم معتبر یا آیدی عددی آن را بفرستید. برای حذف، `-` بفرستید.", parse_mode=constants.ParseMode.MARKDOWN)
                 return SHOP_PLAN_VALUE
             updates = {field: value}
         else:
@@ -1719,6 +1908,24 @@ async def shop_plan_add_price(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("عملیات لغو شد.", reply_markup=admin_main_keyboard())
+    return ConversationHandler.END
+
+
+async def shop_settings_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "به تنظیمات ربات فروش برگشتید.",
+        reply_markup=admin_shop_settings_keyboard(),
+    )
+    return ConversationHandler.END
+
+
+@require_auth(owner_only=True)
+async def admin_management_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        ADMIN_MANAGEMENT_MENU,
+        reply_markup=admin_management_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
     return ConversationHandler.END
 
 
@@ -1907,17 +2114,63 @@ delete_coupon_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
 )
 
+admin_add_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_ADD_ADMIN), admin_add_start)],
+    states={
+        ADMIN_ADD_ID: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), admin_management_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_id),
+        ],
+        ADMIN_ADD_PERMS: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), admin_management_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_permissions),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+admin_remove_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_REMOVE_ADMIN), admin_remove_start)],
+    states={
+        ADMIN_REMOVE_ID: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), admin_management_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, admin_remove_execute),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+admin_perms_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_CHANGE_ADMIN_PERMS), admin_perms_start)],
+    states={
+        ADMIN_PERMS_ID: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), admin_management_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, admin_perms_id),
+        ],
+        ADMIN_PERMS_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), admin_management_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, admin_perms_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
 shop_messages_conv = ConversationHandler(
     entry_points=[MessageHandler(_exact_filter(ADMIN_SHOP_MESSAGES), shop_messages_start)],
     states={
         SHOP_MESSAGE_SELECT: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_message_select),
         ],
         SHOP_MESSAGE_TEXT: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_message_save),
         ],
     },
@@ -1929,32 +2182,32 @@ shop_buttons_conv = ConversationHandler(
     states={
         SHOP_BUTTON_MENU: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_menu_select),
         ],
         SHOP_BUTTON_SELECT: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_select),
         ],
         SHOP_BUTTON_OPTION: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_option),
         ],
         SHOP_BUTTON_VALUE: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_value),
         ],
         SHOP_BUTTON_ADD_TEXT: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_add_text),
         ],
         SHOP_BUTTON_ADD_MESSAGE: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_add_message),
         ],
     },
@@ -1966,32 +2219,32 @@ shop_plans_conv = ConversationHandler(
     states={
         SHOP_PLAN_SELECT: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_select),
         ],
         SHOP_PLAN_OPTION: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_option),
         ],
         SHOP_PLAN_VALUE: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_value),
         ],
         SHOP_PLAN_ADD_VOLUME: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_add_volume),
         ],
         SHOP_PLAN_ADD_TITLE: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_add_title),
         ],
         SHOP_PLAN_ADD_PRICE: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_add_price),
         ],
     },
@@ -2013,12 +2266,15 @@ admin_handlers = [
     edit_coupon_conv,
     deactivate_coupon_conv,
     delete_coupon_conv,
+    admin_add_conv,
+    admin_remove_conv,
+    admin_perms_conv,
     shop_messages_conv,
     shop_buttons_conv,
     shop_plans_conv,
     MessageHandler(_exact_filter(ADMIN_LOGOUT), admin_logout),
     MessageHandler(_exact_filter(ADMIN_ADMINS), admin_management_menu),
-    MessageHandler(_exact_filter(ADMIN_REFRESH_ADMINS), admin_management_menu),
+    MessageHandler(_exact_filter(ADMIN_REFRESH_ADMINS), list_admins),
     MessageHandler(_exact_filter(ADMIN_SHOP_SETTINGS), shop_settings_menu),
     MessageHandler(_exact_filter(ADMIN_SHOP_RESET_DEFAULTS), shop_reset_defaults),
     MessageHandler(
