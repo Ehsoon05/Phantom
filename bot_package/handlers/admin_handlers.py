@@ -1548,6 +1548,14 @@ async def shop_button_menu_select(update: Update, context: ContextTypes.DEFAULT_
         return SHOP_BUTTON_MENU
 
     context.user_data["shop_button_menu"] = menu
+    return await _show_shop_button_list(update, context)
+
+
+async def _show_shop_button_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    menu = context.user_data.get("shop_button_menu")
+    if not menu:
+        return await shop_buttons_start(update, context)
+
     async with async_session() as session:
         buttons = await ShopCustomizationService.list_buttons(session, menu)
 
@@ -1562,6 +1570,30 @@ async def shop_button_menu_select(update: Update, context: ContextTypes.DEFAULT_
         reply_markup=_rows(labels, width=1),
     )
     return SHOP_BUTTON_SELECT
+
+
+async def _show_shop_button_options(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    button_id = context.user_data.get("shop_button_id")
+    async with async_session() as session:
+        button = await ShopCustomizationService.get_button(session, button_id)
+
+    if not button:
+        await update.message.reply_text("دکمه پیدا نشد.", reply_markup=admin_shop_settings_keyboard())
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        "**ویرایش دکمه**\n\n"
+        f"اکشن: `{button.action}`\n"
+        f"متن: {button.text}\n"
+        f"ایموجی: {button.emoji or '-'}\n"
+        f"ایموجی پریمیوم: `{button.premium_emoji_id or '-'}`\n"
+        f"رنگ: `{button.style or 'default'}`\n"
+        f"چینش: ردیف {button.row}، ستون {button.col}\n"
+        f"وضعیت: {'فعال' if button.is_enabled else 'غیرفعال'}",
+        reply_markup=admin_shop_button_edit_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return SHOP_BUTTON_OPTION
 
 
 @require_auth(permission="shop")
@@ -1583,19 +1615,7 @@ async def shop_button_select(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return ConversationHandler.END
 
     context.user_data["shop_button_id"] = button_id
-    await update.message.reply_text(
-        "**ویرایش دکمه**\n\n"
-        f"اکشن: `{button.action}`\n"
-        f"متن: {button.text}\n"
-        f"ایموجی: {button.emoji or '-'}\n"
-        f"ایموجی پریمیوم: `{button.premium_emoji_id or '-'}`\n"
-        f"رنگ: `{button.style or 'default'}`\n"
-        f"چینش: ردیف {button.row}، ستون {button.col}\n"
-        f"وضعیت: {'فعال' if button.is_enabled else 'غیرفعال'}",
-        reply_markup=admin_shop_button_edit_keyboard(),
-        parse_mode=constants.ParseMode.MARKDOWN,
-    )
-    return SHOP_BUTTON_OPTION
+    return await _show_shop_button_options(update, context)
 
 
 @require_auth(permission="shop")
@@ -1732,6 +1752,12 @@ async def shop_plan_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("پلن معتبر نیست.")
         return SHOP_PLAN_SELECT
 
+    context.user_data["shop_plan_volume"] = volume
+    return await _show_shop_plan_options(update, context)
+
+
+async def _show_shop_plan_options(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    volume = context.user_data.get("shop_plan_volume")
     async with async_session() as session:
         plan = await ShopCustomizationService.get_plan(session, volume)
         price = await PriceService.get_price(session, volume)
@@ -1740,7 +1766,6 @@ async def shop_plan_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("پلن پیدا نشد.", reply_markup=admin_shop_settings_keyboard())
         return ConversationHandler.END
 
-    context.user_data["shop_plan_volume"] = volume
     await update.message.reply_text(
         "**ویرایش سرویس**\n\n"
         f"حجم: **{plan.volume_gb} گیگ**\n"
@@ -1917,6 +1942,64 @@ async def shop_settings_back(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup=admin_shop_settings_keyboard(),
     )
     return ConversationHandler.END
+
+
+@require_auth(permission="shop")
+async def shop_message_text_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("shop_message_key", None)
+    return await shop_messages_start(update, context)
+
+
+@require_auth(permission="shop")
+async def shop_button_list_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("shop_button_menu", None)
+    return await shop_buttons_start(update, context)
+
+
+@require_auth(permission="shop")
+async def shop_button_options_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _show_shop_button_list(update, context)
+
+
+@require_auth(permission="shop")
+async def shop_button_value_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("shop_button_field", None)
+    return await _show_shop_button_options(update, context)
+
+
+@require_auth(permission="shop")
+async def shop_button_add_message_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("shop_custom_button_text", None)
+    await update.message.reply_text("متن دکمه سفارشی جدید را ارسال کنید.")
+    return SHOP_BUTTON_ADD_TEXT
+
+
+@require_auth(permission="shop")
+async def shop_plan_options_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("shop_plan_volume", None)
+    return await shop_plans_start(update, context)
+
+
+@require_auth(permission="shop")
+async def shop_plan_value_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("shop_plan_field", None)
+    return await _show_shop_plan_options(update, context)
+
+
+@require_auth(permission="shop")
+async def shop_plan_add_title_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("shop_new_plan", None)
+    await update.message.reply_text("حجم سرویس جدید را به گیگ ارسال کنید. مثال: `30`", parse_mode=constants.ParseMode.MARKDOWN)
+    return SHOP_PLAN_ADD_VOLUME
+
+
+@require_auth(permission="shop")
+async def shop_plan_add_price_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    draft = context.user_data.get("shop_new_plan", {})
+    if "volume" not in draft:
+        return await shop_plan_add_title_back(update, context)
+    await update.message.reply_text("عنوان نمایشی سرویس را ارسال کنید. مثال: `۳۰ گیگ ویژه`")
+    return SHOP_PLAN_ADD_TITLE
 
 
 @require_auth(owner_only=True)
@@ -2170,7 +2253,7 @@ shop_messages_conv = ConversationHandler(
         ],
         SHOP_MESSAGE_TEXT: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_message_text_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_message_save),
         ],
     },
@@ -2187,27 +2270,27 @@ shop_buttons_conv = ConversationHandler(
         ],
         SHOP_BUTTON_SELECT: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_button_list_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_select),
         ],
         SHOP_BUTTON_OPTION: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_button_options_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_option),
         ],
         SHOP_BUTTON_VALUE: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_button_value_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_value),
         ],
         SHOP_BUTTON_ADD_TEXT: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_button_options_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_add_text),
         ],
         SHOP_BUTTON_ADD_MESSAGE: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_button_add_message_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_add_message),
         ],
     },
@@ -2224,27 +2307,27 @@ shop_plans_conv = ConversationHandler(
         ],
         SHOP_PLAN_OPTION: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_plan_options_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_option),
         ],
         SHOP_PLAN_VALUE: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_plan_value_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_value),
         ],
         SHOP_PLAN_ADD_VOLUME: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_plan_options_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_add_volume),
         ],
         SHOP_PLAN_ADD_TITLE: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_plan_add_title_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_add_title),
         ],
         SHOP_PLAN_ADD_PRICE: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_plan_add_price_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_add_price),
         ],
     },
