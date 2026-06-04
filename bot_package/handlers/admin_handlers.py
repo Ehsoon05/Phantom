@@ -1709,8 +1709,8 @@ async def shop_button_option(update: Update, context: ContextTypes.DEFAULT_TYPE)
             button = await ShopCustomizationService.get_button(session, button_id)
             if button:
                 await ShopCustomizationService.update_button(session, button_id, is_enabled=not button.is_enabled)
-        await update.message.reply_text("وضعیت دکمه تغییر کرد.", reply_markup=admin_shop_settings_keyboard())
-        return ConversationHandler.END
+        await update.message.reply_text("وضعیت دکمه تغییر کرد.")
+        return await _show_shop_button_options(update, context)
 
     field_map = {
         ADMIN_EDIT_TEXT: ("text", "متن جدید دکمه را ارسال کنید."),
@@ -1780,8 +1780,8 @@ async def shop_button_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("دکمه ذخیره نشد.", reply_markup=admin_shop_settings_keyboard())
         return ConversationHandler.END
 
-    await update.message.reply_text("دکمه ذخیره شد.", reply_markup=admin_shop_settings_keyboard())
-    return ConversationHandler.END
+    await update.message.reply_text("دکمه ذخیره شد.")
+    return await _show_shop_button_options(update, context)
 
 
 @require_auth(permission="shop")
@@ -1851,8 +1851,8 @@ async def shop_plan_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
             plan = await ShopCustomizationService.get_plan(session, volume)
             if plan:
                 await ShopCustomizationService.update_plan(session, volume, is_active=not plan.is_active)
-        await update.message.reply_text("وضعیت سرویس تغییر کرد.", reply_markup=admin_shop_settings_keyboard())
-        return ConversationHandler.END
+        await update.message.reply_text("وضعیت سرویس تغییر کرد.")
+        return await _show_shop_plan_options(update, context)
 
     field_map = {
         ADMIN_EDIT_TITLE: ("title", "عنوان جدید سرویس را ارسال کنید. مثال: `۳۰ گیگ ویژه`"),
@@ -1897,8 +1897,9 @@ async def shop_plan_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
         async with async_session() as session:
             plan = await ShopCustomizationService.get_plan(session, volume)
             await ShopCustomizationService.upsert_plan(session, volume_gb=volume, title=plan.title, price=price, emoji=plan.emoji, style=plan.style)
-        await update.message.reply_text("قیمت سرویس ذخیره شد.", reply_markup=admin_shop_settings_keyboard())
-        return ConversationHandler.END
+        context.user_data.pop("shop_plan_field", None)
+        await update.message.reply_text("قیمت سرویس ذخیره شد.")
+        return await _show_shop_plan_options(update, context)
 
     if field == "display_order":
         try:
@@ -1947,8 +1948,8 @@ async def shop_plan_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("سرویس ذخیره نشد.", reply_markup=admin_shop_settings_keyboard())
         return ConversationHandler.END
 
-    await update.message.reply_text("سرویس ذخیره شد.", reply_markup=admin_shop_settings_keyboard())
-    return ConversationHandler.END
+    await update.message.reply_text("سرویس ذخیره شد.")
+    return await _show_shop_plan_options(update, context)
 
 
 @require_auth(permission="shop")
