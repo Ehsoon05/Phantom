@@ -56,6 +56,9 @@ SUPPORT_HANDLE=@YourSupport
 CHANNEL_HANDLE=@YourChannel
 SESSION_TIMEOUT_MINUTES=30
 LOG_LEVEL=INFO
+SUBSCRIPTION_PUBLIC_BASE_URL=https://api.phantomhubs.shop
+SUBSCRIPTION_PANEL_SYNC_URL=https://api.phantomhubs.shop/internal/configs
+SUBSCRIPTION_PANEL_SYNC_TOKEN=یک-توکن-مشترک-قوی
 ```
 
 Run both bots:
@@ -63,6 +66,10 @@ Run both bots:
 ```bash
 python -m bot_package.run
 ```
+
+When configs are added through the admin bot, Phantom stores the original upstream
+subscription URL and generates a public token URL using `SUBSCRIPTION_PUBLIC_BASE_URL`.
+Serve those public URLs with the separate `Ehsoon05/Phantom_SubscriptionPanel` project.
 
 You can also run the helper script on Linux:
 

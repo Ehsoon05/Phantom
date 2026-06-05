@@ -1,5 +1,6 @@
 import logging
 
+from telegram import BotCommand
 from telegram.ext import Application
 from .config_loader import BotConfig
 from .database import engine
@@ -18,6 +19,17 @@ async def setup_main_bot():
     await SchemaService.ensure_schema(engine)
     
     app = Application.builder().token(BotConfig.MAIN_BOT_TOKEN).build()
+    await app.bot.set_my_commands(
+        [
+            BotCommand("start", "شروع و نمایش منوی اصلی"),
+            BotCommand("buy", "خرید سرویس"),
+            BotCommand("wallet", "کیف پول"),
+            BotCommand("referrals", "دعوت دوستان"),
+            BotCommand("account", "اطلاعات حساب"),
+            BotCommand("help", "راهنما"),
+            BotCommand("support", "پشتیبانی"),
+        ]
+    )
     for handler in user_handlers:
         app.add_handler(handler)
     app.add_error_handler(log_error)

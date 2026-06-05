@@ -60,6 +60,15 @@ def _parse_int_env(name: str, default: int) -> int:
         return default
 
 
+def _parse_bool_env(name: str, default: bool) -> bool:
+    raw_value = os.getenv(name, "").strip().lower()
+    if raw_value in {"1", "true", "yes", "on"}:
+        return True
+    if raw_value in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 class BotConfig:
     MAIN_BOT_TOKEN = os.getenv("MAIN_BOT_TOKEN", "").strip()
     ADMIN_BOT_TOKEN = os.getenv("ADMIN_BOT_TOKEN", "").strip()
@@ -72,8 +81,33 @@ class BotConfig:
     SUPPORT_URL = os.getenv("SUPPORT_URL", "https://t.me/YourSupport").strip()
     SUPPORT_HANDLE = os.getenv("SUPPORT_HANDLE", "@YourSupport").strip()
     CHANNEL_HANDLE = os.getenv("CHANNEL_HANDLE", "@YourChannel").strip()
-    SESSION_TIMEOUT_MINUTES = _parse_int_env("SESSION_TIMEOUT_MINUTES", 30)
+    SUBSCRIPTION_PUBLIC_BASE_URL = os.getenv("SUBSCRIPTION_PUBLIC_BASE_URL", "https://api.phantomhubs.shop").strip().rstrip("/")
+    SUBSCRIPTION_PANEL_SYNC_URL = os.getenv("SUBSCRIPTION_PANEL_SYNC_URL", "").strip().rstrip("/")
+    SUBSCRIPTION_PANEL_SYNC_TOKEN = os.getenv("SUBSCRIPTION_PANEL_SYNC_TOKEN", "").strip()
+    SESSION_TIMEOUT_MINUTES = _parse_int_env("SESSION_TIMEOUT_MINUTES", 60)
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().upper()
+
+    # --- Crypto top-ups (self-hosted, watch-only) --------------------------------
+    CRYPTO_ENABLED = _parse_bool_env("CRYPTO_ENABLED", False)
+    # Tron (TRC-20 USDT): account-level extended PUBLIC key for watch-only address
+    # derivation. The private seed must never live on the server.
+    TRON_XPUB = os.getenv("TRON_XPUB", "").strip()
+    TRON_API_KEY = os.getenv("TRON_API_KEY", "").strip()  # optional TronGrid key
+    TRON_USDT_CONTRACT = os.getenv(
+        "TRON_USDT_CONTRACT", "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
+    ).strip()
+    # TON: single receiving address; per-invoice memo identifies the payer.
+    TON_DEPOSIT_ADDRESS = os.getenv("TON_DEPOSIT_ADDRESS", "").strip()
+    TON_API_KEY = os.getenv("TON_API_KEY", "").strip()    # optional Toncenter key
+    # USDT jetton master on TON (for USDT-on-TON deposits); empty disables it.
+    TON_USDT_JETTON_MASTER = os.getenv("TON_USDT_JETTON_MASTER", "").strip()
+
+    CRYPTO_INVOICE_TTL_MINUTES = _parse_int_env("CRYPTO_INVOICE_TTL_MINUTES", 20)
+    CRYPTO_MIN_CONFIRMATIONS = _parse_int_env("CRYPTO_MIN_CONFIRMATIONS", 1)
+    CRYPTO_POLL_SECONDS = _parse_int_env("CRYPTO_POLL_SECONDS", 30)
+    CRYPTO_RATE_REFRESH_SECONDS = _parse_int_env("CRYPTO_RATE_REFRESH_SECONDS", 600)
+    # Tolerance band (%) for treating a payment as fully matching the invoice.
+    CRYPTO_UNDERPAY_TOLERANCE = _parse_int_env("CRYPTO_UNDERPAY_TOLERANCE", 2)
 
     @classmethod
     def validate(cls) -> None:

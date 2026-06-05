@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, ForeignKey, Text
 from sqlalchemy.orm import DeclarativeBase, relationship
 from datetime import datetime, timezone
 
@@ -16,6 +16,7 @@ class User(Base):
     referral_code = Column(String, unique=True, nullable=True)
     referred_by_user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=True)
     referred_at = Column(DateTime, nullable=True)
+    accepted_rules_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     purchases = relationship("Purchase", back_populates="user")
     referrals = relationship(
@@ -28,7 +29,9 @@ class Config(Base):
     __tablename__ = "configs"
     id = Column(Integer, primary_key=True)
     volume_gb = Column(Integer, nullable=False)
+    category_key = Column(String, nullable=False, default="default")
     sub_link = Column(String, nullable=False, unique=True)
+    public_sub_token = Column(String, nullable=True, unique=True)
     is_sold = Column(Boolean, default=False)
     sold_to_user_id = Column(BigInteger, nullable=True)
     sold_at = Column(DateTime, nullable=True)
@@ -41,11 +44,13 @@ class Purchase(Base):
     user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
     config_id = Column(Integer, ForeignKey("configs.id"), nullable=False)
     volume_gb = Column(Integer, nullable=False)
+    category_key = Column(String, nullable=False, default="default")
     price = Column(Integer, nullable=False)
     original_price = Column(Integer, nullable=True)
     discount_amount = Column(Integer, nullable=False, default=0)
     coupon_id = Column(Integer, ForeignKey("coupons.id"), nullable=True)
     coupon_code = Column(String, nullable=True)
+    service_name = Column(String, nullable=True)
     purchased_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     user = relationship("User", back_populates="purchases")
     config = relationship("Config", back_populates="purchases")
@@ -113,3 +118,121 @@ class CouponRedemption(Base):
     redeemed_at = Column(DateTime, nullable=True)
     purchase_id = Column(Integer, ForeignKey("purchases.id"), nullable=True)
     coupon = relationship("Coupon", back_populates="redemptions")
+
+
+class RequiredChannel(Base):
+    __tablename__ = "required_channels"
+    id = Column(Integer, primary_key=True)
+    chat_id = Column(String, unique=True, nullable=False)
+    title = Column(String, nullable=False)
+    join_url = Column(String, nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ShopMessage(Base):
+    __tablename__ = "shop_messages"
+    id = Column(Integer, primary_key=True)
+    key = Column(String, unique=True, nullable=False)
+    text = Column(Text, nullable=False)
+    parse_mode = Column(String, nullable=True, default="Markdown")
+    premium_emoji_id = Column(String, nullable=True)
+    premium_emoji_position = Column(String, nullable=False, default="none")
+    response_button_type = Column(String, nullable=False, default="text")
+    response_button_text = Column(String, nullable=True)
+    response_button_url = Column(String, nullable=True)
+    is_active = Column(Boolean, default=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ShopButton(Base):
+    __tablename__ = "shop_buttons"
+    id = Column(Integer, primary_key=True)
+    action = Column(String, nullable=False)
+    menu = Column(String, nullable=False)
+    text = Column(String, nullable=False)
+    emoji = Column(String, nullable=True)
+    premium_emoji_id = Column(String, nullable=True)
+    premium_emoji_position = Column(String, nullable=False, default="left")
+    emoji_position = Column(String, nullable=False, default="left")
+    style = Column(String, nullable=True)
+    row = Column(Integer, nullable=False, default=0)
+    col = Column(Integer, nullable=False, default=0)
+    is_enabled = Column(Boolean, default=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ShopPlan(Base):
+    __tablename__ = "shop_plans"
+    id = Column(Integer, primary_key=True)
+    volume_gb = Column(Integer, nullable=False)
+    category_key = Column(String, nullable=False, default="default")
+    title = Column(String, nullable=False)
+    price = Column(Integer, nullable=True)
+    emoji = Column(String, nullable=True)
+    premium_emoji_id = Column(String, nullable=True)
+    premium_emoji_position = Column(String, nullable=False, default="left")
+    emoji_position = Column(String, nullable=False, default="left")
+    style = Column(String, nullable=True, default="success")
+    display_order = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, default=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ShopPlanCategory(Base):
+    __tablename__ = "shop_plan_categories"
+    id = Column(Integer, primary_key=True)
+    key = Column(String, unique=True, nullable=False)
+    title = Column(String, nullable=False)
+    emoji = Column(String, nullable=True)
+    premium_emoji_id = Column(String, nullable=True)
+    emoji_position = Column(String, nullable=False, default="left")
+    style = Column(String, nullable=True, default="primary")
+    display_order = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, default=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class BotSetting(Base):
+    """Generic key/value store for runtime-tunable settings (e.g. crypto rate mode)."""
+    __tablename__ = "bot_settings"
+    id = Column(Integer, primary_key=True)
+    key = Column(String, unique=True, nullable=False)
+    value = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class CryptoInvoice(Base):
+    """A single crypto top-up request and its on-chain settlement state.
+
+    Attribution:
+      - TRC-20: a unique ``deposit_address`` per invoice identifies the payer.
+      - TON:    a shared address + unique ``memo`` per invoice identifies the payer.
+    """
+    __tablename__ = "crypto_invoices"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
+    coin = Column(String, nullable=False)            # USDT | TON
+    network = Column(String, nullable=False)         # TRC20 | TON
+    deposit_address = Column(String, nullable=False)
+    memo = Column(String, nullable=True)             # TON comment/tag; null for TRC-20
+    address_index = Column(Integer, nullable=True)   # HD derivation index for TRC-20
+
+    # Amounts: crypto stored as string to avoid float rounding; toman as integer.
+    expected_crypto = Column(String, nullable=False)
+    quoted_toman = Column(Integer, nullable=False)
+    locked_rate = Column(String, nullable=False)     # toman per 1 coin unit, at creation
+    rate_source = Column(String, nullable=True)      # online | manual
+
+    status = Column(String, nullable=False, default="pending")  # pending|paid|confirmed|credited|expired|underpaid|error
+    from_address = Column(String, nullable=True)     # on-chain sender, filled on detection
+    received_crypto = Column(String, nullable=True)  # actual amount seen on-chain
+    tx_hash = Column(String, unique=True, nullable=True)  # UNIQUE => credit idempotency
+    confirmations = Column(Integer, nullable=False, default=0)
+
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime, nullable=True)
+    credited_at = Column(DateTime, nullable=True)
+
+    user = relationship("User")

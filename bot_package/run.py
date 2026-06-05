@@ -9,7 +9,11 @@ from bot_package.database import async_session, engine
 from bot_package.main_bot import setup_main_bot
 from bot_package.services.admin_service import AdminService
 from bot_package.services.price_service import PriceService
+from bot_package.services.crypto_jobs import register_crypto_jobs
+from bot_package.services.required_channel_service import RequiredChannelService
 from bot_package.services.schema_service import SchemaService
+from bot_package.services.settings_service import SettingsService
+from bot_package.services.shop_customization_service import ShopCustomizationService
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +49,17 @@ async def main():
 
     async with async_session() as session:
         await PriceService.init_default_prices(session)
+        await ShopCustomizationService.init_defaults(session)
+        await RequiredChannelService.init_defaults(session)
+        await SettingsService.init_defaults(session)
         await AdminService.sync_configured_admins(session)
 
     main_app = await setup_main_bot()
     admin_app = await setup_admin_bot()
+
+    # Crypto background jobs run on the main (user-facing) bot so payment
+    # confirmations are delivered to users.
+    register_crypto_jobs(main_app)
 
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()

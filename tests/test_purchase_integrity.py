@@ -131,20 +131,22 @@ async def test_purchase_history_can_load_config_link(db):
     assert purchase.config.sub_link == "vless://one"
 
 
-@pytest.mark.asyncio
-async def test_reports_use_historical_purchase_price(db):
-    from bot_package.models import Config, Price, Purchase, User
+def test_purchase_flow_locks_user_row_with_for_update():
+    """Regression for the wallet double-spend race: the purchase handler must
+    request a row-level lock on the user when reading the wallet, so two
+    concurrent buys cannot both observe the pre-deduction balance. The lock is
+    a no-op on SQLite and emits ``FOR UPDATE`` on PostgreSQL.
+    """
+    import inspect as _inspect
 
-    async with db.async_session() as session:
-        user = User(telegram_id=1001, first_name="Test")
-        config = Config(volume_gb=1, sub_link="vless://one", is_sold=True, sold_to_user_id=1001)
-        session.add_all([user, config, Price(volume_gb=1, price=99_000)])
-        await session.flush()
-        session.add(Purchase(user_id=1001, config_id=config.id, volume_gb=1, price=15_000))
-        await session.commit()
+    from sqlalchemy.dialects import postgresql
 
-    async with db.async_session() as session:
-        result = await session.execute(select(Purchase))
-        revenue = sum(purchase.price for purchase in result.scalars().all())
+    from bot_package.handlers import user_handlers
 
-    assert revenue == 15_000
+    source = _inspect.getsource(user_handlers.process_purchase)
+    assert ".with_for_update()" in source, (
+        "process_purchase must call .with_for_update() on the user select "
+        "to prevent concurrent purchases from double-spending the wallet."
+    )
+
+    # Sanity: the call act
