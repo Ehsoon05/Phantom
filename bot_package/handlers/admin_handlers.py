@@ -1619,9 +1619,9 @@ async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     key,
                     response_button_type=RESPONSE_BUTTON_VALUES[raw_value],
                 )
-            await update.message.reply_text("نوع دکمه جواب خرید ذخیره شد.", reply_markup=admin_shop_settings_keyboard())
+            await update.message.reply_text("نوع دکمه جواب خرید ذخیره شد.")
             context.user_data.pop("shop_message_key", None)
-            return ConversationHandler.END
+            return await shop_messages_start(update, context)
         if raw_value.startswith("متن دکمه:"):
             button_text = raw_value.split(":", 1)[1].strip()
             if not button_text:
@@ -1629,9 +1629,9 @@ async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return SHOP_MESSAGE_TEXT
             async with async_session() as session:
                 await ShopCustomizationService.update_message_settings(session, key, response_button_text=button_text)
-            await update.message.reply_text("متن دکمه جواب خرید ذخیره شد.", reply_markup=admin_shop_settings_keyboard())
+            await update.message.reply_text("متن دکمه جواب خرید ذخیره شد.")
             context.user_data.pop("shop_message_key", None)
-            return ConversationHandler.END
+            return await shop_messages_start(update, context)
 
     async with async_session() as session:
         message = await ShopCustomizationService.update_message(session, key, update.message.text)
@@ -1643,10 +1643,9 @@ async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"پیام `{key}` ذخیره شد.",
-        reply_markup=admin_shop_settings_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
-    return ConversationHandler.END
+    return await shop_messages_start(update, context)
 
 
 @require_auth(permission="shop")
@@ -2534,6 +2533,7 @@ shop_messages_conv = ConversationHandler(
         ],
     },
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+    allow_reentry=True,
 )
 
 shop_buttons_conv = ConversationHandler(
