@@ -115,6 +115,7 @@ DEFAULT_MESSAGES: dict[str, str] = {
     ),
     "purchase_success": (
         "**خرید با موفقیت انجام شد**\n\n"
+        "نام سرویس: **{service_name}**\n"
         "حجم سرویس: **{volume} گیگ**\n"
         "مبلغ پرداختی: **{price} تومان**\n\n"
         "لینک اشتراک شما:\n"
@@ -126,6 +127,11 @@ DEFAULT_MESSAGES: dict[str, str] = {
     "no_purchase": default_messages.NO_PURCHASE,
     "purchase_history_header": "**آخرین خریدهای شما**\n\n",
     "invalid_plan": "پلن انتخاب‌شده معتبر نیست. لطفا دوباره از منوی خرید انتخاب کنید.",
+    "service_name_prompt": (
+        "**نام دلخواه سرویس را وارد کنید**\n\n"
+        "یک اسم کوتاه مثل علی، مهدی، احسان یا هر نامی که بعدا راحت پیدایش کنید بفرستید."
+    ),
+    "service_name_invalid": "نام سرویس باید بین ۱ تا ۶۰ کاراکتر باشد. لطفا یک نام کوتاه‌تر ارسال کنید.",
     "blocked_user": "حساب شما مسدود شده است.",
     "inactive_plan": "این پلن در حال حاضر فعال نیست.",
     "insufficient_balance": "موجودی کیف پول کافی نیست.\nمبلغ موردنیاز: {required_price} تومان",
@@ -158,6 +164,7 @@ DEFAULT_MESSAGES: dict[str, str] = {
         "ثبت‌نام با لینک دعوت شما: **{referral_count} نفر**"
     ),
     "purchase_history_item": (
+        "نام سرویس: **{service_name}**\n"
         "حجم: {volume} گیگ | مبلغ: {price} تومان{discount}{coupon}\n"
         "زمان: {purchased_at}\n"
         "`{sub_link}`\n\n"
@@ -185,8 +192,13 @@ class ShopCustomizationService:
     async def init_defaults(session: AsyncSession) -> None:
         for key, text in DEFAULT_MESSAGES.items():
             result = await session.execute(select(ShopMessage).where(ShopMessage.key == key))
-            if result.scalar_one_or_none() is None:
+            message = result.scalar_one_or_none()
+            if message is None:
                 session.add(ShopMessage(key=key, text=text, parse_mode=PARSE_MODE_MARKDOWN))
+            elif key == "purchase_success" and "{service_name}" not in message.text:
+                message.text = _insert_after_heading(message.text, "نام سرویس: **{service_name}**\n")
+            elif key == "purchase_history_item" and "{service_name}" not in message.text:
+                message.text = "نام سرویس: **{service_name}**\n" + message.text
 
         for definition in DEFAULT_BUTTONS:
             result = await session.execute(select(ShopButton).where(ShopButton.action == definition.action, ShopButton.menu == definition.menu))
@@ -497,10 +509,11 @@ class ShopCustomizationService:
     @staticmethod
     async def buy_volume_keyboard(session: AsyncSession, prices: dict | None = None) -> ReplyKeyboardMarkup:
         categories = await ShopCustomizationService.active_categories_with_plans(session)
-        if len(categories) > 1:
+        if categories:
             rows: dict[int, list[KeyboardButton]] = {}
-            for category in categories:
-                rows.setdefault(category.display_order, []).append(
+            for index, category in enumerate(categories):
+                row = category.display_order if category.display_order is not None else index
+                rows.setdefault(row, []).append(
                     ShopCustomizationService._keyboard_button(
                         ShopCustomizationService.category_label(category),
                         style=category.style,
@@ -512,8 +525,7 @@ class ShopCustomizationService:
                 rows[max(rows.keys(), default=-1) + 1] = [ShopCustomizationService._button_from_model(button) for button in back_buttons]
             return _reply_keyboard([rows[key] for key in sorted(rows)])
 
-        category_key = categories[0].key if categories else "default"
-        return await ShopCustomizationService.buy_category_keyboard(session, category_key, prices)
+        return await ShopCustomizationService.buy_category_keyboard(session, "default", prices)
 
     @staticmethod
     async def buy_category_keyboard(session: AsyncSession, category_key: str, prices: dict | None = None) -> ReplyKeyboardMarkup:
@@ -573,8 +585,8 @@ class ShopCustomizationService:
         return None
 
     @staticmethod
-    async def volume_for_text(session: AsyncSession, text: str, prices: dict) -> int | None:
-        plans = await ShopCustomizationService.get_active_plans(session)
+    async def volume_for_text(session: AsyncSession, text: str, prices: dict, category_key: str | None = None) -> int | None:
+        plans = await ShopCustomizationService.get_active_plans(session, category_key)
         for plan in plans:
             price = prices.get(plan.volume_gb)
             if price is None:
@@ -758,6 +770,13 @@ def _is_valid_custom_emoji_id(value: str | None) -> bool:
         return False
     value = str(value).strip()
     return bool(value and value.isdigit())
+
+
+def _insert_after_heading(text: str, line: str) -> str:
+    parts = text.split("\n\n", 1)
+    if len(parts) == 2 and parts[0].strip().startswith("**"):
+        return f"{parts[0]}\n\n{line}{parts[1]}"
+    return line + text
 
 
 def _safe_format(template: str, values: dict) -> str:

@@ -86,6 +86,10 @@ async def ensure_required_membership(update: Update, context: ContextTypes.DEFAU
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     payload = context.args[0] if context.args else None
+    context.user_data.pop("awaiting_coupon_code", None)
+    context.user_data.pop("awaiting_service_name", None)
+    context.user_data.pop("pending_purchase_volume", None)
+    context.user_data.pop("selected_plan_category", None)
     if not await ensure_required_membership(update, context):
         return
     await get_or_create_user(user.id, user.first_name, user.username, payload)
@@ -102,6 +106,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("awaiting_coupon_code", None)
+    context.user_data.pop("awaiting_service_name", None)
+    context.user_data.pop("pending_purchase_volume", None)
+    context.user_data.pop("selected_plan_category", None)
     async with async_session() as session:
         text = await ShopCustomizationService.get_message(session, "main_menu")
         fallback_keyboard = await ShopCustomizationService.main_menu_keyboard(session)
@@ -115,6 +122,8 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def buy_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("selected_plan_category", None)
+    context.user_data.pop("awaiting_service_name", None)
+    context.user_data.pop("pending_purchase_volume", None)
     await get_or_create_user(
         update.effective_user.id,
         update.effective_user.first_name,
@@ -286,7 +295,12 @@ async def apply_coupon_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE, selected_volume: int | None = None):
+async def process_purchase(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    selected_volume: int | None = None,
+    service_name: str | None = None,
+):
     volume = selected_volume or _extract_volume(update.message.text)
     if volume is None:
         async with async_session() as session:
@@ -382,6 +396,7 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE, s
             discount_amount=discount_amount,
             coupon_id=coupon.id if coupon else None,
             coupon_code=coupon.code if coupon else None,
+            service_name=service_name,
         )
         session.add(purchase)
         await session.flush()
@@ -391,7 +406,7 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE, s
                 user_id=db_user.telegram_id,
                 amount=-final_price,
                 type="purchase",
-                description=f"Purchase {volume}GB",
+                description=f"Purchase {volume}GB - {service_name or 'بدون نام'}",
             )
         )
         await session.commit()
@@ -399,6 +414,7 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE, s
         text = await ShopCustomizationService.get_message(
             session,
             "purchase_success",
+            service_name=escape_markdown(service_name or f"{volume} گیگ", version=1),
             volume=volume,
             price=f"{final_price:,}",
             sub_link=config.sub_link,
@@ -468,6 +484,7 @@ async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += await ShopCustomizationService.get_message(
                 session,
                 "purchase_history_item",
+                service_name=escape_markdown(purchase.service_name or f"{purchase.volume_gb} گیگ", version=1),
                 volume=purchase.volume_gb,
                 price=f"{purchase.price:,}",
                 discount=discount,
@@ -492,6 +509,37 @@ async def cancel_coupon(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, reply_markup=keyboard)
 
 
+async def ask_service_name(update: Update, context: ContextTypes.DEFAULT_TYPE, volume: int):
+    context.user_data["awaiting_service_name"] = True
+    context.user_data["pending_purchase_volume"] = volume
+    async with async_session() as session:
+        text = await ShopCustomizationService.get_message(session, "service_name_prompt")
+        fallback_keyboard = await ShopCustomizationService.back_keyboard(session)
+        keyboard = await _message_markup(session, "service_name_prompt", fallback_keyboard, copy_text=text)
+    await update.message.reply_text(
+        text,
+        reply_markup=keyboard,
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+
+
+async def receive_service_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    service_name = update.message.text.strip()
+    if not service_name or len(service_name) > 60:
+        async with async_session() as session:
+            text = await ShopCustomizationService.get_message(session, "service_name_invalid")
+            fallback_keyboard = await ShopCustomizationService.back_keyboard(session)
+            keyboard = await _message_markup(session, "service_name_invalid", fallback_keyboard, copy_text=text)
+        await update.message.reply_text(text, reply_markup=keyboard)
+        return
+
+    volume = context.user_data.get("pending_purchase_volume")
+    context.user_data.pop("awaiting_service_name", None)
+    context.user_data.pop("pending_purchase_volume", None)
+    context.user_data.pop("selected_plan_category", None)
+    await process_purchase(update, context, selected_volume=volume, service_name=service_name)
+
+
 async def shop_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await ensure_required_membership(update, context):
         return
@@ -501,7 +549,8 @@ async def shop_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         discounted_prices = await CouponService.prices_with_active_discount(session, update.effective_user.id, prices)
         action = await ShopCustomizationService.action_for_text(session, text)
         category_key = await ShopCustomizationService.category_for_text(session, text)
-        volume = await ShopCustomizationService.volume_for_text(session, text, discounted_prices)
+        selected_category = context.user_data.get("selected_plan_category")
+        volume = await ShopCustomizationService.volume_for_text(session, text, discounted_prices, selected_category)
 
     if context.user_data.get("awaiting_coupon_code"):
         if action == "back_to_main":
@@ -510,12 +559,19 @@ async def shop_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await apply_coupon_code(update, context)
         return
 
+    if context.user_data.get("awaiting_service_name"):
+        if action == "back_to_main":
+            await main_menu(update, context)
+            return
+        await receive_service_name(update, context)
+        return
+
     if category_key:
         await buy_category_menu(update, context, category_key)
         return
 
     if volume is not None:
-        await process_purchase(update, context, selected_volume=volume)
+        await ask_service_name(update, context, volume)
         return
 
     if action == "back_to_main":

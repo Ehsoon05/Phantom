@@ -29,6 +29,7 @@ class SchemaService:
                         "discount_amount": "INTEGER DEFAULT 0 NOT NULL",
                         "coupon_id": "INTEGER",
                         "coupon_code": "VARCHAR",
+                        "service_name": "VARCHAR",
                     },
                 )
             if "shop_messages" in tables:
