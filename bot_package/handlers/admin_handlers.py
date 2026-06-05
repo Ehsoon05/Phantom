@@ -1589,17 +1589,22 @@ async def shop_message_select(update: Update, context: ContextTypes.DEFAULT_TYPE
         return ConversationHandler.END
 
     context.user_data["shop_message_key"] = key
-    extra_keyboard = admin_response_button_keyboard() if key == "purchase_success" else None
-    extra_note = ""
-    if key == "purchase_success":
-        extra_note = (
-            "\n\nبرای تغییر نوع ارسال لینک، یکی از گزینه‌های کیبورد را بزنید.\n"
-            "برای تغییر متن دکمه جواب بنویسید: `متن دکمه: دریافت لینک`"
-        )
+    button_type = message.response_button_type or "text"
+    button_text = message.response_button_text or "-"
+    button_url = message.response_button_url or "-"
+    extra_note = (
+        "\n\nتنظیم دکمه جواب همین پیام:\n"
+        f"نوع فعلی: {button_type}\n"
+        f"متن دکمه: {button_text}\n"
+        f"لینک/متن کپی: {button_url}\n\n"
+        "برای تغییر نوع دکمه، یکی از گزینه‌های کیبورد را بزنید.\n"
+        "برای تغییر متن دکمه بنویسید: متن دکمه: دریافت لینک\n"
+        "برای تنظیم لینک یا متن قابل کپی بنویسید: لینک دکمه: https://example.com\n"
+        "برای حذف لینک/متن کپی بنویسید: لینک دکمه: -"
+    )
     await update.message.reply_text(
-        f"**ویرایش پیام `{key}`**\n\nمتن فعلی:\n\n{message.text}{extra_note}\n\nمتن جدید را ارسال کنید.",
-        reply_markup=extra_keyboard,
-        parse_mode=constants.ParseMode.MARKDOWN,
+        f"ویرایش پیام {key}\n\nمتن فعلی:\n\n{message.text}{extra_note}\n\nمتن جدید را ارسال کنید.",
+        reply_markup=admin_response_button_keyboard(),
     )
     return SHOP_MESSAGE_TEXT
 
@@ -1611,27 +1616,34 @@ async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     key = context.user_data.get("shop_message_key")
     raw_value = update.message.text.strip()
-    if key == "purchase_success":
-        if raw_value in RESPONSE_BUTTON_VALUES:
-            async with async_session() as session:
-                await ShopCustomizationService.update_message_settings(
-                    session,
-                    key,
-                    response_button_type=RESPONSE_BUTTON_VALUES[raw_value],
-                )
-            await update.message.reply_text("نوع دکمه جواب خرید ذخیره شد.")
-            context.user_data.pop("shop_message_key", None)
-            return await shop_messages_start(update, context)
-        if raw_value.startswith("متن دکمه:"):
-            button_text = raw_value.split(":", 1)[1].strip()
-            if not button_text:
-                await update.message.reply_text("بعد از `متن دکمه:` یک عنوان بنویسید.", parse_mode=constants.ParseMode.MARKDOWN)
-                return SHOP_MESSAGE_TEXT
-            async with async_session() as session:
-                await ShopCustomizationService.update_message_settings(session, key, response_button_text=button_text)
-            await update.message.reply_text("متن دکمه جواب خرید ذخیره شد.")
-            context.user_data.pop("shop_message_key", None)
-            return await shop_messages_start(update, context)
+    if raw_value in RESPONSE_BUTTON_VALUES:
+        async with async_session() as session:
+            await ShopCustomizationService.update_message_settings(
+                session,
+                key,
+                response_button_type=RESPONSE_BUTTON_VALUES[raw_value],
+            )
+        await update.message.reply_text("نوع دکمه جواب پیام ذخیره شد.")
+        context.user_data.pop("shop_message_key", None)
+        return await shop_messages_start(update, context)
+    if raw_value.startswith("متن دکمه:"):
+        button_text = raw_value.split(":", 1)[1].strip()
+        if not button_text:
+            await update.message.reply_text("بعد از «متن دکمه:» یک عنوان بنویسید.")
+            return SHOP_MESSAGE_TEXT
+        async with async_session() as session:
+            await ShopCustomizationService.update_message_settings(session, key, response_button_text=button_text)
+        await update.message.reply_text("متن دکمه جواب پیام ذخیره شد.")
+        context.user_data.pop("shop_message_key", None)
+        return await shop_messages_start(update, context)
+    if raw_value.startswith("لینک دکمه:"):
+        button_url = raw_value.split(":", 1)[1].strip()
+        value = None if button_url in {"", "-", "حذف"} else button_url
+        async with async_session() as session:
+            await ShopCustomizationService.update_message_settings(session, key, response_button_url=value)
+        await update.message.reply_text("لینک/متن کپی دکمه جواب پیام ذخیره شد.")
+        context.user_data.pop("shop_message_key", None)
+        return await shop_messages_start(update, context)
 
     async with async_session() as session:
         message = await ShopCustomizationService.update_message(session, key, update.message.text)
@@ -1643,7 +1655,6 @@ async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"پیام `{key}` ذخیره شد.",
-        parse_mode=constants.ParseMode.MARKDOWN,
     )
     return await shop_messages_start(update, context)
 

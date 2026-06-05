@@ -40,6 +40,7 @@ class SchemaService:
                         "premium_emoji_position": "VARCHAR DEFAULT 'none' NOT NULL",
                         "response_button_type": "VARCHAR DEFAULT 'text' NOT NULL",
                         "response_button_text": "VARCHAR",
+                        "response_button_url": "VARCHAR",
                     },
                 )
             if "shop_buttons" in tables:

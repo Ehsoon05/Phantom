@@ -282,7 +282,7 @@ class ShopCustomizationService:
         message = await ShopCustomizationService.get_message_row(session, key)
         if not message:
             return None
-        allowed = {"premium_emoji_id", "premium_emoji_position", "response_button_type", "response_button_text"}
+        allowed = {"premium_emoji_id", "premium_emoji_position", "response_button_type", "response_button_text", "response_button_url"}
         for field, value in values.items():
             if field in allowed:
                 setattr(message, field, value)
@@ -695,19 +695,40 @@ class ShopCustomizationService:
         return _join_emoji(category.emoji, category.title, category.emoji_position)
 
     @staticmethod
-    async def purchase_success_reply_markup(session: AsyncSession, sub_link: str):
-        message = await ShopCustomizationService.get_message_row(session, "purchase_success")
+    async def message_reply_markup(
+        session: AsyncSession,
+        key: str,
+        *,
+        fallback_markup=None,
+        default_url: str | None = None,
+        copy_text: str | None = None,
+    ):
+        message = await ShopCustomizationService.get_message_row(session, key)
         button_type = (message.response_button_type if message else "text") or "text"
-        button_text = (message.response_button_text if message else None) or "دریافت لینک اشتراک"
+        button_text = (message.response_button_text if message else None) or "ادامه"
+        payload = (message.response_button_url if message else None) or default_url
         if button_type == "inline_copy":
+            copy_payload = payload or copy_text
+            if not copy_payload:
+                return fallback_markup
             return InlineKeyboardMarkup(
-                [[InlineKeyboardButton(button_text, api_kwargs={"copy_text": {"text": sub_link}})]]
+                [[InlineKeyboardButton(button_text, api_kwargs={"copy_text": {"text": copy_payload}})]]
             )
-        if button_type == "inline_url" and sub_link.startswith(("http://", "https://", "tg://")):
-            return InlineKeyboardMarkup([[InlineKeyboardButton(button_text, url=sub_link)]])
+        if button_type == "inline_url" and payload and payload.startswith(("http://", "https://", "tg://")):
+            return InlineKeyboardMarkup([[InlineKeyboardButton(button_text, url=payload)]])
         if button_type == "reply_keyboard":
-            return await ShopCustomizationService.back_keyboard(session)
-        return None
+            return fallback_markup
+        return fallback_markup
+
+    @staticmethod
+    async def purchase_success_reply_markup(session: AsyncSession, sub_link: str):
+        return await ShopCustomizationService.message_reply_markup(
+            session,
+            "purchase_success",
+            fallback_markup=await ShopCustomizationService.back_keyboard(session),
+            default_url=sub_link,
+            copy_text=sub_link,
+        )
 
 
 def _reply_keyboard(rows: list[list[KeyboardButton]]) -> ReplyKeyboardMarkup:
