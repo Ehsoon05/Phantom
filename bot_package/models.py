@@ -115,6 +115,17 @@ class CouponRedemption(Base):
     coupon = relationship("Coupon", back_populates="redemptions")
 
 
+class RequiredChannel(Base):
+    __tablename__ = "required_channels"
+    id = Column(Integer, primary_key=True)
+    chat_id = Column(String, unique=True, nullable=False)
+    title = Column(String, nullable=False)
+    join_url = Column(String, nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class ShopMessage(Base):
     __tablename__ = "shop_messages"
     id = Column(Integer, primary_key=True)

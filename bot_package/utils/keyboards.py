@@ -43,6 +43,7 @@ ADMIN_SHOP_MESSAGES = "📝 مدیریت پیام‌ها"
 ADMIN_SHOP_BUTTONS = "🔘 مدیریت دکمه‌ها"
 ADMIN_SHOP_PLANS = "📦 مدیریت سرویس‌ها"
 ADMIN_SHOP_CATEGORIES = "🗂 مدیریت دسته‌ها"
+ADMIN_REQUIRED_CHANNELS = "📣 عضویت اجباری"
 ADMIN_SHOP_RESET_DEFAULTS = "↩️ بازگشت فروشگاه به پیش‌فرض"
 ADMIN_SHOP_MENU_MAIN = "منوی اصلی فروش"
 ADMIN_SHOP_MENU_WALLET = "منوی کیف پول"
@@ -59,6 +60,8 @@ ADMIN_ADD_BUTTON = "➕ افزودن دکمه سفارشی"
 ADMIN_DELETE_BUTTON = "🗑 حذف دکمه"
 ADMIN_ADD_PLAN = "➕ افزودن سرویس"
 ADMIN_ADD_CATEGORY = "➕ افزودن دسته"
+ADMIN_ADD_CHANNEL = "➕ افزودن کانال"
+ADMIN_DELETE_CHANNEL = "🗑 حذف کانال"
 ADMIN_EDIT_TITLE = "✏️ تغییر عنوان"
 ADMIN_EDIT_ORDER = "↕️ تغییر ترتیب"
 ADMIN_EDIT_EMOJI_POSITION = "↔️ جای ایموجی"
@@ -296,6 +299,7 @@ def admin_shop_settings_keyboard() -> ReplyKeyboardMarkup:
         [
             [_button(ADMIN_SHOP_MESSAGES), _button(ADMIN_SHOP_BUTTONS)],
             [_button(ADMIN_SHOP_PLANS), _button(ADMIN_SHOP_CATEGORIES)],
+            [_button(ADMIN_REQUIRED_CHANNELS)],
             [_button(ADMIN_SHOP_RESET_DEFAULTS)],
             [_button(ADMIN_BACK)],
         ]
@@ -368,6 +372,16 @@ def admin_response_button_keyboard() -> ReplyKeyboardMarkup:
         [
             [_button(ADMIN_RESPONSE_TEXT), _button(ADMIN_RESPONSE_INLINE_COPY)],
             [_button(ADMIN_RESPONSE_INLINE_URL), _button(ADMIN_RESPONSE_REPLY_KEYBOARD)],
+            [_button(CANCEL), _button(ADMIN_BACK)],
+        ],
+        one_time_keyboard=True,
+    )
+
+
+def admin_required_channel_keyboard() -> ReplyKeyboardMarkup:
+    return _keyboard(
+        [
+            [_button(ADMIN_ADD_CHANNEL), _button(ADMIN_DELETE_CHANNEL)],
             [_button(CANCEL), _button(ADMIN_BACK)],
         ],
         one_time_keyboard=True,

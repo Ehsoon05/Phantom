@@ -18,6 +18,7 @@ from ..services.coupon_service import CouponError, CouponService
 from ..services.inventory_service import InventoryService
 from ..services.price_service import PriceService
 from ..services.referral_service import ReferralService
+from ..services.required_channel_service import RequiredChannelService
 from ..services.shop_customization_service import ShopCustomizationService
 from ..services.user_service import UserService
 from ..utils.keyboards import (
@@ -65,9 +66,28 @@ async def _message_markup(session, key: str, fallback_markup=None, *, default_ur
     )
 
 
+async def ensure_required_membership(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    async with async_session() as session:
+        channels = await RequiredChannelService.list_channels(session, active_only=True)
+    if not channels:
+        return True
+
+    missing = await RequiredChannelService.missing_channels(context.bot, update.effective_user.id, channels)
+    if not missing:
+        return True
+
+    await update.effective_message.reply_text(
+        "برای استفاده از ربات، ابتدا در کانال‌های زیر عضو شوید و سپس دوباره /start را بزنید.",
+        reply_markup=RequiredChannelService.join_keyboard(missing),
+    )
+    return False
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     payload = context.args[0] if context.args else None
+    if not await ensure_required_membership(update, context):
+        return
     await get_or_create_user(user.id, user.first_name, user.username, payload)
     async with async_session() as session:
         text = await ShopCustomizationService.get_message(session, "main_menu")
@@ -473,6 +493,8 @@ async def cancel_coupon(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def shop_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await ensure_required_membership(update, context):
+        return
     text = update.message.text
     async with async_session() as session:
         prices = await PriceService.get_all_prices(session)

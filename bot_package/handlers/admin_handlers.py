@@ -14,6 +14,7 @@ from ..services.coupon_service import CouponError, CouponService
 from ..services.inventory_service import InventoryService
 from ..services.price_service import PriceService
 from ..services.referral_service import ReferralService
+from ..services.required_channel_service import RequiredChannelService
 from ..services.shop_customization_service import ShopCustomizationService
 from ..services.user_service import UserService
 from ..utils.keyboards import (
@@ -21,6 +22,7 @@ from ..utils.keyboards import (
     ADMIN_ADD_ADMIN,
     ADMIN_ADD_BUTTON,
     ADMIN_ADD_CATEGORY,
+    ADMIN_ADD_CHANNEL,
     ADMIN_ADD_PLAN,
     ADMIN_ADD_CONFIG,
     ADMIN_BACK,
@@ -30,6 +32,7 @@ from ..utils.keyboards import (
     ADMIN_CREATE_COUPON,
     ADMIN_DEACTIVATE_COUPON,
     ADMIN_DELETE_BUTTON,
+    ADMIN_DELETE_CHANNEL,
     ADMIN_DELETE_COUPON,
     ADMIN_EDIT_COUPON,
     ADMIN_EDIT_EMOJI,
@@ -49,6 +52,7 @@ from ..utils.keyboards import (
     ADMIN_PRICES,
     ADMIN_REFERRAL_REPORT,
     ADMIN_REFRESH_ADMINS,
+    ADMIN_REQUIRED_CHANNELS,
     ADMIN_REMOVE_ADMIN,
     ADMIN_REPORTS,
     ADMIN_RESPONSE_INLINE_COPY,
@@ -99,6 +103,7 @@ from ..utils.keyboards import (
     admin_shop_settings_keyboard,
     admin_emoji_position_keyboard,
     admin_response_button_keyboard,
+    admin_required_channel_keyboard,
     admin_style_keyboard,
     admin_user_confirm_keyboard,
     admin_users_keyboard,
@@ -172,12 +177,15 @@ from ..utils.validators import extract_links_from_text
     SHOP_PLAN_ADD_PRICE,
     SHOP_CATEGORY_SELECT,
     SHOP_CATEGORY_ADD,
+    REQUIRED_CHANNEL_ACTION,
+    REQUIRED_CHANNEL_ADD,
+    REQUIRED_CHANNEL_DELETE,
     ADMIN_ADD_ID,
     ADMIN_ADD_PERMS,
     ADMIN_REMOVE_ID,
     ADMIN_PERMS_ID,
     ADMIN_PERMS_VALUE,
-) = range(44)
+) = range(47)
 
 
 SHOP_MENU_LABELS = {
@@ -213,6 +221,7 @@ SHOP_SETTINGS_LABELS = {
     ADMIN_SHOP_CATEGORIES,
     ADMIN_SHOP_PLANS,
     ADMIN_SHOP_RESET_DEFAULTS,
+    ADMIN_REQUIRED_CHANNELS,
 }
 
 
@@ -286,6 +295,8 @@ async def _leave_shop_flow_if_navigation(update: Update, context: ContextTypes.D
             await shop_categories_start(update, context)
         elif text == ADMIN_SHOP_PLANS:
             await shop_plans_start(update, context)
+        elif text == ADMIN_REQUIRED_CHANNELS:
+            await required_channels_start(update, context)
         elif text == ADMIN_SHOP_RESET_DEFAULTS:
             await shop_reset_defaults(update, context)
         return True
@@ -1544,6 +1555,92 @@ async def admin_perms_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+def _required_channel_label(channel) -> str:
+    status = "فعال" if channel.is_active else "غیرفعال"
+    return f"#{channel.id} {channel.title} | `{channel.chat_id}` | {status}"
+
+
+@require_auth(permission="shop")
+async def required_channels_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        channels = await RequiredChannelService.list_channels(session)
+    lines = ["**عضویت اجباری**\n"]
+    if channels:
+        lines.extend(_required_channel_label(channel) for channel in channels)
+    else:
+        lines.append("هنوز هیچ کانالی ثبت نشده است.")
+    lines.append(
+        "\nبرای افزودن یا آپدیت کانال، دکمه افزودن را بزنید.\n"
+        "فرمت افزودن: `chat_id|عنوان|لینک عضویت`\n"
+        "مثال: `@mychannel|کانال اخبار|https://t.me/mychannel`"
+    )
+    await update.message.reply_text(
+        "\n".join(lines),
+        reply_markup=admin_required_channel_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return REQUIRED_CHANNEL_ACTION
+
+
+@require_auth(permission="shop")
+async def required_channel_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == ADMIN_ADD_CHANNEL:
+        await update.message.reply_text(
+            "کانال را با فرمت `chat_id|عنوان|لینک عضویت` ارسال کنید.\n"
+            "برای کانال عمومی بهتر است `@username` را بفرستید.\n"
+            "برای کانال خصوصی باید آیدی عددی کانال و لینک دعوت معتبر بدهید؛ ربات هم باید داخل کانال ادمین باشد.",
+            reply_markup=_cancel_back_keyboard(),
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
+        return REQUIRED_CHANNEL_ADD
+    if update.message.text == ADMIN_DELETE_CHANNEL:
+        async with async_session() as session:
+            channels = await RequiredChannelService.list_channels(session)
+        labels = [f"#{channel.id} {channel.title}" for channel in channels]
+        if not labels:
+            await update.message.reply_text("کانالی برای حذف وجود ندارد.", reply_markup=admin_shop_settings_keyboard())
+            return ConversationHandler.END
+        await update.message.reply_text("کانالی که می‌خواهید حذف شود را انتخاب کنید.", reply_markup=_rows(labels, width=1))
+        return REQUIRED_CHANNEL_DELETE
+    await update.message.reply_text("گزینه معتبر نیست.", reply_markup=admin_required_channel_keyboard())
+    return REQUIRED_CHANNEL_ACTION
+
+
+@require_auth(permission="shop")
+async def required_channel_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    parts = [part.strip() for part in update.message.text.split("|")]
+    if len(parts) != 3 or not all(parts):
+        await update.message.reply_text("فرمت درست نیست. مثال: `@mychannel|کانال اخبار|https://t.me/mychannel`", parse_mode=constants.ParseMode.MARKDOWN)
+        return REQUIRED_CHANNEL_ADD
+    chat_id, title, join_url = parts
+    if not join_url.startswith(("http://", "https://", "tg://")):
+        await update.message.reply_text("لینک عضویت باید با `https://` یا `tg://` شروع شود.", parse_mode=constants.ParseMode.MARKDOWN)
+        return REQUIRED_CHANNEL_ADD
+    async with async_session() as session:
+        channel = await RequiredChannelService.upsert_channel(session, chat_id, title, join_url)
+    await update.message.reply_text(
+        f"کانال **{channel.title}** برای عضویت اجباری ذخیره شد.",
+        reply_markup=admin_shop_settings_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return ConversationHandler.END
+
+
+@require_auth(permission="shop")
+async def required_channel_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    channel_id = _parse_hash_id(update.message.text)
+    if channel_id is None:
+        await update.message.reply_text("کانال معتبر نیست.")
+        return REQUIRED_CHANNEL_DELETE
+    async with async_session() as session:
+        deleted = await RequiredChannelService.delete_channel(session, channel_id)
+    await update.message.reply_text(
+        "کانال حذف شد." if deleted else "کانال پیدا نشد.",
+        reply_markup=admin_shop_settings_keyboard(),
+    )
+    return ConversationHandler.END
+
+
 @require_auth(permission="shop")
 async def shop_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -2512,6 +2609,29 @@ admin_perms_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
 )
 
+required_channels_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_REQUIRED_CHANNELS), required_channels_start)],
+    states={
+        REQUIRED_CHANNEL_ACTION: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, required_channel_action),
+        ],
+        REQUIRED_CHANNEL_ADD: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, required_channel_add),
+        ],
+        REQUIRED_CHANNEL_DELETE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), required_channels_start),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, required_channel_delete),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+    allow_reentry=True,
+)
+
 shop_categories_conv = ConversationHandler(
     entry_points=[MessageHandler(_exact_filter(ADMIN_SHOP_CATEGORIES), shop_categories_start)],
     states={
@@ -2639,6 +2759,7 @@ admin_handlers = [
     admin_add_conv,
     admin_remove_conv,
     admin_perms_conv,
+    required_channels_conv,
     shop_categories_conv,
     shop_messages_conv,
     shop_buttons_conv,
