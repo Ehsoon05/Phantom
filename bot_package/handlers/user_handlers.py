@@ -516,6 +516,7 @@ async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         for purchase in purchases:
             sub_link = await SubscriptionLinkService.public_link_for_config(session, purchase.config)
+            await SubscriptionLinkService.sync_to_panel(purchase.config, purchase.service_name)
             discount = f" | تخفیف: {purchase.discount_amount:,} تومان" if purchase.discount_amount else ""
             coupon = f" | کد: {purchase.coupon_code}" if purchase.coupon_code else ""
             text += await ShopCustomizationService.get_message(
