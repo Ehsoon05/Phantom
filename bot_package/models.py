@@ -192,3 +192,47 @@ class ShopPlanCategory(Base):
     display_order = Column(Integer, nullable=False, default=0)
     is_active = Column(Boolean, default=True)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class BotSetting(Base):
+    """Generic key/value store for runtime-tunable settings (e.g. crypto rate mode)."""
+    __tablename__ = "bot_settings"
+    id = Column(Integer, primary_key=True)
+    key = Column(String, unique=True, nullable=False)
+    value = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class CryptoInvoice(Base):
+    """A single crypto top-up request and its on-chain settlement state.
+
+    Attribution:
+      - TRC-20: a unique ``deposit_address`` per invoice identifies the payer.
+      - TON:    a shared address + unique ``memo`` per invoice identifies the payer.
+    """
+    __tablename__ = "crypto_invoices"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
+    coin = Column(String, nullable=False)            # USDT | TON
+    network = Column(String, nullable=False)         # TRC20 | TON
+    deposit_address = Column(String, nullable=False)
+    memo = Column(String, nullable=True)             # TON comment/tag; null for TRC-20
+    address_index = Column(Integer, nullable=True)   # HD derivation index for TRC-20
+
+    # Amounts: crypto stored as string to avoid float rounding; toman as integer.
+    expected_crypto = Column(String, nullable=False)
+    quoted_toman = Column(Integer, nullable=False)
+    locked_rate = Column(String, nullable=False)     # toman per 1 coin unit, at creation
+    rate_source = Column(String, nullable=True)      # online | manual
+
+    status = Column(String, nullable=False, default="pending")  # pending|paid|confirmed|credited|expired|underpaid|error
+    from_address = Column(String, nullable=True)     # on-chain sender, filled on detection
+    received_crypto = Column(String, nullable=True)  # actual amount seen on-chain
+    tx_hash = Column(String, unique=True, nullable=True)  # UNIQUE => credit idempotency
+    confirmations = Column(Integer, nullable=False, default=0)
+
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime, nullable=True)
+    credited_at = Column(DateTime, nullable=True)
+
+    user = relationship("User")

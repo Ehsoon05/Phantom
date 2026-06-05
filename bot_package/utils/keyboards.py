@@ -9,6 +9,7 @@ HELP = "ℹ️ راهنما"
 REFERRALS = "👥 دعوت دوستان"
 ACCOUNT_INFO = "👤 اطلاعات حساب"
 APPLY_COUPON = "🎁 کد تخفیف"
+CHARGE_CRYPTO = "💎 شارژ با کریپتو"
 BACK_TO_MAIN = "⬅️ بازگشت به منوی اصلی"
 
 ADMIN_INVENTORY = "📦 مدیریت موجودی"
@@ -16,10 +17,19 @@ ADMIN_PRICES = "💳 مدیریت قیمت‌ها"
 ADMIN_USERS = "👤 مدیریت کاربران"
 ADMIN_REPORTS = "📊 گزارش فروش"
 ADMIN_COUPONS = "🎟 مدیریت تخفیف‌ها"
+ADMIN_CRYPTO = "💎 پرداخت کریپتو"
 ADMIN_ADMINS = "🛡 مدیریت ادمین‌ها"
 ADMIN_SHOP_SETTINGS = "⚙️ تنظیمات ربات فروش"
 ADMIN_LOGOUT = "🚪 خروج"
 ADMIN_BACK = "⬅️ بازگشت به پنل"
+
+ADMIN_CRYPTO_HISTORY = "📜 تراکنش‌های کریپتو"
+ADMIN_CRYPTO_SEARCH = "🔎 جستجوی تراکنش کاربر"
+ADMIN_CRYPTO_RATES = "⚙️ تنظیمات نرخ ارز"
+ADMIN_CRYPTO_TOGGLE_MODE = "🔁 تغییر حالت نرخ (آنلاین/دستی)"
+ADMIN_CRYPTO_SET_MARGIN = "✏️ تنظیم کارمزد (٪)"
+ADMIN_CRYPTO_SET_USDT = "✏️ نرخ دستی USDT"
+ADMIN_CRYPTO_SET_TON = "✏️ نرخ دستی TON"
 
 ADMIN_ADD_CONFIG = "➕ افزودن کانفیگ"
 ADMIN_STOCK_STATUS = "📋 وضعیت موجودی"
@@ -207,9 +217,30 @@ def admin_main_keyboard() -> ReplyKeyboardMarkup:
         [
             [_button(ADMIN_INVENTORY), _button(ADMIN_PRICES)],
             [_button(ADMIN_USERS), _button(ADMIN_REPORTS)],
-            [_button(ADMIN_COUPONS), _button(ADMIN_SHOP_SETTINGS)],
-            [_button(ADMIN_ADMINS)],
+            [_button(ADMIN_COUPONS), _button(ADMIN_CRYPTO)],
+            [_button(ADMIN_SHOP_SETTINGS), _button(ADMIN_ADMINS)],
             [_button(ADMIN_LOGOUT)],
+        ]
+    )
+
+
+def admin_crypto_keyboard() -> ReplyKeyboardMarkup:
+    return _keyboard(
+        [
+            [_button(ADMIN_CRYPTO_HISTORY), _button(ADMIN_CRYPTO_SEARCH)],
+            [_button(ADMIN_CRYPTO_RATES)],
+            [_button(ADMIN_BACK)],
+        ]
+    )
+
+
+def admin_crypto_rates_keyboard() -> ReplyKeyboardMarkup:
+    return _keyboard(
+        [
+            [_button(ADMIN_CRYPTO_TOGGLE_MODE)],
+            [_button(ADMIN_CRYPTO_SET_MARGIN)],
+            [_button(ADMIN_CRYPTO_SET_USDT), _button(ADMIN_CRYPTO_SET_TON)],
+            [_button(ADMIN_BACK)],
         ]
     )
 

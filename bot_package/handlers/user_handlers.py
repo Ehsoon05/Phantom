@@ -13,6 +13,7 @@ except ImportError:
         del version
         return text.replace("\\", "\\\\").replace("_", "\\_").replace("*", "\\*").replace("`", "\\`").replace("[", "\\[")
 
+from . import crypto_user
 from ..database import async_session
 from ..models import Purchase, Transaction, User
 from ..services.coupon_service import CouponError, CouponService
@@ -637,6 +638,10 @@ async def shop_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         selected_category = context.user_data.get("selected_plan_category")
         plan_id = await ShopCustomizationService.plan_for_text(session, text, discounted_prices, selected_category)
 
+    if context.user_data.get(crypto_user.STEP_KEY):
+        await crypto_user.handle_step(update, context)
+        return
+
     if context.user_data.get("awaiting_coupon_code"):
         if action == "back_to_main":
             await cancel_coupon(update, context)
@@ -677,6 +682,8 @@ async def shop_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await help_menu(update, context)
     elif action == "apply_coupon":
         await apply_coupon_start(update, context)
+    elif action == "charge_crypto":
+        await crypto_user.charge_start(update, context)
     elif action and action.startswith("custom_message:"):
         async with async_session() as session:
             message = await ShopCustomizationService.get_message(session, action)
@@ -695,6 +702,7 @@ user_handlers = [
     CommandHandler("start", start),
     CommandHandler("buy", buy_menu),
     CommandHandler("wallet", wallet_menu),
+    CommandHandler("charge", crypto_user.charge_start),
     CommandHandler("referrals", referral_menu),
     CommandHandler("account", account_info_menu),
     CommandHandler("help", help_menu),

@@ -11,6 +11,9 @@ from ..database import async_session
 from ..models import Purchase
 from ..services.admin_service import ALL_PERMISSIONS, AdminService, normalize_permissions
 from ..services.coupon_service import CouponError, CouponService
+from ..services.crypto_payment_service import CryptoPaymentService, available_coins
+from ..services.rate_service import RateService
+from ..services.settings_service import SettingsService
 from ..services.inventory_service import InventoryService
 from ..services.price_service import PriceService
 from ..services.referral_service import ReferralService
@@ -29,6 +32,14 @@ from ..utils.keyboards import (
     ADMIN_CHANGE_ADMIN_PERMS,
     ADMIN_CHARGE_WALLET,
     ADMIN_COUPONS,
+    ADMIN_CRYPTO,
+    ADMIN_CRYPTO_HISTORY,
+    ADMIN_CRYPTO_RATES,
+    ADMIN_CRYPTO_SEARCH,
+    ADMIN_CRYPTO_SET_MARGIN,
+    ADMIN_CRYPTO_SET_TON,
+    ADMIN_CRYPTO_SET_USDT,
+    ADMIN_CRYPTO_TOGGLE_MODE,
     ADMIN_CREATE_COUPON,
     ADMIN_DEACTIVATE_COUPON,
     ADMIN_DELETE_BUTTON,
@@ -92,6 +103,8 @@ from ..utils.keyboards import (
     REPORT_WEEK,
     add_links_collecting_keyboard,
     admin_coupons_keyboard,
+    admin_crypto_keyboard,
+    admin_crypto_rates_keyboard,
     admin_inventory_keyboard,
     admin_main_keyboard,
     admin_management_keyboard,
@@ -186,7 +199,11 @@ from ..utils.validators import extract_links_from_text
     ADMIN_REMOVE_ID,
     ADMIN_PERMS_ID,
     ADMIN_PERMS_VALUE,
-) = range(48)
+    CRYPTO_SEARCH_ID,
+    CRYPTO_SET_MARGIN_VALUE,
+    CRYPTO_SET_USDT_VALUE,
+    CRYPTO_SET_TON_VALUE,
+) = range(52)
 
 
 SHOP_MENU_LABELS = {
@@ -2341,6 +2358,247 @@ async def shop_plan_add_price(update: Update, context: ContextTypes.DEFAULT_TYPE
     return ConversationHandler.END
 
 
+# ---------------------------------------------------------------------------
+# Crypto payments admin section
+# ---------------------------------------------------------------------------
+
+_CRYPTO_STATUS_FA = {
+    "pending": "⏳ در انتظار",
+    "credited": "✅ موفق",
+    "underpaid": "⚠️ کسری پرداخت",
+    "expired": "⛔️ منقضی",
+    "error": "❌ خطا",
+}
+
+
+def _shorten(value: str | None, head: int = 8, tail: int = 6) -> str:
+    if not value:
+        return "-"
+    if len(value) <= head + tail + 3:
+        return value
+    return f"{value[:head]}…{value[-tail:]}"
+
+
+def _format_invoice(invoice) -> str:
+    status = _CRYPTO_STATUS_FA.get(invoice.status, invoice.status)
+    when = invoice.created_at.strftime("%Y-%m-%d %H:%M") if invoice.created_at else "-"
+    lines = [
+        f"#{invoice.id} | {status}",
+        f"👤 کاربر: `{invoice.user_id}`",
+        f"💰 مبلغ: {invoice.quoted_toman:,} تومان",
+        f"🪙 ارز: {invoice.coin}/{invoice.network} | مقدار: {invoice.expected_crypto}",
+    ]
+    if invoice.received_crypto:
+        lines.append(f"📥 دریافت‌شده: {invoice.received_crypto} {invoice.coin}")
+    lines.append(f"🏦 به آدرس: `{_shorten(invoice.deposit_address)}`")
+    if invoice.memo:
+        lines.append(f"📝 ممو: `{invoice.memo}`")
+    if invoice.from_address:
+        lines.append(f"📤 از آدرس: `{_shorten(invoice.from_address)}`")
+    if invoice.tx_hash:
+        lines.append(f"🔗 تراکنش: `{_shorten(invoice.tx_hash)}`")
+    lines.append(f"🕒 {when}")
+    return "\n".join(lines)
+
+
+@require_auth(permission="users")
+async def crypto_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    enabled = bool(available_coins())
+    status_line = (
+        "وضعیت: ✅ فعال" if enabled else "وضعیت: ⛔️ غیرفعال (تنظیمات کیف‌پول/شبکه ناقص است)"
+    )
+    await update.message.reply_text(
+        "**پرداخت کریپتو**\n\n"
+        f"{status_line}\n\n"
+        "از این بخش می‌توانید تراکنش‌های کریپتو را ببینید، تراکنش‌های یک کاربر را جستجو کنید "
+        "و نرخ تبدیل را تنظیم کنید.",
+        reply_markup=admin_crypto_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+
+
+@require_auth(permission="users")
+async def crypto_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        invoices = await CryptoPaymentService.list_recent(session, limit=10)
+
+    if not invoices:
+        await update.message.reply_text(
+            "هنوز هیچ تراکنش کریپتویی ثبت نشده است.",
+            reply_markup=admin_crypto_keyboard(),
+        )
+        return
+
+    header = "**آخرین تراکنش‌های کریپتو**\n\n"
+    body = "\n\n".join(_format_invoice(invoice) for invoice in invoices)
+    await update.message.reply_text(
+        header + body,
+        reply_markup=admin_crypto_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+
+
+@require_auth(permission="users")
+async def crypto_search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "آیدی عددی کاربر را برای مشاهده تراکنش‌های کریپتو ارسال کنید.",
+        reply_markup=_cancel_back_keyboard(),
+    )
+    return CRYPTO_SEARCH_ID
+
+
+@require_auth(permission="users")
+async def crypto_search_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query_text = update.message.text.strip()
+    async with async_session() as session:
+        user = await UserService.search_user(session, query_text)
+        if not user:
+            await update.message.reply_text("کاربر پیدا نشد. دوباره ارسال کنید یا لغو را بزنید.")
+            return CRYPTO_SEARCH_ID
+        invoices = await CryptoPaymentService.list_for_user(session, user.telegram_id, limit=10)
+
+    if not invoices:
+        await update.message.reply_text(
+            f"برای کاربر `{user.telegram_id}` تراکنش کریپتویی ثبت نشده است.",
+            reply_markup=admin_crypto_keyboard(),
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
+        return ConversationHandler.END
+
+    total_credited = sum(i.quoted_toman for i in invoices if i.status == "credited")
+    header = (
+        f"**تراکنش‌های کریپتو کاربر** `{user.telegram_id}`\n"
+        f"نمایش {len(invoices)} مورد اخیر | مجموع شارژ موفق (همین موارد): {total_credited:,} تومان\n\n"
+    )
+    body = "\n\n".join(_format_invoice(invoice) for invoice in invoices)
+    await update.message.reply_text(
+        header + body,
+        reply_markup=admin_crypto_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return ConversationHandler.END
+
+
+@require_auth(permission="users")
+async def crypto_rates_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        mode = await SettingsService.get_rate_mode(session)
+        margin = await SettingsService.get_margin(session)
+        manual_usdt = await SettingsService.get_manual_rate(session, "USDT")
+        manual_ton = await SettingsService.get_manual_rate(session, "TON")
+
+    online_usdt = RateService.cached_online_rate("USDT")
+    online_ton = RateService.cached_online_rate("TON")
+    mode_fa = "🌐 آنلاین (API)" if mode == "online" else "✋ دستی"
+
+    def _fmt(value):
+        return f"{int(value):,}" if value else "-"
+
+    text = (
+        "**تنظیمات نرخ ارز**\n\n"
+        f"حالت فعلی: *{mode_fa}*\n"
+        f"کارمزد: *{margin}%*\n\n"
+        "نرخ‌های دستی (تومان به ازای هر واحد):\n"
+        f"• USDT: {manual_usdt:,}\n"
+        f"• TON: {manual_ton:,}\n\n"
+        "آخرین نرخ آنلاین کش‌شده:\n"
+        f"• USDT: {_fmt(online_usdt)}\n"
+        f"• TON: {_fmt(online_ton)}"
+    )
+    await update.message.reply_text(
+        text,
+        reply_markup=admin_crypto_rates_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+
+
+@require_auth(permission="users")
+async def crypto_toggle_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        mode = await SettingsService.get_rate_mode(session)
+        new_mode = "manual" if mode == "online" else "online"
+        await SettingsService.set_rate_mode(session, new_mode)
+    await crypto_rates_menu(update, context)
+
+
+def _parse_amount(text: str) -> int | None:
+    digits = text.strip().replace(",", "").replace("،", "").replace(" ", "")
+    if not digits.isdigit():
+        return None
+    return int(digits)
+
+
+@require_auth(permission="users")
+async def crypto_set_margin_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "درصد کارمزد را وارد کنید (مثلا 2.5):",
+        reply_markup=_cancel_back_keyboard(),
+    )
+    return CRYPTO_SET_MARGIN_VALUE
+
+
+@require_auth(permission="users")
+async def crypto_set_margin_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    raw = update.message.text.strip().replace("،", ".").replace("%", "").replace("٪", "")
+    try:
+        margin = float(raw)
+    except ValueError:
+        await update.message.reply_text("عدد نامعتبر است. دوباره وارد کنید یا لغو را بزنید.")
+        return CRYPTO_SET_MARGIN_VALUE
+    if margin < 0 or margin >= 100:
+        await update.message.reply_text("کارمزد باید بین 0 تا 100 باشد.")
+        return CRYPTO_SET_MARGIN_VALUE
+    async with async_session() as session:
+        await SettingsService.set_margin(session, margin)
+    await update.message.reply_text(f"کارمزد روی {margin}% تنظیم شد.")
+    await crypto_rates_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="users")
+async def crypto_set_usdt_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "نرخ دستی USDT را به تومان وارد کنید (به ازای هر ۱ USDT):",
+        reply_markup=_cancel_back_keyboard(),
+    )
+    return CRYPTO_SET_USDT_VALUE
+
+
+@require_auth(permission="users")
+async def crypto_set_usdt_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    amount = _parse_amount(update.message.text)
+    if amount is None or amount <= 0:
+        await update.message.reply_text("عدد نامعتبر است. دوباره وارد کنید یا لغو را بزنید.")
+        return CRYPTO_SET_USDT_VALUE
+    async with async_session() as session:
+        await SettingsService.set_manual_rate(session, "USDT", amount)
+    await update.message.reply_text(f"نرخ دستی USDT روی {amount:,} تومان تنظیم شد.")
+    await crypto_rates_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="users")
+async def crypto_set_ton_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "نرخ دستی TON را به تومان وارد کنید (به ازای هر ۱ TON):",
+        reply_markup=_cancel_back_keyboard(),
+    )
+    return CRYPTO_SET_TON_VALUE
+
+
+@require_auth(permission="users")
+async def crypto_set_ton_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    amount = _parse_amount(update.message.text)
+    if amount is None or amount <= 0:
+        await update.message.reply_text("عدد نامعتبر است. دوباره وارد کنید یا لغو را بزنید.")
+        return CRYPTO_SET_TON_VALUE
+    async with async_session() as session:
+        await SettingsService.set_manual_rate(session, "TON", amount)
+    await update.message.reply_text(f"نرخ دستی TON روی {amount:,} تومان تنظیم شد.")
+    await crypto_rates_menu(update, context)
+    return ConversationHandler.END
+
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("عملیات لغو شد.", reply_markup=admin_main_keyboard())
     return ConversationHandler.END
@@ -2803,6 +3061,54 @@ shop_plans_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
 )
 
+crypto_search_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_CRYPTO_SEARCH), crypto_search_start)],
+    states={
+        CRYPTO_SEARCH_ID: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, crypto_search_result),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+crypto_set_margin_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_CRYPTO_SET_MARGIN), crypto_set_margin_start)],
+    states={
+        CRYPTO_SET_MARGIN_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, crypto_set_margin_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+crypto_set_usdt_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_CRYPTO_SET_USDT), crypto_set_usdt_start)],
+    states={
+        CRYPTO_SET_USDT_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, crypto_set_usdt_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+crypto_set_ton_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_CRYPTO_SET_TON), crypto_set_ton_start)],
+    states={
+        CRYPTO_SET_TON_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, crypto_set_ton_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
 admin_handlers = [
     CommandHandler("start", admin_start),
     CommandHandler("admins", list_admins),
@@ -2826,6 +3132,14 @@ admin_handlers = [
     shop_messages_conv,
     shop_buttons_conv,
     shop_plans_conv,
+    crypto_search_conv,
+    crypto_set_margin_conv,
+    crypto_set_usdt_conv,
+    crypto_set_ton_conv,
+    MessageHandler(_exact_filter(ADMIN_CRYPTO), crypto_menu),
+    MessageHandler(_exact_filter(ADMIN_CRYPTO_HISTORY), crypto_history),
+    MessageHandler(_exact_filter(ADMIN_CRYPTO_RATES), crypto_rates_menu),
+    MessageHandler(_exact_filter(ADMIN_CRYPTO_TOGGLE_MODE), crypto_toggle_mode),
     MessageHandler(_exact_filter(ADMIN_LOGOUT), admin_logout),
     MessageHandler(_exact_filter(ADMIN_ADMINS), admin_management_menu),
     MessageHandler(_exact_filter(ADMIN_REFRESH_ADMINS), list_admins),
