@@ -444,6 +444,7 @@ async def process_purchase(
         await session.commit()
 
         public_sub_link = await SubscriptionLinkService.public_link_for_config(session, config)
+        await SubscriptionLinkService.sync_to_panel(config, service_name)
         await session.commit()
 
         text = await ShopCustomizationService.get_message(

@@ -18,6 +18,7 @@ class InventoryService:
                 session.add(new_config)
                 await session.flush()
                 await SubscriptionLinkService.ensure_public_token(session, new_config)
+                await SubscriptionLinkService.sync_to_panel(new_config)
                 added_count += 1
         await session.commit()
         return added_count

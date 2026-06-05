@@ -57,6 +57,8 @@ CHANNEL_HANDLE=@YourChannel
 SESSION_TIMEOUT_MINUTES=30
 LOG_LEVEL=INFO
 SUBSCRIPTION_PUBLIC_BASE_URL=https://api.phantomhubs.shop
+SUBSCRIPTION_PANEL_SYNC_URL=https://api.phantomhubs.shop/internal/configs
+SUBSCRIPTION_PANEL_SYNC_TOKEN=یک-توکن-مشترک-قوی
 ```
 
 Run both bots:
