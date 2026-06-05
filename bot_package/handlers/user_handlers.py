@@ -21,6 +21,7 @@ from ..services.price_service import PriceService
 from ..services.referral_service import ReferralService
 from ..services.required_channel_service import RequiredChannelService
 from ..services.shop_customization_service import ShopCustomizationService
+from ..services.subscription_link_service import SubscriptionLinkService
 from ..services.user_service import UserService
 from ..utils.keyboards import (
     referral_share_keyboard,
@@ -442,15 +443,18 @@ async def process_purchase(
         )
         await session.commit()
 
+        public_sub_link = await SubscriptionLinkService.public_link_for_config(session, config)
+        await session.commit()
+
         text = await ShopCustomizationService.get_message(
             session,
             "purchase_success",
             service_name=escape_markdown(service_name or f"{volume} گیگ", version=1),
             volume=volume,
             price=f"{final_price:,}",
-            sub_link=config.sub_link,
+            sub_link=public_sub_link,
         )
-        keyboard = await ShopCustomizationService.purchase_success_reply_markup(session, config.sub_link)
+        keyboard = await ShopCustomizationService.purchase_success_reply_markup(session, public_sub_link)
         if keyboard is None:
             keyboard = await ShopCustomizationService.back_keyboard(session)
         await update.message.reply_text(
@@ -510,6 +514,7 @@ async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = await _message_markup(session, "purchase_history_header", fallback_keyboard, copy_text=text)
 
         for purchase in purchases:
+            sub_link = await SubscriptionLinkService.public_link_for_config(session, purchase.config)
             discount = f" | تخفیف: {purchase.discount_amount:,} تومان" if purchase.discount_amount else ""
             coupon = f" | کد: {purchase.coupon_code}" if purchase.coupon_code else ""
             text += await ShopCustomizationService.get_message(
@@ -522,8 +527,9 @@ async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 discount=discount,
                 coupon=coupon,
                 purchased_at=purchase.purchased_at.strftime("%Y-%m-%d %H:%M"),
-                sub_link=purchase.config.sub_link,
+                sub_link=sub_link,
             )
+        await session.commit()
 
     await update.message.reply_text(
         text,

@@ -2,6 +2,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update
 from ..models import Config, ShopPlan
+from .subscription_link_service import SubscriptionLinkService
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 
@@ -15,6 +16,8 @@ class InventoryService:
             if result.scalar_one_or_none() is None:
                 new_config = Config(volume_gb=volume_gb, category_key=category_key, sub_link=link)
                 session.add(new_config)
+                await session.flush()
+                await SubscriptionLinkService.ensure_public_token(session, new_config)
                 added_count += 1
         await session.commit()
         return added_count

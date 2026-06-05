@@ -1,0 +1,15 @@
+[Unit]
+Description=Phantom subscription gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/phantom
+EnvironmentFile=/opt/phantom/.env
+ExecStart=/opt/phantom/venv/bin/uvicorn bot_package.subscription_app:app --host 127.0.0.1 --port 8090
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

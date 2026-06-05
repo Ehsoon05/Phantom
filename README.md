@@ -56,6 +56,9 @@ SUPPORT_HANDLE=@YourSupport
 CHANNEL_HANDLE=@YourChannel
 SESSION_TIMEOUT_MINUTES=30
 LOG_LEVEL=INFO
+SUBSCRIPTION_PUBLIC_BASE_URL=https://api.phantomhubs.shop
+SUBSCRIPTION_CHANNEL_HANDLE=@PhantomHubs
+SUBSCRIPTION_TEMPLATE_PRIMARY=#426df8
 ```
 
 Run both bots:
@@ -63,6 +66,17 @@ Run both bots:
 ```bash
 python -m bot_package.run
 ```
+
+Run the subscription gateway locally:
+
+```bash
+uvicorn bot_package.subscription_app:app --host 127.0.0.1 --port 8090
+```
+
+When configs are added through the admin bot, Phantom stores the original upstream
+subscription URL and generates a public token URL using `SUBSCRIPTION_PUBLIC_BASE_URL`.
+VPN clients receive the upstream subscription content from `/token/<token>`, while
+browsers see the themed subscription page.
 
 You can also run the helper script on Linux:
 

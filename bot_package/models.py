@@ -31,6 +31,7 @@ class Config(Base):
     volume_gb = Column(Integer, nullable=False)
     category_key = Column(String, nullable=False, default="default")
     sub_link = Column(String, nullable=False, unique=True)
+    public_sub_token = Column(String, nullable=True, unique=True)
     is_sold = Column(Boolean, default=False)
     sold_to_user_id = Column(BigInteger, nullable=True)
     sold_at = Column(DateTime, nullable=True)

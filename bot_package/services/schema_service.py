@@ -27,6 +27,7 @@ class SchemaService:
                     "configs",
                     {
                         "category_key": "VARCHAR DEFAULT 'default' NOT NULL",
+                        "public_sub_token": "VARCHAR",
                     },
                 )
             if "purchases" in tables:
