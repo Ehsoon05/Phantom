@@ -42,6 +42,7 @@ ADMIN_CHANGE_ADMIN_PERMS = "🔐 تغییر دسترسی ادمین"
 ADMIN_SHOP_MESSAGES = "📝 مدیریت پیام‌ها"
 ADMIN_SHOP_BUTTONS = "🔘 مدیریت دکمه‌ها"
 ADMIN_SHOP_PLANS = "📦 مدیریت سرویس‌ها"
+ADMIN_SHOP_CATEGORIES = "🗂 مدیریت دسته‌ها"
 ADMIN_SHOP_RESET_DEFAULTS = "↩️ بازگشت فروشگاه به پیش‌فرض"
 ADMIN_SHOP_MENU_MAIN = "منوی اصلی فروش"
 ADMIN_SHOP_MENU_WALLET = "منوی کیف پول"
@@ -50,11 +51,14 @@ ADMIN_SHOP_MENU_BACK = "دکمه بازگشت"
 ADMIN_EDIT_TEXT = "✏️ تغییر متن"
 ADMIN_EDIT_EMOJI = "😀 تغییر ایموجی"
 ADMIN_EDIT_PREMIUM_EMOJI = "💎 تغییر ایموجی پریمیوم"
+ADMIN_EDIT_PREMIUM_EMOJI_POSITION = "💎↔️ جای ایموجی پریمیوم"
 ADMIN_EDIT_STYLE = "🎨 تغییر رنگ"
 ADMIN_EDIT_POSITION = "↕️ تغییر چینش"
 ADMIN_TOGGLE_ENABLED = "⏯ فعال/غیرفعال"
 ADMIN_ADD_BUTTON = "➕ افزودن دکمه سفارشی"
+ADMIN_DELETE_BUTTON = "🗑 حذف دکمه"
 ADMIN_ADD_PLAN = "➕ افزودن سرویس"
+ADMIN_ADD_CATEGORY = "➕ افزودن دسته"
 ADMIN_EDIT_TITLE = "✏️ تغییر عنوان"
 ADMIN_EDIT_ORDER = "↕️ تغییر ترتیب"
 ADMIN_EDIT_EMOJI_POSITION = "↔️ جای ایموجی"
@@ -291,7 +295,7 @@ def admin_shop_settings_keyboard() -> ReplyKeyboardMarkup:
     return _keyboard(
         [
             [_button(ADMIN_SHOP_MESSAGES), _button(ADMIN_SHOP_BUTTONS)],
-            [_button(ADMIN_SHOP_PLANS)],
+            [_button(ADMIN_SHOP_PLANS), _button(ADMIN_SHOP_CATEGORIES)],
             [_button(ADMIN_SHOP_RESET_DEFAULTS)],
             [_button(ADMIN_BACK)],
         ]
@@ -314,8 +318,9 @@ def admin_shop_button_edit_keyboard() -> ReplyKeyboardMarkup:
         [
             [_button(ADMIN_EDIT_TEXT), _button(ADMIN_EDIT_EMOJI)],
             [_button(ADMIN_EDIT_PREMIUM_EMOJI), _button(ADMIN_EDIT_STYLE)],
-            [_button(ADMIN_EDIT_EMOJI_POSITION), _button(ADMIN_EDIT_POSITION)],
-            [_button(ADMIN_TOGGLE_ENABLED)],
+            [_button(ADMIN_EDIT_EMOJI_POSITION), _button(ADMIN_EDIT_PREMIUM_EMOJI_POSITION)],
+            [_button(ADMIN_EDIT_POSITION), _button(ADMIN_TOGGLE_ENABLED)],
+            [_button(ADMIN_DELETE_BUTTON)],
             [_button(CANCEL), _button(ADMIN_BACK)],
         ],
         one_time_keyboard=True,
@@ -327,7 +332,8 @@ def admin_shop_plan_edit_keyboard() -> ReplyKeyboardMarkup:
         [
             [_button(ADMIN_EDIT_TITLE), _button(ADMIN_EDIT_PRICE)],
             [_button(ADMIN_EDIT_EMOJI), _button(ADMIN_EDIT_PREMIUM_EMOJI)],
-            [_button(ADMIN_EDIT_EMOJI_POSITION), _button(ADMIN_EDIT_STYLE)],
+            [_button(ADMIN_EDIT_EMOJI_POSITION), _button(ADMIN_EDIT_PREMIUM_EMOJI_POSITION)],
+            [_button(ADMIN_EDIT_STYLE)],
             [_button(ADMIN_EDIT_CATEGORY), _button(ADMIN_EDIT_ORDER)],
             [_button(ADMIN_TOGGLE_ENABLED)],
             [_button(CANCEL), _button(ADMIN_BACK)],

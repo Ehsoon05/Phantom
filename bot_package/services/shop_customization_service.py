@@ -309,13 +309,26 @@ class ShopCustomizationService:
         if not button:
             return None
 
-        allowed = {"text", "emoji", "premium_emoji_id", "emoji_position", "style", "row", "col", "is_enabled"}
+        allowed = {"text", "emoji", "premium_emoji_id", "premium_emoji_position", "emoji_position", "style", "row", "col", "is_enabled"}
         for key, value in values.items():
             if key in allowed:
                 setattr(button, key, value)
         button.updated_at = datetime.now(timezone.utc)
         await session.commit()
         return button
+
+    @staticmethod
+    async def delete_button(session: AsyncSession, button_id: int) -> bool:
+        button = await ShopCustomizationService.get_button(session, button_id)
+        if not button:
+            return False
+        if button.action.startswith("custom_message:"):
+            message = await ShopCustomizationService.get_message_row(session, button.action)
+            if message:
+                await session.delete(message)
+        await session.delete(button)
+        await session.commit()
+        return True
 
     @staticmethod
     async def create_custom_button(session: AsyncSession, menu: str, text: str, message_text: str) -> ShopButton:
@@ -378,6 +391,19 @@ class ShopCustomizationService:
         return category
 
     @staticmethod
+    async def update_category(session: AsyncSession, key: str, **values) -> ShopPlanCategory | None:
+        category = await ShopCustomizationService.get_category(session, key)
+        if not category:
+            return None
+        allowed = {"title", "emoji", "premium_emoji_id", "emoji_position", "style", "display_order", "is_active"}
+        for field, value in values.items():
+            if field in allowed:
+                setattr(category, field, value)
+        category.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+        return category
+
+    @staticmethod
     async def get_plan(session: AsyncSession, volume_gb: int) -> ShopPlan | None:
         result = await session.execute(select(ShopPlan).where(ShopPlan.volume_gb == volume_gb))
         return result.scalar_one_or_none()
@@ -431,7 +457,7 @@ class ShopCustomizationService:
         if not plan:
             return None
 
-        allowed = {"title", "emoji", "premium_emoji_id", "emoji_position", "category_key", "style", "display_order", "is_active"}
+        allowed = {"title", "emoji", "premium_emoji_id", "premium_emoji_position", "emoji_position", "category_key", "style", "display_order", "is_active"}
         category_title = values.get("category_title")
         for key, value in values.items():
             if key == "category_title":

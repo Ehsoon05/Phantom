@@ -48,6 +48,7 @@ class SchemaService:
                     "shop_buttons",
                     {
                         "emoji_position": "VARCHAR DEFAULT 'left' NOT NULL",
+                        "premium_emoji_position": "VARCHAR DEFAULT 'left' NOT NULL",
                     },
                 )
             if "shop_plans" in tables:
@@ -57,6 +58,7 @@ class SchemaService:
                     {
                         "category_key": "VARCHAR DEFAULT 'default' NOT NULL",
                         "emoji_position": "VARCHAR DEFAULT 'left' NOT NULL",
+                        "premium_emoji_position": "VARCHAR DEFAULT 'left' NOT NULL",
                     },
                 )
 
