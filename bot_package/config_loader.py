@@ -73,8 +73,6 @@ class BotConfig:
     SUPPORT_HANDLE = os.getenv("SUPPORT_HANDLE", "@YourSupport").strip()
     CHANNEL_HANDLE = os.getenv("CHANNEL_HANDLE", "@YourChannel").strip()
     SUBSCRIPTION_PUBLIC_BASE_URL = os.getenv("SUBSCRIPTION_PUBLIC_BASE_URL", "https://api.phantomhubs.shop").strip().rstrip("/")
-    SUBSCRIPTION_CHANNEL_HANDLE = os.getenv("SUBSCRIPTION_CHANNEL_HANDLE", "@PhantomHubs").strip()
-    SUBSCRIPTION_TEMPLATE_PRIMARY = os.getenv("SUBSCRIPTION_TEMPLATE_PRIMARY", "#426df8").strip()
     SESSION_TIMEOUT_MINUTES = _parse_int_env("SESSION_TIMEOUT_MINUTES", 60)
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().upper()
 
