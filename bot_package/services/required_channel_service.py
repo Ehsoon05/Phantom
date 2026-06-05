@@ -16,6 +16,15 @@ ACTIVE_MEMBER_STATUSES = {
 
 
 class RequiredChannelService:
+    DEFAULT_CHANNELS = (
+        ("@PhantomHubs", "کانال PhantomHubs", "https://t.me/PhantomHubs"),
+    )
+
+    @staticmethod
+    async def init_defaults(session: AsyncSession) -> None:
+        for chat_id, title, join_url in RequiredChannelService.DEFAULT_CHANNELS:
+            await RequiredChannelService.upsert_channel(session, chat_id, title, join_url)
+
     @staticmethod
     async def list_channels(session: AsyncSession, active_only: bool = False) -> list[RequiredChannel]:
         stmt = select(RequiredChannel)
