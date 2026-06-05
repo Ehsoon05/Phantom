@@ -196,6 +196,25 @@ RESPONSE_BUTTON_VALUES = {
     ADMIN_RESPONSE_REPLY_KEYBOARD: "reply_keyboard",
 }
 
+ADMIN_TOP_LEVEL_LABELS = {
+    ADMIN_INVENTORY,
+    ADMIN_PRICES,
+    ADMIN_USERS,
+    ADMIN_REPORTS,
+    ADMIN_COUPONS,
+    ADMIN_ADMINS,
+    ADMIN_SHOP_SETTINGS,
+    ADMIN_LOGOUT,
+}
+
+SHOP_SETTINGS_LABELS = {
+    ADMIN_SHOP_MESSAGES,
+    ADMIN_SHOP_BUTTONS,
+    ADMIN_SHOP_CATEGORIES,
+    ADMIN_SHOP_PLANS,
+    ADMIN_SHOP_RESET_DEFAULTS,
+}
+
 
 def _exact_filter(text: str):
     return filters.Regex(f"^{re.escape(text)}$")
@@ -241,6 +260,36 @@ def _category_label(category) -> str:
 def _parse_hash_id(text: str) -> int | None:
     match = re.match(r"#(\d+)\b", text.strip())
     return int(match.group(1)) if match else None
+
+
+async def _leave_shop_flow_if_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    text = update.message.text
+    if text == ADMIN_BACK:
+        await admin_menu_navigation(update, context)
+        return True
+    if text in ADMIN_TOP_LEVEL_LABELS:
+        if text == ADMIN_SHOP_SETTINGS:
+            await shop_settings_menu(update, context)
+        elif text == ADMIN_ADMINS:
+            await admin_management_menu(update, context)
+        elif text == ADMIN_LOGOUT:
+            await admin_logout(update, context)
+        else:
+            await admin_menu_navigation(update, context)
+        return True
+    if text in SHOP_SETTINGS_LABELS:
+        if text == ADMIN_SHOP_MESSAGES:
+            await shop_messages_start(update, context)
+        elif text == ADMIN_SHOP_BUTTONS:
+            await shop_buttons_start(update, context)
+        elif text == ADMIN_SHOP_CATEGORIES:
+            await shop_categories_start(update, context)
+        elif text == ADMIN_SHOP_PLANS:
+            await shop_plans_start(update, context)
+        elif text == ADMIN_SHOP_RESET_DEFAULTS:
+            await shop_reset_defaults(update, context)
+        return True
+    return False
 
 
 async def _admin_volume_keyboard(session, action: str) -> ReplyKeyboardMarkup:
@@ -1529,6 +1578,8 @@ async def shop_messages_start(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 @require_auth(permission="shop")
 async def shop_message_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        return ConversationHandler.END
     key = update.message.text.removeprefix("📝").strip()
     async with async_session() as session:
         message = await ShopCustomizationService.get_message_row(session, key)
@@ -1555,6 +1606,9 @@ async def shop_message_select(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 @require_auth(permission="shop")
 async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("shop_message_key", None)
+        return ConversationHandler.END
     key = context.user_data.get("shop_message_key")
     raw_value = update.message.text.strip()
     if key == "purchase_success":
@@ -1607,6 +1661,8 @@ async def shop_buttons_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 @require_auth(permission="shop")
 async def shop_button_menu_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        return ConversationHandler.END
     menu = SHOP_MENU_LABELS.get(update.message.text)
     if not menu:
         await update.message.reply_text("منوی انتخاب‌شده معتبر نیست.", reply_markup=admin_shop_menus_keyboard())
@@ -1665,6 +1721,9 @@ async def _show_shop_button_options(update: Update, context: ContextTypes.DEFAUL
 
 @require_auth(permission="shop")
 async def shop_button_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("shop_button_id", None)
+        return ConversationHandler.END
     if update.message.text == ADMIN_ADD_BUTTON:
         await update.message.reply_text("متن دکمه سفارشی جدید را ارسال کنید.")
         return SHOP_BUTTON_ADD_TEXT
@@ -1687,6 +1746,9 @@ async def shop_button_select(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 @require_auth(permission="shop")
 async def shop_button_add_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("shop_custom_button_text", None)
+        return ConversationHandler.END
     text = update.message.text.strip()
     if not text:
         await update.message.reply_text("متن دکمه نمی‌تواند خالی باشد.")
@@ -1698,6 +1760,9 @@ async def shop_button_add_text(update: Update, context: ContextTypes.DEFAULT_TYP
 
 @require_auth(permission="shop")
 async def shop_button_add_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("shop_custom_button_text", None)
+        return ConversationHandler.END
     menu = context.user_data.get("shop_button_menu")
     text = context.user_data.get("shop_custom_button_text")
     if not menu or not text:
@@ -1718,6 +1783,9 @@ async def shop_button_add_message(update: Update, context: ContextTypes.DEFAULT_
 
 @require_auth(permission="shop")
 async def shop_button_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("shop_button_field", None)
+        return ConversationHandler.END
     option = update.message.text
     button_id = context.user_data.get("shop_button_id")
 
@@ -1763,6 +1831,9 @@ async def shop_button_option(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 @require_auth(permission="shop")
 async def shop_button_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("shop_button_field", None)
+        return ConversationHandler.END
     button_id = context.user_data.get("shop_button_id")
     field = context.user_data.get("shop_button_field")
     raw_value = update.message.text.strip()
@@ -1842,6 +1913,8 @@ async def shop_categories_start(update: Update, context: ContextTypes.DEFAULT_TY
 
 @require_auth(permission="shop")
 async def shop_category_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        return ConversationHandler.END
     if update.message.text == ADMIN_ADD_CATEGORY:
         await update.message.reply_text(
             "دسته جدید را با فرمت `key|عنوان|emoji` ارسال کنید.\n"
@@ -1858,6 +1931,8 @@ async def shop_category_select(update: Update, context: ContextTypes.DEFAULT_TYP
 
 @require_auth(permission="shop")
 async def shop_category_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        return ConversationHandler.END
     parts = [part.strip() for part in update.message.text.split("|")]
     if len(parts) < 2 or not parts[0] or not parts[1]:
         await update.message.reply_text("فرمت درست نیست. مثال: `reality|سرورهای Reality|🌐`", parse_mode=constants.ParseMode.MARKDOWN)
@@ -1879,6 +1954,9 @@ async def shop_category_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @require_auth(permission="shop")
 async def shop_plan_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("shop_plan_volume", None)
+        return ConversationHandler.END
     if update.message.text == ADMIN_ADD_PLAN:
         await update.message.reply_text(
             "حجم سرویس جدید را به گیگ ارسال کنید. مثال: `30`",
@@ -1927,6 +2005,9 @@ async def _show_shop_plan_options(update: Update, context: ContextTypes.DEFAULT_
 
 @require_auth(permission="shop")
 async def shop_plan_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("shop_plan_field", None)
+        return ConversationHandler.END
     option = update.message.text
     volume = context.user_data.get("shop_plan_volume")
 
@@ -1965,6 +2046,9 @@ async def shop_plan_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @require_auth(permission="shop")
 async def shop_plan_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("shop_plan_field", None)
+        return ConversationHandler.END
     volume = context.user_data.get("shop_plan_volume")
     field = context.user_data.get("shop_plan_field")
     raw_value = update.message.text.strip()
@@ -2039,6 +2123,9 @@ async def shop_plan_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @require_auth(permission="shop")
 async def shop_plan_add_volume(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("shop_new_plan", None)
+        return ConversationHandler.END
     try:
         volume = int(update.message.text.strip())
     except ValueError:
@@ -2055,6 +2142,9 @@ async def shop_plan_add_volume(update: Update, context: ContextTypes.DEFAULT_TYP
 
 @require_auth(permission="shop")
 async def shop_plan_add_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("shop_new_plan", None)
+        return ConversationHandler.END
     title = update.message.text.strip()
     if not title:
         await update.message.reply_text("عنوان نمی‌تواند خالی باشد.")
@@ -2066,6 +2156,9 @@ async def shop_plan_add_title(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 @require_auth(permission="shop")
 async def shop_plan_add_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("shop_new_plan", None)
+        return ConversationHandler.END
     try:
         price = int(update.message.text.replace(",", "").strip())
     except ValueError:
