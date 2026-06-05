@@ -107,6 +107,13 @@ DEFAULT_BUTTONS: tuple[ButtonDefinition, ...] = (
 DEFAULT_MESSAGES: dict[str, str] = {
     "main_menu": default_messages.MAIN_MENU_TEXT,
     "buy_menu": default_messages.BUY_MENU_TEXT,
+    "rules_text": (
+        "**قوانین استفاده از فانتوم**\n\n"
+        "با استفاده از ربات، مسئولیت نگهداری لینک اشتراک و رعایت قوانین سرویس بر عهده شماست.\n"
+        "لطفا لینک‌ها را عمومی منتشر نکنید و فقط برای استفاده شخصی نگه دارید.\n\n"
+        "برای ادامه، قوانین را تایید کنید."
+    ),
+    "rules_accepted": "قوانین تایید شد. خوش آمدید.",
     "wallet": (
         "**کیف پول شما**\n\n"
         "موجودی فعلی: **{wallet_balance} تومان**\n\n"
@@ -232,12 +239,21 @@ class ShopCustomizationService:
                 )
 
         for definition in DEFAULT_PLANS:
-            result = await session.execute(select(ShopPlan).where(ShopPlan.volume_gb == definition.volume_gb))
-            if result.scalar_one_or_none() is None:
+            result = await session.execute(
+                select(ShopPlan).where(
+                    ShopPlan.volume_gb == definition.volume_gb,
+                    ShopPlan.category_key == definition.category_key,
+                )
+            )
+            plan = result.scalar_one_or_none()
+            price_result = await session.execute(select(Price).where(Price.volume_gb == definition.volume_gb))
+            price_row = price_result.scalar_one_or_none()
+            if plan is None:
                 session.add(
                     ShopPlan(
                         volume_gb=definition.volume_gb,
                         title=definition.title,
+                        price=price_row.price if price_row else None,
                         emoji=definition.emoji,
                         premium_emoji_id=definition.premium_emoji_id,
                         category_key=definition.category_key,
@@ -246,6 +262,16 @@ class ShopCustomizationService:
                         display_order=definition.display_order,
                     )
                 )
+            elif plan.price is None and price_row:
+                plan.price = price_row.price
+
+        existing_plans = await session.execute(select(ShopPlan))
+        for plan in existing_plans.scalars().all():
+            if plan.price is None:
+                price_result = await session.execute(select(Price).where(Price.volume_gb == plan.volume_gb))
+                price_row = price_result.scalar_one_or_none()
+                if price_row:
+                    plan.price = price_row.price
         await session.commit()
 
     @staticmethod
@@ -416,8 +442,15 @@ class ShopCustomizationService:
         return category
 
     @staticmethod
-    async def get_plan(session: AsyncSession, volume_gb: int) -> ShopPlan | None:
-        result = await session.execute(select(ShopPlan).where(ShopPlan.volume_gb == volume_gb))
+    async def get_plan(session: AsyncSession, plan_id: int) -> ShopPlan | None:
+        result = await session.execute(select(ShopPlan).where(ShopPlan.id == plan_id))
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def get_plan_by_product(session: AsyncSession, volume_gb: int, category_key: str) -> ShopPlan | None:
+        result = await session.execute(
+            select(ShopPlan).where(ShopPlan.volume_gb == volume_gb, ShopPlan.category_key == _clean_key(category_key))
+        )
         return result.scalar_one_or_none()
 
     @staticmethod
@@ -427,18 +460,22 @@ class ShopCustomizationService:
         volume_gb: int,
         title: str,
         price: int | None = None,
+        category_key: str = "default",
         emoji: str | None = "📦",
         style: str | None = STYLE_SUCCESS,
     ) -> ShopPlan:
-        plan = await ShopCustomizationService.get_plan(session, volume_gb)
+        category_key = _clean_key(category_key)
+        await ShopCustomizationService.ensure_category(session, category_key)
+        plan = await ShopCustomizationService.get_plan_by_product(session, volume_gb, category_key)
         if not plan:
             current = await ShopCustomizationService.list_plans(session)
             plan = ShopPlan(
                 volume_gb=volume_gb,
                 title=title,
+                price=price,
                 emoji=emoji,
                 premium_emoji_id=SHOP_BUTTON_CUSTOM_EMOJI_ID,
-                category_key="default",
+                category_key=category_key,
                 style=style,
                 display_order=len(current),
                 is_active=True,
@@ -446,30 +483,23 @@ class ShopCustomizationService:
             session.add(plan)
         else:
             plan.title = title
+            if price is not None:
+                plan.price = price
             plan.emoji = emoji
             plan.style = style
             plan.is_active = True
             plan.updated_at = datetime.now(timezone.utc)
 
-        if price is not None:
-            price_result = await session.execute(select(Price).where(Price.volume_gb == volume_gb))
-            price_row = price_result.scalar_one_or_none()
-            if price_row:
-                price_row.price = price
-                price_row.updated_at = datetime.now(timezone.utc)
-            else:
-                session.add(Price(volume_gb=volume_gb, price=price))
-
         await session.commit()
         return plan
 
     @staticmethod
-    async def update_plan(session: AsyncSession, volume_gb: int, **values) -> ShopPlan | None:
-        plan = await ShopCustomizationService.get_plan(session, volume_gb)
+    async def update_plan(session: AsyncSession, plan_id: int, **values) -> ShopPlan | None:
+        plan = await ShopCustomizationService.get_plan(session, plan_id)
         if not plan:
             return None
 
-        allowed = {"title", "emoji", "premium_emoji_id", "premium_emoji_position", "emoji_position", "category_key", "style", "display_order", "is_active"}
+        allowed = {"title", "price", "emoji", "premium_emoji_id", "premium_emoji_position", "emoji_position", "category_key", "style", "display_order", "is_active"}
         category_title = values.get("category_title")
         for key, value in values.items():
             if key == "category_title":
@@ -530,16 +560,16 @@ class ShopCustomizationService:
     @staticmethod
     async def buy_category_keyboard(session: AsyncSession, category_key: str, prices: dict | None = None) -> ReplyKeyboardMarkup:
         if not prices:
-            prices = {1: 15000, 2: 28000, 3: 40000, 5: 65000, 10: 120000, 20: 220000}
+            prices = {}
 
         plans = await ShopCustomizationService.get_active_plans(session, category_key)
         rows: dict[int, list[KeyboardButton]] = {}
         for index, plan in enumerate(plans):
-            if plan.volume_gb not in prices:
+            if plan.id not in prices:
                 continue
             row = index // 2
             rows.setdefault(row, []).append(ShopCustomizationService._keyboard_button(
-                ShopCustomizationService.plan_label(plan, prices[plan.volume_gb]),
+                ShopCustomizationService.plan_label(plan, prices[plan.id]),
                 style=plan.style,
                 premium_emoji_id=plan.premium_emoji_id,
             ))
@@ -585,14 +615,14 @@ class ShopCustomizationService:
         return None
 
     @staticmethod
-    async def volume_for_text(session: AsyncSession, text: str, prices: dict, category_key: str | None = None) -> int | None:
+    async def plan_for_text(session: AsyncSession, text: str, prices: dict, category_key: str | None = None) -> int | None:
         plans = await ShopCustomizationService.get_active_plans(session, category_key)
         for plan in plans:
-            price = prices.get(plan.volume_gb)
+            price = prices.get(plan.id)
             if price is None:
                 continue
             if ShopCustomizationService.plan_label(plan, price) == text:
-                return plan.volume_gb
+                return plan.id
         return None
 
     @staticmethod

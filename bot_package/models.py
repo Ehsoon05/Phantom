@@ -16,6 +16,7 @@ class User(Base):
     referral_code = Column(String, unique=True, nullable=True)
     referred_by_user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=True)
     referred_at = Column(DateTime, nullable=True)
+    accepted_rules_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     purchases = relationship("Purchase", back_populates="user")
     referrals = relationship(
@@ -28,6 +29,7 @@ class Config(Base):
     __tablename__ = "configs"
     id = Column(Integer, primary_key=True)
     volume_gb = Column(Integer, nullable=False)
+    category_key = Column(String, nullable=False, default="default")
     sub_link = Column(String, nullable=False, unique=True)
     is_sold = Column(Boolean, default=False)
     sold_to_user_id = Column(BigInteger, nullable=True)
@@ -41,6 +43,7 @@ class Purchase(Base):
     user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
     config_id = Column(Integer, ForeignKey("configs.id"), nullable=False)
     volume_gb = Column(Integer, nullable=False)
+    category_key = Column(String, nullable=False, default="default")
     price = Column(Integer, nullable=False)
     original_price = Column(Integer, nullable=True)
     discount_amount = Column(Integer, nullable=False, default=0)
@@ -162,9 +165,10 @@ class ShopButton(Base):
 class ShopPlan(Base):
     __tablename__ = "shop_plans"
     id = Column(Integer, primary_key=True)
-    volume_gb = Column(Integer, unique=True, nullable=False)
+    volume_gb = Column(Integer, nullable=False)
     category_key = Column(String, nullable=False, default="default")
     title = Column(String, nullable=False)
+    price = Column(Integer, nullable=True)
     emoji = Column(String, nullable=True)
     premium_emoji_id = Column(String, nullable=True)
     premium_emoji_position = Column(String, nullable=False, default="left")

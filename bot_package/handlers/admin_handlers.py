@@ -174,6 +174,7 @@ from ..utils.validators import extract_links_from_text
     SHOP_PLAN_VALUE,
     SHOP_PLAN_ADD_VOLUME,
     SHOP_PLAN_ADD_TITLE,
+    SHOP_PLAN_ADD_CATEGORY,
     SHOP_PLAN_ADD_PRICE,
     SHOP_CATEGORY_SELECT,
     SHOP_CATEGORY_ADD,
@@ -185,7 +186,7 @@ from ..utils.validators import extract_links_from_text
     ADMIN_REMOVE_ID,
     ADMIN_PERMS_ID,
     ADMIN_PERMS_VALUE,
-) = range(47)
+) = range(48)
 
 
 SHOP_MENU_LABELS = {
@@ -257,7 +258,7 @@ def _button_label(button) -> str:
 def _plan_label(plan) -> str:
     status = "فعال" if plan.is_active else "غیرفعال"
     emoji = f"{plan.emoji} " if plan.emoji else ""
-    return f"#{plan.volume_gb} [{plan.category_key}] {emoji}{plan.title} ({status})"
+    return f"#{plan.id} [{plan.category_key}] {emoji}{plan.title} - {plan.volume_gb} گیگ ({status})"
 
 
 def _category_label(category) -> str:
@@ -307,9 +308,9 @@ async def _admin_volume_keyboard(session, action: str) -> ReplyKeyboardMarkup:
     plans = await ShopCustomizationService.list_plans(session)
     active_plans = [plan for plan in plans if plan.is_active]
     if action == "edit_price":
-        labels = [f"✏️ قیمت {plan.volume_gb} گیگ" for plan in active_plans]
+        labels = [f"#{plan.id} ✏️ [{plan.category_key}] {plan.title} - {plan.volume_gb} گیگ" for plan in active_plans]
     else:
-        labels = [f"📦 {plan.volume_gb} گیگ" for plan in active_plans]
+        labels = [f"#{plan.id} 📦 [{plan.category_key}] {plan.title} - {plan.volume_gb} گیگ" for plan in active_plans]
     if not labels:
         labels = [f"📦 {volume} گیگ" for volume in (1, 2, 3, 5, 10, 20)]
     return _rows(labels, width=2)
@@ -499,12 +500,20 @@ async def add_config_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @require_auth(permission="inventory")
 async def add_config_volume(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    volume = _extract_volume(update.message.text)
-    if volume is None:
-        await update.message.reply_text("حجم انتخاب‌شده معتبر نیست.", reply_markup=admin_inventory_keyboard())
+    plan_id = _parse_hash_id(update.message.text)
+    if plan_id is None:
+        await update.message.reply_text("سرویس انتخاب‌شده معتبر نیست.", reply_markup=admin_inventory_keyboard())
         return ConversationHandler.END
 
-    context.user_data["adding_volume"] = volume
+    async with async_session() as session:
+        plan = await ShopCustomizationService.get_plan(session, plan_id)
+    if not plan:
+        await update.message.reply_text("سرویس پیدا نشد.", reply_markup=admin_inventory_keyboard())
+        return ConversationHandler.END
+
+    context.user_data["adding_plan_id"] = plan.id
+    context.user_data["adding_volume"] = plan.volume_gb
+    context.user_data["adding_category_key"] = plan.category_key
     context.user_data["collected_links"] = []
     await update.message.reply_text(
         SEND_LINKS_PROMPT,
@@ -531,17 +540,19 @@ async def collect_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @require_auth(permission="inventory")
 async def done_collecting(update: Update, context: ContextTypes.DEFAULT_TYPE):
     volume = context.user_data.get("adding_volume")
+    category_key = context.user_data.get("adding_category_key", "default")
     links = context.user_data.get("collected_links", [])
     if not volume or not links:
         await update.message.reply_text("لینکی برای ثبت وجود ندارد.", reply_markup=admin_inventory_keyboard())
         return ConversationHandler.END
 
     async with async_session() as session:
-        count = await InventoryService.add_configs(session, volume, links)
+        count = await InventoryService.add_configs(session, volume, links, category_key)
 
     await update.message.reply_text(
-        f"{count} لینک برای پلن {volume} گیگ ثبت شد.",
+        f"{count} لینک برای پلن {volume} گیگ در دسته `{category_key}` ثبت شد.",
         reply_markup=admin_inventory_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
     )
     return ConversationHandler.END
 
@@ -552,14 +563,14 @@ async def stock_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         stock = await InventoryService.get_stock_status(session)
 
     message = STOCK_STATUS_HEADER
-    for volume, count in stock.items():
+    for category_key, volume, title, count in stock:
         if count < 5:
             status = "بحرانی"
         elif count <= 10:
             status = "متوسط"
         else:
             status = "مناسب"
-        message += f"{volume} گیگ: {count} عدد ({status})\n"
+        message += f"[{category_key}] {title} - {volume} گیگ: {count} عدد ({status})\n"
 
     await update.message.reply_text(
         message,
@@ -571,11 +582,13 @@ async def stock_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @require_auth(permission="prices")
 async def view_prices(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with async_session() as session:
-        prices = await PriceService.get_all_prices(session)
+        plans = await ShopCustomizationService.list_plans(session)
 
     message = PRICE_LIST_HEADER.format(datetime.now().strftime("%Y-%m-%d %H:%M"))
-    for volume, price in prices.items():
-        message += f"{volume} گیگ: {price:,} تومان\n"
+    async with async_session() as session:
+        for plan in plans:
+            price = await PriceService.get_plan_price(session, plan)
+            message += f"#{plan.id} [{plan.category_key}] {plan.title} - {plan.volume_gb} گیگ: {(price or 0):,} تومان\n"
 
     await update.message.reply_text(
         message,
@@ -597,17 +610,24 @@ async def edit_price_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @require_auth(permission="prices")
 async def edit_price_enter(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    volume = _extract_volume(update.message.text)
-    if volume is None:
-        await update.message.reply_text("حجم انتخاب‌شده معتبر نیست.", reply_markup=admin_prices_keyboard())
+    plan_id = _parse_hash_id(update.message.text)
+    if plan_id is None:
+        await update.message.reply_text("سرویس انتخاب‌شده معتبر نیست.", reply_markup=admin_prices_keyboard())
         return ConversationHandler.END
 
-    context.user_data["editing_volume"] = volume
     async with async_session() as session:
-        current_price = await PriceService.get_price(session, volume)
+        plan = await ShopCustomizationService.get_plan(session, plan_id)
+        if not plan:
+            await update.message.reply_text("سرویس پیدا نشد.", reply_markup=admin_prices_keyboard())
+            return ConversationHandler.END
+        current_price = await PriceService.get_plan_price(session, plan)
+
+    context.user_data["editing_plan_id"] = plan.id
+    context.user_data["editing_volume"] = plan.volume_gb
+    context.user_data["editing_category_key"] = plan.category_key
 
     await update.message.reply_text(
-        EDIT_PRICE_PROMPT.format(volume, f"{current_price:,}"),
+        EDIT_PRICE_PROMPT.format(plan.volume_gb, f"{(current_price or 0):,}"),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     return ENTER_NEW_PRICE
@@ -615,7 +635,7 @@ async def edit_price_enter(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @require_auth(permission="prices")
 async def save_new_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    volume = context.user_data.get("editing_volume")
+    plan_id = context.user_data.get("editing_plan_id")
     try:
         new_price = int(update.message.text.replace(",", "").strip())
     except ValueError:
@@ -627,11 +647,12 @@ async def save_new_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ENTER_NEW_PRICE
 
     async with async_session() as session:
-        success = await PriceService.update_price(session, volume, new_price)
+        plan = await ShopCustomizationService.update_plan(session, plan_id, price=new_price)
+        success = plan is not None
 
     if success:
         await update.message.reply_text(
-            PRICE_UPDATED.format(volume, f"{new_price:,}", datetime.now().strftime("%H:%M:%S")),
+            PRICE_UPDATED.format(context.user_data.get("editing_volume"), f"{new_price:,}", datetime.now().strftime("%H:%M:%S")),
             reply_markup=admin_prices_keyboard(),
             parse_mode=constants.ParseMode.MARKDOWN,
         )
@@ -2062,7 +2083,7 @@ async def shop_category_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @require_auth(permission="shop")
 async def shop_plan_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await _leave_shop_flow_if_navigation(update, context):
-        context.user_data.pop("shop_plan_volume", None)
+        context.user_data.pop("shop_plan_id", None)
         return ConversationHandler.END
     if update.message.text == ADMIN_ADD_PLAN:
         await update.message.reply_text(
@@ -2072,20 +2093,20 @@ async def shop_plan_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return SHOP_PLAN_ADD_VOLUME
 
-    volume = _parse_hash_id(update.message.text)
-    if volume is None:
+    plan_id = _parse_hash_id(update.message.text)
+    if plan_id is None:
         await update.message.reply_text("پلن معتبر نیست.")
         return SHOP_PLAN_SELECT
 
-    context.user_data["shop_plan_volume"] = volume
+    context.user_data["shop_plan_id"] = plan_id
     return await _show_shop_plan_options(update, context)
 
 
 async def _show_shop_plan_options(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    volume = context.user_data.get("shop_plan_volume")
+    plan_id = context.user_data.get("shop_plan_id")
     async with async_session() as session:
-        plan = await ShopCustomizationService.get_plan(session, volume)
-        price = await PriceService.get_price(session, volume)
+        plan = await ShopCustomizationService.get_plan(session, plan_id)
+        price = await PriceService.get_plan_price(session, plan) if plan else None
 
     if not plan:
         await update.message.reply_text("پلن پیدا نشد.", reply_markup=admin_shop_settings_keyboard())
@@ -2093,6 +2114,7 @@ async def _show_shop_plan_options(update: Update, context: ContextTypes.DEFAULT_
 
     await update.message.reply_text(
         "**ویرایش سرویس**\n\n"
+        f"شناسه: `#{plan.id}`\n"
         f"حجم: **{plan.volume_gb} گیگ**\n"
         f"عنوان: {plan.title}\n"
         f"دسته‌بندی: `{plan.category_key}`\n"
@@ -2116,13 +2138,13 @@ async def shop_plan_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("shop_plan_field", None)
         return ConversationHandler.END
     option = update.message.text
-    volume = context.user_data.get("shop_plan_volume")
+    plan_id = context.user_data.get("shop_plan_id")
 
     if option == ADMIN_TOGGLE_ENABLED:
         async with async_session() as session:
-            plan = await ShopCustomizationService.get_plan(session, volume)
+            plan = await ShopCustomizationService.get_plan(session, plan_id)
             if plan:
-                await ShopCustomizationService.update_plan(session, volume, is_active=not plan.is_active)
+                await ShopCustomizationService.update_plan(session, plan_id, is_active=not plan.is_active)
         await update.message.reply_text("وضعیت سرویس تغییر کرد.")
         return await _show_shop_plan_options(update, context)
 
@@ -2156,7 +2178,7 @@ async def shop_plan_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await _leave_shop_flow_if_navigation(update, context):
         context.user_data.pop("shop_plan_field", None)
         return ConversationHandler.END
-    volume = context.user_data.get("shop_plan_volume")
+    plan_id = context.user_data.get("shop_plan_id")
     field = context.user_data.get("shop_plan_field")
     raw_value = update.message.text.strip()
     updates = {}
@@ -2171,8 +2193,7 @@ async def shop_plan_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("قیمت باید بیشتر از صفر باشد.")
             return SHOP_PLAN_VALUE
         async with async_session() as session:
-            plan = await ShopCustomizationService.get_plan(session, volume)
-            await ShopCustomizationService.upsert_plan(session, volume_gb=volume, title=plan.title, price=price, emoji=plan.emoji, style=plan.style)
+            await ShopCustomizationService.update_plan(session, plan_id, price=price)
         context.user_data.pop("shop_plan_field", None)
         await update.message.reply_text("قیمت سرویس ذخیره شد.")
         return await _show_shop_plan_options(update, context)
@@ -2217,7 +2238,7 @@ async def shop_plan_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
         updates = {"title": raw_value}
 
     async with async_session() as session:
-        plan = await ShopCustomizationService.update_plan(session, volume, **updates)
+        plan = await ShopCustomizationService.update_plan(session, plan_id, **updates)
 
     context.user_data.pop("shop_plan_field", None)
     if not plan:
@@ -2257,6 +2278,32 @@ async def shop_plan_add_title(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("عنوان نمی‌تواند خالی باشد.")
         return SHOP_PLAN_ADD_TITLE
     context.user_data.setdefault("shop_new_plan", {})["title"] = title
+    async with async_session() as session:
+        categories = await ShopCustomizationService.list_categories(session, active_only=True)
+    labels = [_category_label(category) for category in categories]
+    await update.message.reply_text(
+        "دسته این سرویس را انتخاب کنید.",
+        reply_markup=_rows(labels, width=1),
+    )
+    return SHOP_PLAN_ADD_CATEGORY
+
+
+@require_auth(permission="shop")
+async def shop_plan_add_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("shop_new_plan", None)
+        return ConversationHandler.END
+    category_key = None
+    if update.message.text.startswith("#"):
+        category_key = update.message.text.split(" ", 1)[0].lstrip("#")
+    else:
+        category_key = update.message.text.strip()
+    async with async_session() as session:
+        category = await ShopCustomizationService.get_category(session, category_key)
+    if not category:
+        await update.message.reply_text("دسته معتبر نیست. از لیست دکمه‌ها انتخاب کنید.")
+        return SHOP_PLAN_ADD_CATEGORY
+    context.user_data.setdefault("shop_new_plan", {})["category_key"] = category.key
     await update.message.reply_text("قیمت سرویس را به تومان ارسال کنید. مثال: `250000`", reply_markup=_cancel_back_keyboard())
     return SHOP_PLAN_ADD_PRICE
 
@@ -2282,6 +2329,7 @@ async def shop_plan_add_price(update: Update, context: ContextTypes.DEFAULT_TYPE
             volume_gb=draft["volume"],
             title=draft["title"],
             price=price,
+            category_key=draft.get("category_key", "default"),
         )
 
     context.user_data.pop("shop_new_plan", None)
@@ -2338,7 +2386,7 @@ async def shop_button_add_message_back(update: Update, context: ContextTypes.DEF
 
 @require_auth(permission="shop")
 async def shop_plan_options_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.pop("shop_plan_volume", None)
+    context.user_data.pop("shop_plan_id", None)
     return await shop_plans_start(update, context)
 
 
@@ -2364,6 +2412,15 @@ async def shop_plan_add_price_back(update: Update, context: ContextTypes.DEFAULT
     draft = context.user_data.get("shop_new_plan", {})
     if "volume" not in draft:
         return await shop_plan_add_title_back(update, context)
+    async with async_session() as session:
+        categories = await ShopCustomizationService.list_categories(session, active_only=True)
+    labels = [_category_label(category) for category in categories]
+    await update.message.reply_text("دسته این سرویس را انتخاب کنید.", reply_markup=_rows(labels, width=1))
+    return SHOP_PLAN_ADD_CATEGORY
+
+
+@require_auth(permission="shop")
+async def shop_plan_add_category_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("عنوان نمایشی سرویس را ارسال کنید. مثال: `۳۰ گیگ ویژه`", reply_markup=_cancel_back_keyboard())
     return SHOP_PLAN_ADD_TITLE
 
@@ -2381,7 +2438,7 @@ async def admin_management_back(update: Update, context: ContextTypes.DEFAULT_TY
 add_config_conv = ConversationHandler(
     entry_points=[MessageHandler(_exact_filter(ADMIN_ADD_CONFIG), add_config_start)],
     states={
-        CHOOSE_VOLUME_ADD: [MessageHandler(filters.Regex(r"^📦 \d+ گیگ$"), add_config_volume)],
+        CHOOSE_VOLUME_ADD: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_config_volume)],
         COLLECT_LINKS: [
             MessageHandler(_exact_filter(DONE_ADDING_CONFIGS), done_collecting),
             MessageHandler(_exact_filter(CANCEL), cancel),
@@ -2395,7 +2452,7 @@ add_config_conv = ConversationHandler(
 edit_price_conv = ConversationHandler(
     entry_points=[MessageHandler(_exact_filter(ADMIN_EDIT_PRICE), edit_price_select)],
     states={
-        CHOOSE_VOLUME_PRICE: [MessageHandler(filters.Regex(r"^✏️ قیمت \d+ گیگ$"), edit_price_enter)],
+        CHOOSE_VOLUME_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_price_enter)],
         ENTER_NEW_PRICE: [
             MessageHandler(_exact_filter(CANCEL), cancel),
             MessageHandler(_exact_filter(ADMIN_BACK), cancel),
@@ -2731,6 +2788,11 @@ shop_plans_conv = ConversationHandler(
             MessageHandler(_exact_filter(CANCEL), cancel),
             MessageHandler(_exact_filter(ADMIN_BACK), shop_plan_add_title_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_add_title),
+        ],
+        SHOP_PLAN_ADD_CATEGORY: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_plan_add_category_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_add_category),
         ],
         SHOP_PLAN_ADD_PRICE: [
             MessageHandler(_exact_filter(CANCEL), cancel),

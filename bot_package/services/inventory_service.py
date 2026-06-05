@@ -1,43 +1,47 @@
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update
-from ..models import Config, Price
+from ..models import Config, ShopPlan
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 
 class InventoryService:
     @staticmethod
-    async def add_configs(session: AsyncSession, volume_gb: int, links: List[str]) -> int:
+    async def add_configs(session: AsyncSession, volume_gb: int, links: List[str], category_key: str = "default") -> int:
         added_count = 0
         for link in links:
             stmt = select(Config).where(Config.sub_link == link)
             result = await session.execute(stmt)
             if result.scalar_one_or_none() is None:
-                new_config = Config(volume_gb=volume_gb, sub_link=link)
+                new_config = Config(volume_gb=volume_gb, category_key=category_key, sub_link=link)
                 session.add(new_config)
                 added_count += 1
         await session.commit()
         return added_count
     
     @staticmethod
-    async def get_stock_status(session: AsyncSession) -> dict:
+    async def get_stock_status(session: AsyncSession) -> list[tuple[str, int, str, int]]:
         stmt = (
-            select(Config.volume_gb, func.count(Config.id))
+            select(Config.category_key, Config.volume_gb, func.count(Config.id))
             .where(Config.is_sold == False)
-            .group_by(Config.volume_gb)
+            .group_by(Config.category_key, Config.volume_gb)
         )
         result = await session.execute(stmt)
-        stock = {row[0]: row[1] for row in result.fetchall()}
-        price_result = await session.execute(select(Price.volume_gb).order_by(Price.volume_gb))
-        for vol in price_result.scalars().all():
-            stock.setdefault(vol, 0)
-        return dict(sorted(stock.items()))
+        stock = {(row[0] or "default", row[1]): row[2] for row in result.fetchall()}
+        plans_result = await session.execute(
+            select(ShopPlan).order_by(ShopPlan.category_key, ShopPlan.display_order, ShopPlan.volume_gb)
+        )
+        rows = []
+        for plan in plans_result.scalars().all():
+            key = plan.category_key or "default"
+            rows.append((key, plan.volume_gb, plan.title, stock.get((key, plan.volume_gb), 0)))
+        return rows
     
     @staticmethod
-    async def get_available_config(session: AsyncSession, volume_gb: int) -> Optional[Config]:
+    async def get_available_config(session: AsyncSession, volume_gb: int, category_key: str = "default") -> Optional[Config]:
         stmt = (
             select(Config)
-            .where(Config.volume_gb == volume_gb, Config.is_sold == False)
+            .where(Config.volume_gb == volume_gb, Config.category_key == category_key, Config.is_sold == False)
             .limit(1)
         )
         result = await session.execute(stmt)
