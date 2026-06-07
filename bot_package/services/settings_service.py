@@ -11,12 +11,14 @@ RATE_MODE = "crypto_rate_mode"            # "online" | "manual"
 RATE_MARGIN = "crypto_margin_percent"     # float string, e.g. "2.5"
 MANUAL_RATE_USDT = "crypto_manual_rate_usdt"  # toman per 1 USDT
 MANUAL_RATE_TON = "crypto_manual_rate_ton"    # toman per 1 TON
+BRANDED_SUBSCRIPTION_LINKS = "branded_subscription_links_enabled"
 
 DEFAULTS = {
     RATE_MODE: "online",
     RATE_MARGIN: "2.5",
     MANUAL_RATE_USDT: "0",
     MANUAL_RATE_TON: "0",
+    BRANDED_SUBSCRIPTION_LINKS: "true",
 }
 
 
@@ -83,3 +85,12 @@ class SettingsService:
     async def set_manual_rate(session: AsyncSession, coin: str, toman_per_unit: int) -> None:
         key = MANUAL_RATE_TON if coin.upper() == "TON" else MANUAL_RATE_USDT
         await SettingsService.set(session, key, str(int(toman_per_unit)))
+
+    @staticmethod
+    async def branded_links_enabled(session: AsyncSession) -> bool:
+        value = await SettingsService.get(session, BRANDED_SUBSCRIPTION_LINKS, "true")
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    async def set_branded_links_enabled(session: AsyncSession, enabled: bool) -> None:
+        await SettingsService.set(session, BRANDED_SUBSCRIPTION_LINKS, "true" if enabled else "false")

@@ -10,7 +10,6 @@ from ..config_loader import BotConfig
 from ..database import async_session
 from ..models import Purchase
 from ..services.admin_service import ALL_PERMISSIONS, AdminService, normalize_permissions
-from ..services.bot_setting_service import BotSettingService
 from ..services.coupon_service import CouponError, CouponService
 from ..services.crypto_payment_service import CryptoPaymentService, available_coins
 from ..services.rate_service import RateService
@@ -1687,7 +1686,7 @@ async def required_channel_delete(update: Update, context: ContextTypes.DEFAULT_
 @require_auth(permission="shop")
 async def shop_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with async_session() as session:
-        branded_links = await BotSettingService.branded_links_enabled(session)
+        branded_links = await SettingsService.branded_links_enabled(session)
     await update.message.reply_text(
         "**تنظیمات ربات فروش**\n\n"
         "از این بخش می‌توانید متن پیام‌ها، ظاهر و چینش دکمه‌ها، رنگ‌ها، ایموجی پریمیوم و سرویس‌های قابل فروش را مدیریت کنید.\n\n"
@@ -1700,8 +1699,9 @@ async def shop_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
 @require_auth(permission="shop")
 async def toggle_branded_subscription_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with async_session() as session:
-        current = await BotSettingService.branded_links_enabled(session)
-        enabled = await BotSettingService.set_bool(session, BotSettingService.BRANDED_LINKS, not current)
+        current = await SettingsService.branded_links_enabled(session)
+        enabled = not current
+        await SettingsService.set_branded_links_enabled(session, enabled)
     await update.message.reply_text(
         f"ساخت و تحویل لینک اختصاصی ساب **{'روشن' if enabled else 'خاموش'}** شد.",
         reply_markup=admin_shop_settings_keyboard(),

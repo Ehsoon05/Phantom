@@ -17,7 +17,7 @@ from . import crypto_user
 from ..database import async_session
 from ..models import Purchase, Transaction, User
 from ..services.coupon_service import CouponError, CouponService
-from ..services.bot_setting_service import BotSettingService
+from ..services.settings_service import SettingsService
 from ..services.inventory_service import InventoryService
 from ..services.price_service import PriceService
 from ..services.referral_service import ReferralService
@@ -456,7 +456,7 @@ async def process_purchase(
         )
         await session.commit()
 
-        branded_links = await BotSettingService.branded_links_enabled(session)
+        branded_links = await SettingsService.branded_links_enabled(session)
         if branded_links:
             public_sub_link = await SubscriptionLinkService.public_link_for_config(session, config)
             await SubscriptionLinkService.sync_to_panel(config, service_name)
@@ -532,7 +532,7 @@ async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = await _message_markup(session, "purchase_history_header", fallback_keyboard, copy_text=text)
 
         for purchase in purchases:
-            if await BotSettingService.branded_links_enabled(session):
+            if await SettingsService.branded_links_enabled(session):
                 sub_link = await SubscriptionLinkService.public_link_for_config(session, purchase.config)
                 await SubscriptionLinkService.sync_to_panel(purchase.config, purchase.service_name)
             else:
