@@ -17,6 +17,7 @@ from . import crypto_user
 from ..database import async_session
 from ..models import Purchase, Transaction, User
 from ..services.coupon_service import CouponError, CouponService
+from ..services.bot_setting_service import BotSettingService
 from ..services.inventory_service import InventoryService
 from ..services.price_service import PriceService
 from ..services.referral_service import ReferralService
@@ -60,6 +61,10 @@ def _exact_filter(text: str):
 def _extract_volume(text: str) -> int | None:
     match = re.search(r"(\d+)\s*گیگ", text)
     return int(match.group(1)) if match else None
+
+
+def _parse_mode(text: str):
+    return getattr(text, "parse_mode", constants.ParseMode.MARKDOWN)
 
 
 async def _message_markup(session, key: str, fallback_markup=None, *, default_url: str | None = None, copy_text: str | None = None):
@@ -110,7 +115,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         text,
         reply_markup=keyboard,
-        parse_mode=constants.ParseMode.MARKDOWN,
+        parse_mode=_parse_mode(text),
     )
 
 
@@ -135,7 +140,7 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         text,
         reply_markup=keyboard,
-        parse_mode=constants.ParseMode.MARKDOWN,
+        parse_mode=_parse_mode(text),
     )
 
 
@@ -162,7 +167,7 @@ async def buy_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         text,
         reply_markup=keyboard,
-        parse_mode=constants.ParseMode.MARKDOWN,
+        parse_mode=_parse_mode(text),
     )
 
 
@@ -178,7 +183,7 @@ async def buy_category_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     await update.message.reply_text(
         text,
         reply_markup=keyboard,
-        parse_mode=constants.ParseMode.MARKDOWN,
+        parse_mode=_parse_mode(text),
     )
 
 
@@ -200,7 +205,7 @@ async def wallet_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         text,
         reply_markup=keyboard,
-        parse_mode=constants.ParseMode.MARKDOWN,
+        parse_mode=_parse_mode(text),
     )
 
 
@@ -226,11 +231,12 @@ async def referral_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         text,
         reply_markup=referral_share_keyboard(share_url),
-        parse_mode=constants.ParseMode.MARKDOWN,
+        parse_mode=_parse_mode(text),
     )
     await update.message.reply_text(
         followup,
         reply_markup=keyboard,
+        parse_mode=_parse_mode(followup),
     )
 
 
@@ -261,7 +267,7 @@ async def account_info_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         text,
         reply_markup=keyboard,
-        parse_mode=constants.ParseMode.MARKDOWN,
+        parse_mode=_parse_mode(text),
     )
 
 
@@ -274,6 +280,7 @@ async def apply_coupon_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text(
         text,
         reply_markup=keyboard,
+        parse_mode=_parse_mode(text),
     )
 
 
@@ -293,6 +300,7 @@ async def apply_coupon_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 text,
                 reply_markup=keyboard,
+                parse_mode=_parse_mode(text),
             )
             context.user_data.pop("awaiting_coupon_code", None)
             return
@@ -314,7 +322,7 @@ async def apply_coupon_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         text,
         reply_markup=keyboard,
-        parse_mode=constants.ParseMode.MARKDOWN,
+        parse_mode=_parse_mode(text),
     )
 
 
@@ -332,6 +340,7 @@ async def process_purchase(
         await update.message.reply_text(
             text,
             reply_markup=keyboard,
+            parse_mode=_parse_mode(text),
         )
         return
 
@@ -347,7 +356,7 @@ async def process_purchase(
             text = await ShopCustomizationService.get_message(session, "inactive_plan")
             fallback_keyboard = await ShopCustomizationService.main_menu_keyboard(session)
             keyboard = await _message_markup(session, "inactive_plan", fallback_keyboard, copy_text=text)
-            await update.message.reply_text(text, reply_markup=keyboard)
+            await update.message.reply_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
             return
 
         volume = plan.volume_gb
@@ -367,7 +376,7 @@ async def process_purchase(
             text = await ShopCustomizationService.get_message(session, "blocked_user")
             fallback_keyboard = await ShopCustomizationService.main_menu_keyboard(session)
             keyboard = await _message_markup(session, "blocked_user", fallback_keyboard, copy_text=text)
-            await update.message.reply_text(text, reply_markup=keyboard)
+            await update.message.reply_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
             return
 
         original_price = await PriceService.get_plan_price(session, plan)
@@ -375,7 +384,7 @@ async def process_purchase(
             text = await ShopCustomizationService.get_message(session, "inactive_plan")
             fallback_keyboard = await ShopCustomizationService.main_menu_keyboard(session)
             keyboard = await _message_markup(session, "inactive_plan", fallback_keyboard, copy_text=text)
-            await update.message.reply_text(text, reply_markup=keyboard)
+            await update.message.reply_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
             return
 
         coupon = await CouponService.get_active_coupon(session, db_user.telegram_id)
@@ -392,6 +401,7 @@ async def process_purchase(
             await update.message.reply_text(
                 text,
                 reply_markup=keyboard,
+                parse_mode=_parse_mode(text),
             )
             return
 
@@ -403,6 +413,7 @@ async def process_purchase(
             await update.message.reply_text(
                 text,
                 reply_markup=keyboard,
+                parse_mode=_parse_mode(text),
             )
             return
 
@@ -416,6 +427,7 @@ async def process_purchase(
             await update.message.reply_text(
                 text,
                 reply_markup=keyboard,
+                parse_mode=_parse_mode(text),
             )
             return
 
@@ -444,8 +456,12 @@ async def process_purchase(
         )
         await session.commit()
 
-        public_sub_link = await SubscriptionLinkService.public_link_for_config(session, config)
-        await SubscriptionLinkService.sync_to_panel(config, service_name)
+        branded_links = await BotSettingService.branded_links_enabled(session)
+        if branded_links:
+            public_sub_link = await SubscriptionLinkService.public_link_for_config(session, config)
+            await SubscriptionLinkService.sync_to_panel(config, service_name)
+        else:
+            public_sub_link = config.sub_link
         await session.commit()
 
         text = await ShopCustomizationService.get_message(
@@ -462,7 +478,7 @@ async def process_purchase(
         await update.message.reply_text(
             text,
             reply_markup=keyboard,
-            parse_mode=constants.ParseMode.MARKDOWN,
+            parse_mode=_parse_mode(text),
         )
 
 
@@ -474,7 +490,7 @@ async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         text,
         reply_markup=keyboard,
-        parse_mode=constants.ParseMode.MARKDOWN,
+        parse_mode=_parse_mode(text),
     )
 
 
@@ -486,7 +502,7 @@ async def support_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         text,
         reply_markup=keyboard,
-        parse_mode=constants.ParseMode.MARKDOWN,
+        parse_mode=_parse_mode(text),
     )
 
 
@@ -507,7 +523,7 @@ async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text = await ShopCustomizationService.get_message(session, "no_purchase")
             fallback_keyboard = await ShopCustomizationService.back_keyboard(session)
             keyboard = await _message_markup(session, "no_purchase", fallback_keyboard, copy_text=text)
-        await update.message.reply_text(text, reply_markup=keyboard, parse_mode=constants.ParseMode.MARKDOWN)
+        await update.message.reply_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
         return
 
     async with async_session() as session:
@@ -516,8 +532,11 @@ async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = await _message_markup(session, "purchase_history_header", fallback_keyboard, copy_text=text)
 
         for purchase in purchases:
-            sub_link = await SubscriptionLinkService.public_link_for_config(session, purchase.config)
-            await SubscriptionLinkService.sync_to_panel(purchase.config, purchase.service_name)
+            if await BotSettingService.branded_links_enabled(session):
+                sub_link = await SubscriptionLinkService.public_link_for_config(session, purchase.config)
+                await SubscriptionLinkService.sync_to_panel(purchase.config, purchase.service_name)
+            else:
+                sub_link = purchase.config.sub_link
             discount = f" | تخفیف: {purchase.discount_amount:,} تومان" if purchase.discount_amount else ""
             coupon = f" | کد: {purchase.coupon_code}" if purchase.coupon_code else ""
             text += await ShopCustomizationService.get_message(
@@ -537,7 +556,7 @@ async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         text,
         reply_markup=keyboard,
-        parse_mode=constants.ParseMode.MARKDOWN,
+        parse_mode=_parse_mode(text),
     )
 
 
@@ -547,7 +566,7 @@ async def cancel_coupon(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = await ShopCustomizationService.get_message(session, "coupon_cancelled")
         fallback_keyboard = await ShopCustomizationService.wallet_keyboard(session)
         keyboard = await _message_markup(session, "coupon_cancelled", fallback_keyboard, copy_text=text)
-    await update.message.reply_text(text, reply_markup=keyboard)
+    await update.message.reply_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
 
 
 async def ask_service_name(update: Update, context: ContextTypes.DEFAULT_TYPE, plan_id: int):
@@ -560,7 +579,7 @@ async def ask_service_name(update: Update, context: ContextTypes.DEFAULT_TYPE, p
     await update.message.reply_text(
         text,
         reply_markup=keyboard,
-        parse_mode=constants.ParseMode.MARKDOWN,
+        parse_mode=_parse_mode(text),
     )
 
 
@@ -571,7 +590,7 @@ async def receive_service_name(update: Update, context: ContextTypes.DEFAULT_TYP
             text = await ShopCustomizationService.get_message(session, "service_name_invalid")
             fallback_keyboard = await ShopCustomizationService.back_keyboard(session)
             keyboard = await _message_markup(session, "service_name_invalid", fallback_keyboard, copy_text=text)
-        await update.message.reply_text(text, reply_markup=keyboard)
+        await update.message.reply_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
         return
 
     plan_id = context.user_data.get("pending_purchase_plan_id")
@@ -589,7 +608,7 @@ async def rules_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(
         text,
         reply_markup=keyboard,
-        parse_mode=constants.ParseMode.MARKDOWN,
+        parse_mode=_parse_mode(text),
     )
 
 
@@ -609,7 +628,7 @@ async def accept_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await ReferralService.ensure_referral_code(session, user)
         text = await ShopCustomizationService.get_message(session, "rules_accepted")
         await session.commit()
-    await update.message.reply_text(text)
+    await update.message.reply_text(text, parse_mode=_parse_mode(text))
     await main_menu(update, context)
 
 
@@ -692,7 +711,7 @@ async def shop_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             message,
             reply_markup=keyboard,
-            parse_mode=constants.ParseMode.MARKDOWN,
+            parse_mode=_parse_mode(message),
         )
     else:
         await main_menu(update, context)

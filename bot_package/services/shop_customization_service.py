@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import html
+import re
 from string import Formatter
 
 from sqlalchemy import select
@@ -29,6 +31,27 @@ from ..utils.keyboards import (
 
 
 PARSE_MODE_MARKDOWN = "Markdown"
+
+
+class RenderedMessage(str):
+    parse_mode: str
+
+    def __new__(cls, value: str, parse_mode: str = PARSE_MODE_MARKDOWN):
+        instance = super().__new__(cls, value)
+        instance.parse_mode = parse_mode
+        return instance
+
+
+def _markdown_to_telegram_html(value: str) -> str:
+    escaped = html.escape(value, quote=False)
+    escaped = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped, flags=re.DOTALL)
+    escaped = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", escaped)
+    escaped = re.sub(
+        r"\[([^\]]+)\]\((https?://[^)\s]+|tg://[^)\s]+)\)",
+        r'<a href="\2">\1</a>',
+        escaped,
+    )
+    return escaped
 
 
 @dataclass(frozen=True)
@@ -516,15 +539,25 @@ class ShopCustomizationService:
         return plan
 
     @staticmethod
-    async def get_message(session: AsyncSession, key: str, **values) -> str:
+    async def get_message(session: AsyncSession, key: str, **values) -> RenderedMessage:
         result = await session.execute(
             select(ShopMessage).where(ShopMessage.key == key, ShopMessage.is_active == True)
         )
         message = result.scalar_one_or_none()
         template = message.text if message else DEFAULT_MESSAGES[key]
-        if not values:
-            return template
-        return _safe_format(template, values)
+        rendered = _safe_format(template, values) if values else template
+        premium_id = message.premium_emoji_id if message else None
+        position = message.premium_emoji_position if message else "none"
+        if not _is_valid_custom_emoji_id(premium_id) or position == "none":
+            return RenderedMessage(rendered, message.parse_mode if message and message.parse_mode else PARSE_MODE_MARKDOWN)
+
+        custom_emoji = f'<tg-emoji emoji-id="{premium_id}">⭐</tg-emoji>'
+        rendered_html = _markdown_to_telegram_html(rendered)
+        if position == "right":
+            rendered_html = f"{rendered_html} {custom_emoji}"
+        else:
+            rendered_html = f"{custom_emoji} {rendered_html}"
+        return RenderedMessage(rendered_html, "HTML")
 
     @staticmethod
     async def main_menu_keyboard(session: AsyncSession) -> ReplyKeyboardMarkup:

@@ -10,6 +10,7 @@ from ..config_loader import BotConfig
 from ..database import async_session
 from ..models import Purchase
 from ..services.admin_service import ALL_PERMISSIONS, AdminService, normalize_permissions
+from ..services.bot_setting_service import BotSettingService
 from ..services.coupon_service import CouponError, CouponService
 from ..services.crypto_payment_service import CryptoPaymentService, available_coins
 from ..services.rate_service import RateService
@@ -84,6 +85,7 @@ from ..utils.keyboards import (
     ADMIN_SHOP_SETTINGS,
     ADMIN_STOCK_STATUS,
     ADMIN_TOGGLE_ENABLED,
+    ADMIN_TOGGLE_BRANDED_LINKS,
     ADMIN_USERS,
     ADMIN_USER_STATS,
     ADMIN_EMOJI_LEFT,
@@ -240,6 +242,7 @@ SHOP_SETTINGS_LABELS = {
     ADMIN_SHOP_PLANS,
     ADMIN_SHOP_RESET_DEFAULTS,
     ADMIN_REQUIRED_CHANNELS,
+    ADMIN_TOGGLE_BRANDED_LINKS,
 }
 
 
@@ -315,6 +318,8 @@ async def _leave_shop_flow_if_navigation(update: Update, context: ContextTypes.D
             await shop_plans_start(update, context)
         elif text == ADMIN_REQUIRED_CHANNELS:
             await required_channels_start(update, context)
+        elif text == ADMIN_TOGGLE_BRANDED_LINKS:
+            await toggle_branded_subscription_links(update, context)
         elif text == ADMIN_SHOP_RESET_DEFAULTS:
             await shop_reset_defaults(update, context)
         return True
@@ -1681,9 +1686,24 @@ async def required_channel_delete(update: Update, context: ContextTypes.DEFAULT_
 
 @require_auth(permission="shop")
 async def shop_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        branded_links = await BotSettingService.branded_links_enabled(session)
     await update.message.reply_text(
         "**تنظیمات ربات فروش**\n\n"
-        "از این بخش می‌توانید متن پیام‌ها، ظاهر و چینش دکمه‌ها، رنگ‌ها، ایموجی پریمیوم و سرویس‌های قابل فروش را مدیریت کنید.",
+        "از این بخش می‌توانید متن پیام‌ها، ظاهر و چینش دکمه‌ها، رنگ‌ها، ایموجی پریمیوم و سرویس‌های قابل فروش را مدیریت کنید.\n\n"
+        f"لینک اختصاصی ساب: **{'روشن' if branded_links else 'خاموش'}**",
+        reply_markup=admin_shop_settings_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+
+
+@require_auth(permission="shop")
+async def toggle_branded_subscription_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        current = await BotSettingService.branded_links_enabled(session)
+        enabled = await BotSettingService.set_bool(session, BotSettingService.BRANDED_LINKS, not current)
+    await update.message.reply_text(
+        f"ساخت و تحویل لینک اختصاصی ساب **{'روشن' if enabled else 'خاموش'}** شد.",
         reply_markup=admin_shop_settings_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
@@ -3144,6 +3164,7 @@ admin_handlers = [
     MessageHandler(_exact_filter(ADMIN_ADMINS), admin_management_menu),
     MessageHandler(_exact_filter(ADMIN_REFRESH_ADMINS), list_admins),
     MessageHandler(_exact_filter(ADMIN_SHOP_SETTINGS), shop_settings_menu),
+    MessageHandler(_exact_filter(ADMIN_TOGGLE_BRANDED_LINKS), toggle_branded_subscription_links),
     MessageHandler(_exact_filter(ADMIN_SHOP_RESET_DEFAULTS), shop_reset_defaults),
     MessageHandler(
         filters.Regex(
