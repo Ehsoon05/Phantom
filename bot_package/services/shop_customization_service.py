@@ -41,6 +41,22 @@ class RenderedMessage(str):
         instance.parse_mode = parse_mode
         return instance
 
+    def __add__(self, other):
+        other_mode = getattr(other, "parse_mode", PARSE_MODE_MARKDOWN)
+        if self.parse_mode == "HTML" or other_mode == "HTML":
+            left = str(self) if self.parse_mode == "HTML" else _markdown_to_telegram_html(str(self))
+            right = str(other) if other_mode == "HTML" else _markdown_to_telegram_html(str(other))
+            return RenderedMessage(left + right, "HTML")
+        return RenderedMessage(super().__add__(str(other)), self.parse_mode)
+
+    def __radd__(self, other):
+        other_mode = getattr(other, "parse_mode", PARSE_MODE_MARKDOWN)
+        if self.parse_mode == "HTML" or other_mode == "HTML":
+            left = str(other) if other_mode == "HTML" else _markdown_to_telegram_html(str(other))
+            right = str(self) if self.parse_mode == "HTML" else _markdown_to_telegram_html(str(self))
+            return RenderedMessage(left + right, "HTML")
+        return RenderedMessage(str(other) + str(self), self.parse_mode)
+
 
 def _markdown_to_telegram_html(value: str) -> str:
     escaped = html.escape(value, quote=False)
