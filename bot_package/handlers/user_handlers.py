@@ -1,11 +1,12 @@
+import html
 import re
 from datetime import datetime, timezone
 from urllib.parse import quote
 
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
-from telegram import ReplyKeyboardMarkup, Update, constants
-from telegram.ext import CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update, constants
+from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 try:
     from telegram.helpers import escape_markdown
 except ImportError:
@@ -528,36 +529,115 @@ async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     async with async_session() as session:
         text = await ShopCustomizationService.get_message(session, "purchase_history_header")
-        fallback_keyboard = await ShopCustomizationService.back_keyboard(session)
-        keyboard = await _message_markup(session, "purchase_history_header", fallback_keyboard, copy_text=text)
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(purchase.service_name or f"{purchase.volume_gb} گیگ", callback_data=f"service:{purchase.id}")]
+            for purchase in purchases
+        ]
+    )
+    await update.effective_message.reply_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
 
-        for purchase in purchases:
-            if await SettingsService.branded_links_enabled(session):
-                sub_link = await SubscriptionLinkService.public_link_for_config(session, purchase.config)
-                await SubscriptionLinkService.sync_to_panel(purchase.config, purchase.service_name)
-            else:
-                sub_link = purchase.config.sub_link
-            discount = f" | تخفیف: {purchase.discount_amount:,} تومان" if purchase.discount_amount else ""
-            coupon = f" | کد: {purchase.coupon_code}" if purchase.coupon_code else ""
-            text += await ShopCustomizationService.get_message(
-                session,
-                "purchase_history_item",
-                service_name=escape_markdown(purchase.service_name or f"{purchase.volume_gb} گیگ", version=1),
-                volume=purchase.volume_gb,
-                category=purchase.category_key or "default",
-                price=f"{purchase.price:,}",
-                discount=discount,
-                coupon=coupon,
-                purchased_at=purchase.purchased_at.strftime("%Y-%m-%d %H:%M"),
-                sub_link=sub_link,
+
+def _format_service_bytes(value: int | None) -> str:
+    if value is None:
+        return "نامشخص"
+    units = ("بایت", "کیلوبایت", "مگابایت", "گیگابایت", "ترابایت")
+    size = float(max(value, 0))
+    index = 0
+    while size >= 1024 and index < len(units) - 1:
+        size /= 1024
+        index += 1
+    return f"{size:.1f} {units[index]}"
+
+
+def _format_expiry(expire: int | None) -> tuple[str, str]:
+    if not expire:
+        return "نامحدود", "نامحدود"
+    expiry = datetime.fromtimestamp(expire, timezone.utc)
+    remaining = expiry - datetime.now(timezone.utc)
+    if remaining.total_seconds() <= 0:
+        return expiry.strftime("%Y-%m-%d %H:%M UTC"), "منقضی شده"
+    days = remaining.days
+    hours = remaining.seconds // 3600
+    return expiry.strftime("%Y-%m-%d %H:%M UTC"), f"{days} روز و {hours} ساعت"
+
+
+async def service_details_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if query.data == "services:list":
+        await query.answer()
+        async with async_session() as session:
+            result = await session.execute(
+                select(Purchase)
+                .where(Purchase.user_id == update.effective_user.id)
+                .order_by(Purchase.purchased_at.desc())
+                .limit(10)
             )
+            purchases = result.scalars().all()
+            text = await ShopCustomizationService.get_message(session, "purchase_history_header")
+        keyboard = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton(purchase.service_name or f"{purchase.volume_gb} گیگ", callback_data=f"service:{purchase.id}")]
+                for purchase in purchases
+            ]
+        )
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
+        return
+
+    try:
+        purchase_id = int(query.data.split(":", 1)[1])
+    except (AttributeError, IndexError, ValueError):
+        await query.answer("سرویس نامعتبر است.", show_alert=True)
+        return
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Purchase)
+            .options(selectinload(Purchase.config))
+            .where(Purchase.id == purchase_id, Purchase.user_id == update.effective_user.id)
+        )
+        purchase = result.scalar_one_or_none()
+        if not purchase:
+            await query.answer("این سرویس پیدا نشد.", show_alert=True)
+            return
+        await query.answer()
+        if await SettingsService.branded_links_enabled(session):
+            sub_link = await SubscriptionLinkService.public_link_for_config(session, purchase.config)
+            await SubscriptionLinkService.sync_to_panel(purchase.config, purchase.service_name)
+            token = purchase.config.public_sub_token
+        else:
+            sub_link = purchase.config.sub_link
+            token = None
         await session.commit()
 
-    await update.message.reply_text(
-        text,
-        reply_markup=keyboard,
-        parse_mode=_parse_mode(text),
+    metadata = await SubscriptionLinkService.fetch_metadata(token) if token else None
+    expiry_text, remaining_time = _format_expiry(metadata.get("expire") if metadata else None)
+    original_title = metadata.get("title") if metadata else "نامشخص"
+    remaining_volume = _format_service_bytes(metadata.get("remaining")) if metadata else "نامشخص"
+    used_volume = _format_service_bytes(metadata.get("used")) if metadata else "نامشخص"
+    total_volume = _format_service_bytes(metadata.get("total")) if metadata else f"{purchase.volume_gb} گیگابایت"
+    config_count = metadata.get("config_count", "نامشخص") if metadata else "نامشخص"
+    text = (
+        f"<b>{html.escape(purchase.service_name or f'{purchase.volume_gb} گیگ')}</b>\n\n"
+        f"نام اصلی اشتراک: <b>{html.escape(str(original_title))}</b>\n"
+        f"دسته‌بندی: <b>{html.escape(purchase.category_key or 'default')}</b>\n"
+        f"حجم کل: <b>{total_volume}</b>\n"
+        f"حجم مصرف‌شده: <b>{used_volume}</b>\n"
+        f"حجم باقی‌مانده: <b>{remaining_volume}</b>\n"
+        f"تاریخ انقضا: <b>{expiry_text}</b>\n"
+        f"زمان باقی‌مانده: <b>{remaining_time}</b>\n"
+        f"تعداد کانفیگ: <b>{config_count}</b>\n"
+        f"تاریخ خرید: <b>{purchase.purchased_at.strftime('%Y-%m-%d %H:%M')}</b>\n"
+        f"مبلغ پرداختی: <b>{purchase.price:,} تومان</b>"
     )
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("باز کردن لینک اشتراک", url=sub_link)],
+            [InlineKeyboardButton("کپی لینک", api_kwargs={"copy_text": {"text": sub_link}})],
+            [InlineKeyboardButton("بازگشت به سرویس‌ها", callback_data="services:list")],
+        ]
+    )
+    await query.edit_message_text(text, reply_markup=keyboard, parse_mode=constants.ParseMode.HTML)
 
 
 async def cancel_coupon(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -727,5 +807,6 @@ user_handlers = [
     CommandHandler("help", help_menu),
     CommandHandler("support", support_menu),
     CommandHandler("cancel", cancel_coupon),
+    CallbackQueryHandler(service_details_callback, pattern=r"^(service:\d+|services:list)$"),
     MessageHandler(filters.TEXT & ~filters.COMMAND, shop_text_router),
 ]
