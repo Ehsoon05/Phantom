@@ -3,7 +3,7 @@ set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/phantom}"
 REMOTE="${REMOTE:-origin}"
-BRANCH="${BRANCH:-main}"
+BRANCH="${BRANCH:-WIP}"
 SERVICE_NAME="${SERVICE_NAME:-phantom-bot.service}"
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -16,7 +16,7 @@ install -m 0755 scripts/update_from_git.sh /usr/local/bin/phantom-update-from-gi
 sed \
   -e "s|/opt/phantom|$APP_DIR|g" \
   -e "s|REMOTE=origin|REMOTE=$REMOTE|g" \
-  -e "s|BRANCH=main|BRANCH=$BRANCH|g" \
+  -e "s|BRANCH=WIP|BRANCH=$BRANCH|g" \
   -e "s|SERVICE_NAME=phantom-bot.service|SERVICE_NAME=$SERVICE_NAME|g" \
   deploy/systemd/phantom-auto-update.service > /etc/systemd/system/phantom-auto-update.service
 
