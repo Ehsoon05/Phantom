@@ -158,6 +158,24 @@ async def test_shop_category_can_be_fully_customized(db):
     assert updated.is_active is False
 
 
+def test_admin_category_button_label_is_short_and_hides_internal_key():
+    from types import SimpleNamespace
+
+    from bot_package.handlers.admin_handlers import _category_label
+
+    category = SimpleNamespace(
+        key="reality_servers_internal",
+        title="سرورهای Reality",
+        emoji="🌐",
+        is_active=True,
+    )
+
+    label = _category_label(category)
+
+    assert label == "✅ 🌐 سرورهای Reality"
+    assert category.key not in label
+
+
 @pytest.mark.asyncio
 async def test_shop_category_delete_is_blocked_while_in_use(db):
     from bot_package.models import Config

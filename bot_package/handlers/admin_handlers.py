@@ -285,14 +285,9 @@ def _plan_label(plan) -> str:
 
 
 def _category_label(category) -> str:
-    status = "فعال" if category.is_active else "غیرفعال"
+    status = "✅" if category.is_active else "⏸"
     emoji = f"{category.emoji} " if category.emoji else ""
-    return f"#{category.key} {emoji}{category.title} ({status})"
-
-
-def _parse_category_key(text: str) -> str | None:
-    match = re.match(r"#([A-Za-z0-9_-]+)\b", text.strip())
-    return match.group(1) if match else None
+    return f"{status} {emoji}{category.title}"
 
 
 def _parse_hash_id(text: str) -> int | None:
@@ -2169,11 +2164,13 @@ async def shop_category_select(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return SHOP_CATEGORY_ADD
 
-    key = _parse_category_key(update.message.text)
-    if not key:
+    async with async_session() as session:
+        categories = await ShopCustomizationService.list_categories(session)
+    matches = [category for category in categories if _category_label(category) == update.message.text]
+    if len(matches) != 1:
         await update.message.reply_text("دسته انتخاب‌شده معتبر نیست.")
         return SHOP_CATEGORY_SELECT
-    return await _show_shop_category_options(update, context, key)
+    return await _show_shop_category_options(update, context, matches[0].key)
 
 
 @require_auth(permission="shop")
