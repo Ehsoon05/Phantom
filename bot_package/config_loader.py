@@ -2,7 +2,9 @@ import os
 
 from dotenv import load_dotenv
 
-load_dotenv()
+if os.environ.get("_PHANTOM_DOTENV_LOADED") != "1":
+    load_dotenv()
+    os.environ["_PHANTOM_DOTENV_LOADED"] = "1"
 
 
 def _parse_int(value: str) -> int:
