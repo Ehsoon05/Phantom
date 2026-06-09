@@ -347,11 +347,17 @@ class ShopCustomizationService:
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def update_message(session: AsyncSession, key: str, text: str) -> ShopMessage | None:
+    async def update_message(
+        session: AsyncSession,
+        key: str,
+        text: str,
+        parse_mode: str = PARSE_MODE_MARKDOWN,
+    ) -> ShopMessage | None:
         message = await ShopCustomizationService.get_message_row(session, key)
         if not message:
             return None
         message.text = text
+        message.parse_mode = parse_mode
         message.updated_at = datetime.now(timezone.utc)
         await session.commit()
         return message
@@ -561,14 +567,18 @@ class ShopCustomizationService:
         )
         message = result.scalar_one_or_none()
         template = message.text if message else DEFAULT_MESSAGES[key]
-        rendered = _safe_format(template, values) if values else template
+        parse_mode = message.parse_mode if message and message.parse_mode else PARSE_MODE_MARKDOWN
+        if values:
+            rendered = _safe_format_html(template, values) if parse_mode == "HTML" else _safe_format(template, values)
+        else:
+            rendered = template
         premium_id = message.premium_emoji_id if message else None
         position = message.premium_emoji_position if message else "none"
         if not _is_valid_custom_emoji_id(premium_id) or position == "none":
-            return RenderedMessage(rendered, message.parse_mode if message and message.parse_mode else PARSE_MODE_MARKDOWN)
+            return RenderedMessage(rendered, parse_mode)
 
         custom_emoji = f'<tg-emoji emoji-id="{premium_id}">⭐</tg-emoji>'
-        rendered_html = _markdown_to_telegram_html(rendered)
+        rendered_html = rendered if parse_mode == "HTML" else _markdown_to_telegram_html(rendered)
         if position == "right":
             rendered_html = f"{rendered_html} {custom_emoji}"
         else:
@@ -863,4 +873,13 @@ def _insert_after_heading(text: str, line: str) -> str:
 def _safe_format(template: str, values: dict) -> str:
     allowed_keys = {field_name for _, field_name, _, _ in Formatter().parse(template) if field_name}
     safe_values = {key: values.get(key, "{" + key + "}") for key in allowed_keys}
+    return template.format(**safe_values)
+
+
+def _safe_format_html(template: str, values: dict) -> str:
+    allowed_keys = {field_name for _, field_name, _, _ in Formatter().parse(template) if field_name}
+    safe_values = {
+        key: html.escape(str(values.get(key, "{" + key + "}")), quote=False)
+        for key in allowed_keys
+    }
     return template.format(**safe_values)

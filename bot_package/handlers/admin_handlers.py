@@ -368,6 +368,14 @@ def _read_custom_emoji_id(message, raw_text: str) -> str | None:
     return _extract_custom_emoji_id(message) or _normalize_custom_emoji_id(raw_text)
 
 
+def _message_text_for_storage(message) -> tuple[str, str]:
+    if _extract_custom_emoji_id(message):
+        text_html = getattr(message, "text_html", None)
+        if isinstance(text_html, str) and text_html:
+            return text_html, constants.ParseMode.HTML
+    return message.text, constants.ParseMode.MARKDOWN
+
+
 def _admin_user_preview(user) -> str:
     username = f"@{user.username}" if user.username else "ندارد"
     status = "مسدود" if user.is_blocked else "فعال"
@@ -1856,8 +1864,14 @@ async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("لینک/متن کپی دکمه جواب پیام ذخیره شد.")
         return await _show_shop_message_editor(update, context, key)
 
+    message_text, parse_mode = _message_text_for_storage(update.message)
     async with async_session() as session:
-        message = await ShopCustomizationService.update_message(session, key, update.message.text)
+        message = await ShopCustomizationService.update_message(
+            session,
+            key,
+            message_text,
+            parse_mode=parse_mode,
+        )
 
     context.user_data.pop("shop_message_key", None)
     if not message:

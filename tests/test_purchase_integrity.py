@@ -163,6 +163,52 @@ async def test_shop_message_renders_premium_emoji_and_keeps_markdown_formatting(
 
 
 @pytest.mark.asyncio
+async def test_shop_message_preserves_inline_premium_emojis(db):
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    inline_emoji = '<tg-emoji emoji-id="5373141891321699086">🔥</tg-emoji>'
+    async with db.async_session() as session:
+        await ShopCustomizationService.init_defaults(session)
+        await ShopCustomizationService.update_message(
+            session,
+            "account_info",
+            f"{inline_emoji} سلام {{first_name}}",
+            parse_mode="HTML",
+        )
+        rendered = await ShopCustomizationService.get_message(
+            session,
+            "account_info",
+            first_name="<Ehsan>",
+        )
+
+    assert rendered.parse_mode == "HTML"
+    assert inline_emoji in rendered
+    assert "&lt;Ehsan&gt;" in rendered
+
+
+def test_admin_message_storage_uses_telegram_html_for_custom_emoji():
+    from types import SimpleNamespace
+
+    from bot_package.handlers.admin_handlers import _message_text_for_storage
+
+    message = SimpleNamespace(
+        text="🔥 پیام",
+        text_html='<tg-emoji emoji-id="5373141891321699086">🔥</tg-emoji> پیام',
+        entities=[
+            SimpleNamespace(
+                type="custom_emoji",
+                custom_emoji_id="5373141891321699086",
+            )
+        ],
+    )
+
+    text, parse_mode = _message_text_for_storage(message)
+
+    assert parse_mode == "HTML"
+    assert 'emoji-id="5373141891321699086"' in text
+
+
+@pytest.mark.asyncio
 async def test_branded_subscription_link_setting_can_be_toggled(db):
     from bot_package.services.settings_service import SettingsService
 
