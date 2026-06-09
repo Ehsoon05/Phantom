@@ -1736,18 +1736,31 @@ async def shop_message_select(update: Update, context: ContextTypes.DEFAULT_TYPE
     if await _leave_shop_flow_if_navigation(update, context):
         return ConversationHandler.END
     key = update.message.text.removeprefix("📝").strip()
+    return await _show_shop_message_editor(update, context, key)
+
+
+async def _show_shop_message_editor(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str):
     async with async_session() as session:
         message = await ShopCustomizationService.get_message_row(session, key)
-
     if not message:
         await update.message.reply_text("این پیام پیدا نشد.", reply_markup=admin_shop_settings_keyboard())
         return ConversationHandler.END
 
     context.user_data["shop_message_key"] = key
+    context.user_data.pop("shop_message_field", None)
     button_type = message.response_button_type or "text"
     button_text = message.response_button_text or "-"
     button_url = message.response_button_url or "-"
+    premium_emoji = message.premium_emoji_id or "-"
+    premium_position = {
+        "left": "چپ",
+        "right": "راست",
+        "none": "غیرفعال",
+    }.get(message.premium_emoji_position, "غیرفعال")
     extra_note = (
+        "\n\nایموجی پریمیوم پیام:\n"
+        f"آیدی فعلی: {premium_emoji}\n"
+        f"جای فعلی: {premium_position}\n"
         "\n\nتنظیم دکمه جواب همین پیام:\n"
         f"نوع فعلی: {button_type}\n"
         f"متن دکمه: {button_text}\n"
@@ -1771,6 +1784,52 @@ async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     key = context.user_data.get("shop_message_key")
     raw_value = update.message.text.strip()
+    pending_field = context.user_data.get("shop_message_field")
+    if pending_field == "premium_emoji_id":
+        premium_emoji_id = _read_custom_emoji_id(update.message, raw_value)
+        if premium_emoji_id == "":
+            await update.message.reply_text(
+                "ایموجی پریمیوم را مستقیم ارسال کنید تا آیدی‌اش خودکار خوانده شود. برای حذف، `-` بفرستید.",
+                parse_mode=constants.ParseMode.MARKDOWN,
+            )
+            return SHOP_MESSAGE_TEXT
+        async with async_session() as session:
+            await ShopCustomizationService.update_message_settings(
+                session,
+                key,
+                premium_emoji_id=premium_emoji_id,
+                premium_emoji_position="left" if premium_emoji_id else "none",
+            )
+        await update.message.reply_text("ایموجی پریمیوم پیام ذخیره شد.")
+        return await _show_shop_message_editor(update, context, key)
+    if pending_field == "premium_emoji_position":
+        position = EMOJI_POSITION_VALUES.get(raw_value)
+        if not position:
+            await update.message.reply_text("جای ایموجی را از دکمه‌های چپ یا راست انتخاب کنید.")
+            return SHOP_MESSAGE_TEXT
+        async with async_session() as session:
+            await ShopCustomizationService.update_message_settings(
+                session,
+                key,
+                premium_emoji_position=position,
+            )
+        await update.message.reply_text("جای ایموجی پریمیوم پیام ذخیره شد.")
+        return await _show_shop_message_editor(update, context, key)
+    if raw_value == ADMIN_EDIT_PREMIUM_EMOJI:
+        context.user_data["shop_message_field"] = "premium_emoji_id"
+        await update.message.reply_text(
+            "ایموجی پریمیوم را مستقیم ارسال کنید تا آیدی آن خودکار خوانده شود.\nبرای حذف ایموجی، `-` بفرستید.",
+            reply_markup=_cancel_back_keyboard(),
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
+        return SHOP_MESSAGE_TEXT
+    if raw_value == ADMIN_EDIT_PREMIUM_EMOJI_POSITION:
+        context.user_data["shop_message_field"] = "premium_emoji_position"
+        await update.message.reply_text(
+            "جای نمایش ایموجی پریمیوم را انتخاب کنید.",
+            reply_markup=admin_emoji_position_keyboard(),
+        )
+        return SHOP_MESSAGE_TEXT
     if raw_value in RESPONSE_BUTTON_VALUES:
         async with async_session() as session:
             await ShopCustomizationService.update_message_settings(
@@ -1779,8 +1838,7 @@ async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 response_button_type=RESPONSE_BUTTON_VALUES[raw_value],
             )
         await update.message.reply_text("نوع دکمه جواب پیام ذخیره شد.")
-        context.user_data.pop("shop_message_key", None)
-        return await shop_messages_start(update, context)
+        return await _show_shop_message_editor(update, context, key)
     if raw_value.startswith("متن دکمه:"):
         button_text = raw_value.split(":", 1)[1].strip()
         if not button_text:
@@ -1789,16 +1847,14 @@ async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
         async with async_session() as session:
             await ShopCustomizationService.update_message_settings(session, key, response_button_text=button_text)
         await update.message.reply_text("متن دکمه جواب پیام ذخیره شد.")
-        context.user_data.pop("shop_message_key", None)
-        return await shop_messages_start(update, context)
+        return await _show_shop_message_editor(update, context, key)
     if raw_value.startswith("لینک دکمه:"):
         button_url = raw_value.split(":", 1)[1].strip()
         value = None if button_url in {"", "-", "حذف"} else button_url
         async with async_session() as session:
             await ShopCustomizationService.update_message_settings(session, key, response_button_url=value)
         await update.message.reply_text("لینک/متن کپی دکمه جواب پیام ذخیره شد.")
-        context.user_data.pop("shop_message_key", None)
-        return await shop_messages_start(update, context)
+        return await _show_shop_message_editor(update, context, key)
 
     async with async_session() as session:
         message = await ShopCustomizationService.update_message(session, key, update.message.text)

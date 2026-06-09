@@ -404,6 +404,7 @@ def admin_response_button_keyboard() -> ReplyKeyboardMarkup:
         [
             [_button(ADMIN_RESPONSE_TEXT), _button(ADMIN_RESPONSE_INLINE_COPY)],
             [_button(ADMIN_RESPONSE_INLINE_URL), _button(ADMIN_RESPONSE_REPLY_KEYBOARD)],
+            [_button(ADMIN_EDIT_PREMIUM_EMOJI), _button(ADMIN_EDIT_PREMIUM_EMOJI_POSITION)],
             [_button(CANCEL), _button(ADMIN_BACK)],
         ],
         one_time_keyboard=True,
