@@ -2245,19 +2245,13 @@ async def shop_category_option(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if option == ADMIN_DELETE_CATEGORY:
         async with async_session() as session:
-            plan_count, config_count = await ShopCustomizationService.category_usage(session, key)
             deleted = await ShopCustomizationService.delete_category(session, key)
         if deleted:
             context.user_data.pop("shop_category_key", None)
-            await update.message.reply_text("دسته حذف شد.")
+            await update.message.reply_text("دسته حذف شد. سرویس‌ها و کانفیگ‌های متصل بدون تغییر باقی ماندند.")
             return await shop_categories_start(update, context)
         if key == "default":
             await update.message.reply_text("دسته پیش‌فرض قابل حذف نیست.")
-        elif plan_count or config_count:
-            await update.message.reply_text(
-                f"این دسته هنوز به {plan_count} سرویس و {config_count} کانفیگ متصل است.\n"
-                "ابتدا آن‌ها را به دسته دیگری منتقل کنید و دوباره حذف را بزنید."
-            )
         else:
             await update.message.reply_text("دسته حذف نشد.")
         return await _show_shop_category_options(update, context, key)

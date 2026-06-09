@@ -177,7 +177,7 @@ def test_admin_category_button_label_is_short_and_hides_internal_key():
 
 
 @pytest.mark.asyncio
-async def test_shop_category_delete_is_blocked_while_in_use(db):
+async def test_shop_category_can_be_deleted_while_in_use(db):
     from bot_package.models import Config
     from bot_package.services.shop_customization_service import ShopCustomizationService
 
@@ -188,9 +188,13 @@ async def test_shop_category_delete_is_blocked_while_in_use(db):
 
         plan_count, config_count = await ShopCustomizationService.category_usage(session, category.key)
         deleted = await ShopCustomizationService.delete_category(session, category.key)
+        saved_category = await ShopCustomizationService.get_category(session, category.key)
+        saved_config = (await session.execute(select(Config).where(Config.category_key == category.key))).scalar_one()
 
     assert (plan_count, config_count) == (0, 1)
-    assert deleted is False
+    assert deleted is True
+    assert saved_category is None
+    assert saved_config.sub_link == "vless://vip"
 
 
 @pytest.mark.asyncio

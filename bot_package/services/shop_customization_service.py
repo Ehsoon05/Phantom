@@ -501,9 +501,6 @@ class ShopCustomizationService:
         category = await ShopCustomizationService.get_category(session, key)
         if not category:
             return False
-        plan_count, config_count = await ShopCustomizationService.category_usage(session, key)
-        if plan_count or config_count:
-            return False
         await session.delete(category)
         await session.commit()
         return True
