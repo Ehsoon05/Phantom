@@ -71,6 +71,7 @@ ADMIN_ADD_BUTTON = "➕ افزودن دکمه سفارشی"
 ADMIN_DELETE_BUTTON = "🗑 حذف دکمه"
 ADMIN_ADD_PLAN = "➕ افزودن سرویس"
 ADMIN_ADD_CATEGORY = "➕ افزودن دسته"
+ADMIN_DELETE_CATEGORY = "🗑 حذف دسته"
 ADMIN_ADD_CHANNEL = "➕ افزودن کانال"
 ADMIN_DELETE_CHANNEL = "🗑 حذف کانال"
 ADMIN_EDIT_TITLE = "✏️ تغییر عنوان"
@@ -372,6 +373,20 @@ def admin_shop_plan_edit_keyboard() -> ReplyKeyboardMarkup:
             [_button(ADMIN_EDIT_STYLE)],
             [_button(ADMIN_EDIT_CATEGORY), _button(ADMIN_EDIT_ORDER)],
             [_button(ADMIN_TOGGLE_ENABLED)],
+            [_button(CANCEL), _button(ADMIN_BACK)],
+        ],
+        one_time_keyboard=True,
+    )
+
+
+def admin_shop_category_edit_keyboard() -> ReplyKeyboardMarkup:
+    return _keyboard(
+        [
+            [_button(ADMIN_EDIT_TITLE), _button(ADMIN_EDIT_EMOJI)],
+            [_button(ADMIN_EDIT_PREMIUM_EMOJI), _button(ADMIN_EDIT_EMOJI_POSITION)],
+            [_button(ADMIN_EDIT_STYLE), _button(ADMIN_EDIT_ORDER)],
+            [_button(ADMIN_TOGGLE_ENABLED)],
+            [_button(ADMIN_DELETE_CATEGORY)],
             [_button(CANCEL), _button(ADMIN_BACK)],
         ],
         one_time_keyboard=True,

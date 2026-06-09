@@ -43,6 +43,7 @@ from ..utils.keyboards import (
     ADMIN_CREATE_COUPON,
     ADMIN_DEACTIVATE_COUPON,
     ADMIN_DELETE_BUTTON,
+    ADMIN_DELETE_CATEGORY,
     ADMIN_DELETE_CHANNEL,
     ADMIN_DELETE_COUPON,
     ADMIN_EDIT_COUPON,
@@ -112,6 +113,7 @@ from ..utils.keyboards import (
     admin_prices_keyboard,
     admin_reports_keyboard,
     admin_shop_button_edit_keyboard,
+    admin_shop_category_edit_keyboard,
     admin_shop_menus_keyboard,
     admin_shop_plan_edit_keyboard,
     admin_shop_settings_keyboard,
@@ -192,6 +194,8 @@ from ..utils.validators import extract_links_from_text
     SHOP_PLAN_ADD_PRICE,
     SHOP_CATEGORY_SELECT,
     SHOP_CATEGORY_ADD,
+    SHOP_CATEGORY_OPTION,
+    SHOP_CATEGORY_VALUE,
     REQUIRED_CHANNEL_ACTION,
     REQUIRED_CHANNEL_ADD,
     REQUIRED_CHANNEL_DELETE,
@@ -204,7 +208,7 @@ from ..utils.validators import extract_links_from_text
     CRYPTO_SET_MARGIN_VALUE,
     CRYPTO_SET_USDT_VALUE,
     CRYPTO_SET_TON_VALUE,
-) = range(52)
+) = range(54)
 
 
 SHOP_MENU_LABELS = {
@@ -284,6 +288,11 @@ def _category_label(category) -> str:
     status = "فعال" if category.is_active else "غیرفعال"
     emoji = f"{category.emoji} " if category.emoji else ""
     return f"#{category.key} {emoji}{category.title} ({status})"
+
+
+def _parse_category_key(text: str) -> str | None:
+    match = re.match(r"#([A-Za-z0-9_-]+)\b", text.strip())
+    return match.group(1) if match else None
 
 
 def _parse_hash_id(text: str) -> int | None:
@@ -2160,8 +2169,11 @@ async def shop_category_select(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return SHOP_CATEGORY_ADD
 
-    await update.message.reply_text("برای ویرایش خود دسته فعلا از افزودن دسته با همان کلید و عنوان جدید استفاده کنید.", reply_markup=admin_shop_settings_keyboard())
-    return ConversationHandler.END
+    key = _parse_category_key(update.message.text)
+    if not key:
+        await update.message.reply_text("دسته انتخاب‌شده معتبر نیست.")
+        return SHOP_CATEGORY_SELECT
+    return await _show_shop_category_options(update, context, key)
 
 
 @require_auth(permission="shop")
@@ -2185,6 +2197,144 @@ async def shop_category_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     return ConversationHandler.END
+
+
+async def _show_shop_category_options(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str):
+    async with async_session() as session:
+        category = await ShopCustomizationService.get_category(session, key)
+        if category:
+            plan_count, config_count = await ShopCustomizationService.category_usage(session, key)
+    if not category:
+        await update.message.reply_text("دسته پیدا نشد.", reply_markup=admin_shop_settings_keyboard())
+        return ConversationHandler.END
+
+    context.user_data["shop_category_key"] = key
+    context.user_data.pop("shop_category_field", None)
+    await update.message.reply_text(
+        f"**ویرایش دسته {category.title}**\n\n"
+        f"کلید ثابت: `{category.key}`\n"
+        f"عنوان: {category.title}\n"
+        f"ایموجی: {category.emoji or '-'}\n"
+        f"ایموجی پریمیوم: `{category.premium_emoji_id or '-'}`\n"
+        f"جای ایموجی: {'راست' if category.emoji_position == 'right' else 'چپ'}\n"
+        f"رنگ: `{category.style or 'default'}`\n"
+        f"ترتیب: {category.display_order}\n"
+        f"وضعیت: {'فعال' if category.is_active else 'غیرفعال'}\n"
+        f"سرویس‌های متصل: {plan_count}\n"
+        f"کانفیگ‌های متصل: {config_count}",
+        reply_markup=admin_shop_category_edit_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return SHOP_CATEGORY_OPTION
+
+
+@require_auth(permission="shop")
+async def shop_category_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("shop_category_key", None)
+        return ConversationHandler.END
+    key = context.user_data.get("shop_category_key")
+    if not key:
+        return await shop_categories_start(update, context)
+
+    option = update.message.text
+    if option == ADMIN_TOGGLE_ENABLED:
+        async with async_session() as session:
+            category = await ShopCustomizationService.get_category(session, key)
+            if category:
+                await ShopCustomizationService.update_category(session, key, is_active=not category.is_active)
+        await update.message.reply_text("وضعیت دسته تغییر کرد.")
+        return await _show_shop_category_options(update, context, key)
+
+    if option == ADMIN_DELETE_CATEGORY:
+        async with async_session() as session:
+            plan_count, config_count = await ShopCustomizationService.category_usage(session, key)
+            deleted = await ShopCustomizationService.delete_category(session, key)
+        if deleted:
+            context.user_data.pop("shop_category_key", None)
+            await update.message.reply_text("دسته حذف شد.")
+            return await shop_categories_start(update, context)
+        if key == "default":
+            await update.message.reply_text("دسته پیش‌فرض قابل حذف نیست.")
+        elif plan_count or config_count:
+            await update.message.reply_text(
+                f"این دسته هنوز به {plan_count} سرویس و {config_count} کانفیگ متصل است.\n"
+                "ابتدا آن‌ها را به دسته دیگری منتقل کنید و دوباره حذف را بزنید."
+            )
+        else:
+            await update.message.reply_text("دسته حذف نشد.")
+        return await _show_shop_category_options(update, context, key)
+
+    fields = {
+        ADMIN_EDIT_TITLE: ("title", "عنوان جدید دسته را ارسال کنید."),
+        ADMIN_EDIT_EMOJI: ("emoji", "ایموجی عادی را ارسال کنید. برای حذف، `-` بفرستید."),
+        ADMIN_EDIT_PREMIUM_EMOJI: (
+            "premium_emoji_id",
+            "خود ایموجی پریمیوم را ارسال کنید تا آیدی‌اش خودکار خوانده شود. برای حذف، `-` بفرستید.",
+        ),
+        ADMIN_EDIT_EMOJI_POSITION: ("emoji_position", "جای ایموجی را انتخاب کنید."),
+        ADMIN_EDIT_STYLE: ("style", "رنگ دکمه دسته را انتخاب کنید."),
+        ADMIN_EDIT_ORDER: ("display_order", "شماره ترتیب نمایش دسته را ارسال کنید."),
+    }
+    selected = fields.get(option)
+    if not selected:
+        await update.message.reply_text("گزینه معتبر نیست.", reply_markup=admin_shop_category_edit_keyboard())
+        return SHOP_CATEGORY_OPTION
+
+    field, prompt = selected
+    context.user_data["shop_category_field"] = field
+    keyboard = admin_style_keyboard() if field == "style" else admin_emoji_position_keyboard() if field == "emoji_position" else _cancel_back_keyboard()
+    await update.message.reply_text(prompt, reply_markup=keyboard, parse_mode=constants.ParseMode.MARKDOWN)
+    return SHOP_CATEGORY_VALUE
+
+
+@require_auth(permission="shop")
+async def shop_category_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = context.user_data.get("shop_category_key")
+    field = context.user_data.get("shop_category_field")
+    if not key or not field:
+        return await shop_categories_start(update, context)
+
+    raw_value = update.message.text.strip()
+    if field == "title":
+        if not raw_value:
+            await update.message.reply_text("عنوان دسته نمی‌تواند خالی باشد.")
+            return SHOP_CATEGORY_VALUE
+        value = raw_value
+    elif field == "emoji":
+        value = _normalize_nullable(raw_value)
+    elif field == "premium_emoji_id":
+        value = _read_custom_emoji_id(update.message, raw_value)
+        if value == "":
+            await update.message.reply_text("یک ایموجی پریمیوم معتبر یا آیدی عددی آن را ارسال کنید.")
+            return SHOP_CATEGORY_VALUE
+    elif field == "emoji_position":
+        value = EMOJI_POSITION_VALUES.get(raw_value)
+        if not value:
+            await update.message.reply_text("جای ایموجی را از بین چپ یا راست انتخاب کنید.")
+            return SHOP_CATEGORY_VALUE
+    elif field == "style":
+        value = raw_value if raw_value in STYLE_VALUES else None
+        if value is None:
+            await update.message.reply_text("رنگ معتبر نیست.", reply_markup=admin_style_keyboard())
+            return SHOP_CATEGORY_VALUE
+    elif field == "display_order":
+        try:
+            value = int(raw_value)
+        except ValueError:
+            await update.message.reply_text("ترتیب باید فقط عدد باشد.")
+            return SHOP_CATEGORY_VALUE
+    else:
+        return await _show_shop_category_options(update, context, key)
+
+    async with async_session() as session:
+        category = await ShopCustomizationService.update_category(session, key, **{field: value})
+    context.user_data.pop("shop_category_field", None)
+    if not category:
+        await update.message.reply_text("دسته ذخیره نشد.")
+        return ConversationHandler.END
+    await update.message.reply_text("تغییرات دسته ذخیره شد.")
+    return await _show_shop_category_options(update, context, key)
 
 
 @require_auth(permission="shop")
@@ -2709,6 +2859,22 @@ async def shop_message_text_back(update: Update, context: ContextTypes.DEFAULT_T
 
 
 @require_auth(permission="shop")
+async def shop_category_option_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("shop_category_key", None)
+    context.user_data.pop("shop_category_field", None)
+    return await shop_categories_start(update, context)
+
+
+@require_auth(permission="shop")
+async def shop_category_value_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = context.user_data.get("shop_category_key")
+    context.user_data.pop("shop_category_field", None)
+    if not key:
+        return await shop_categories_start(update, context)
+    return await _show_shop_category_options(update, context, key)
+
+
+@require_auth(permission="shop")
 async def shop_button_list_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("shop_button_menu", None)
     return await shop_buttons_start(update, context)
@@ -3047,8 +3213,18 @@ shop_categories_conv = ConversationHandler(
         ],
         SHOP_CATEGORY_ADD: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_categories_start),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_category_add),
+        ],
+        SHOP_CATEGORY_OPTION: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_category_option_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_category_option),
+        ],
+        SHOP_CATEGORY_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_category_value_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_category_value),
         ],
     },
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],

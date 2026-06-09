@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
-from ..models import Price, ShopButton, ShopMessage, ShopPlan, ShopPlanCategory
+from ..models import Config, Price, ShopButton, ShopMessage, ShopPlan, ShopPlanCategory
 from ..utils import messages as default_messages
 from ..utils.keyboards import (
     ACCOUNT_INFO,
@@ -487,6 +487,26 @@ class ShopCustomizationService:
         category.updated_at = datetime.now(timezone.utc)
         await session.commit()
         return category
+
+    @staticmethod
+    async def category_usage(session: AsyncSession, key: str) -> tuple[int, int]:
+        plans = await session.execute(select(ShopPlan).where(ShopPlan.category_key == key))
+        configs = await session.execute(select(Config).where(Config.category_key == key))
+        return len(plans.scalars().all()), len(configs.scalars().all())
+
+    @staticmethod
+    async def delete_category(session: AsyncSession, key: str) -> bool:
+        if key == "default":
+            return False
+        category = await ShopCustomizationService.get_category(session, key)
+        if not category:
+            return False
+        plan_count, config_count = await ShopCustomizationService.category_usage(session, key)
+        if plan_count or config_count:
+            return False
+        await session.delete(category)
+        await session.commit()
+        return True
 
     @staticmethod
     async def get_plan(session: AsyncSession, plan_id: int) -> ShopPlan | None:

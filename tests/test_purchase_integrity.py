@@ -132,6 +132,64 @@ async def test_purchase_history_can_load_config_link(db):
 
 
 @pytest.mark.asyncio
+async def test_shop_category_can_be_fully_customized(db):
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    async with db.async_session() as session:
+        category = await ShopCustomizationService.ensure_category(session, "vip", "VIP")
+        updated = await ShopCustomizationService.update_category(
+            session,
+            category.key,
+            title="سرورهای ویژه",
+            emoji="🚀",
+            premium_emoji_id="5373141891321699086",
+            emoji_position="right",
+            style="danger",
+            display_order=7,
+            is_active=False,
+        )
+
+    assert updated.title == "سرورهای ویژه"
+    assert updated.emoji == "🚀"
+    assert updated.premium_emoji_id == "5373141891321699086"
+    assert updated.emoji_position == "right"
+    assert updated.style == "danger"
+    assert updated.display_order == 7
+    assert updated.is_active is False
+
+
+@pytest.mark.asyncio
+async def test_shop_category_delete_is_blocked_while_in_use(db):
+    from bot_package.models import Config
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    async with db.async_session() as session:
+        category = await ShopCustomizationService.ensure_category(session, "vip", "VIP")
+        session.add(Config(volume_gb=10, category_key=category.key, sub_link="vless://vip"))
+        await session.commit()
+
+        plan_count, config_count = await ShopCustomizationService.category_usage(session, category.key)
+        deleted = await ShopCustomizationService.delete_category(session, category.key)
+
+    assert (plan_count, config_count) == (0, 1)
+    assert deleted is False
+
+
+@pytest.mark.asyncio
+async def test_unused_shop_category_can_be_deleted(db):
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    async with db.async_session() as session:
+        category = await ShopCustomizationService.ensure_category(session, "unused", "Unused")
+        await session.commit()
+        deleted = await ShopCustomizationService.delete_category(session, category.key)
+        saved = await ShopCustomizationService.get_category(session, category.key)
+
+    assert deleted is True
+    assert saved is None
+
+
+@pytest.mark.asyncio
 async def test_shop_message_renders_premium_emoji_and_keeps_markdown_formatting(db):
     from bot_package.services.shop_customization_service import ShopCustomizationService
 
