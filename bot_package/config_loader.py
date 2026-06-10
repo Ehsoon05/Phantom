@@ -111,6 +111,17 @@ class BotConfig:
     # Tolerance band (%) for treating a payment as fully matching the invoice.
     CRYPTO_UNDERPAY_TOLERANCE = _parse_int_env("CRYPTO_UNDERPAY_TOLERANCE", 2)
 
+    # --- USDC on BNB Smart Chain (BEP-20), watch-only EVM xpub -------------------
+    # Account-level EVM extended PUBLIC key (BIP44 coin type 60). Seed stays offline.
+    BSC_XPUB = os.getenv("BSC_XPUB", "").strip()
+    BSCSCAN_API_KEY = os.getenv("BSCSCAN_API_KEY", "").strip()  # recommended for prod
+    BSC_USDC_CONTRACT = os.getenv(
+        "BSC_USDC_CONTRACT", "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d"
+    ).strip()
+    BSC_USDC_DECIMALS = _parse_int_env("BSC_USDC_DECIMALS", 18)
+
+    TON_USDT_DECIMALS = _parse_int_env("TON_USDT_DECIMALS", 6)
+
     @classmethod
     def validate(cls) -> None:
         errors = []
