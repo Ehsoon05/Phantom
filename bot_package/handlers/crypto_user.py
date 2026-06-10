@@ -27,9 +27,23 @@ COIN_KEY = "crypto_coin"
 
 _MIN_TOMAN = 1000
 
+# The crypto method we steer users toward (fastest + cheapest fees).
+RECOMMENDED_COIN_KEY = "TON"
+RECOMMENDED_TAG = "⭐ پیشنهادی"
+
+
+def _display_label(key: str) -> str:
+    """Coin button label, with a recommended marker on the preferred coin."""
+    label = SUPPORTED_COINS[key]["label"]
+    if key == RECOMMENDED_COIN_KEY:
+        return f"{label} — {RECOMMENDED_TAG}"
+    return label
+
 
 def _coin_keyboard() -> ReplyKeyboardMarkup:
-    rows = [[KeyboardButton(SUPPORTED_COINS[key]["label"])] for key in available_coins()]
+    # List the recommended coin first so it's the most prominent option.
+    keys = sorted(available_coins(), key=lambda k: 0 if k == RECOMMENDED_COIN_KEY else 1)
+    rows = [[KeyboardButton(_display_label(key))] for key in keys]
     rows.append([KeyboardButton(BACK_TO_MAIN)])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True, one_time_keyboard=True)
 
@@ -40,7 +54,7 @@ def _back_keyboard() -> ReplyKeyboardMarkup:
 
 def _coin_key_for_label(label: str) -> str | None:
     for key in available_coins():
-        if SUPPORTED_COINS[key]["label"] == label:
+        if _display_label(key) == label:
             return key
     return None
 
@@ -62,8 +76,11 @@ async def charge_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     context.user_data[STEP_KEY] = "choose_coin"
     context.user_data.pop(COIN_KEY, None)
+    note = ""
+    if RECOMMENDED_COIN_KEY in coins:
+        note = "\n\n🌟 *پیشنهاد ما: TON* — سریع‌تر، کم‌هزینه‌تر و مطمئن‌تر."
     await update.message.reply_text(
-        "💎 *شارژ کیف پول با ارز دیجیتال*\n\nارز مورد نظر خود را انتخاب کنید:",
+        "💎 *شارژ کیف پول با ارز دیجیتال*\n\nارز مورد نظر خود را انتخاب کنید:" + note,
         reply_markup=_coin_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
