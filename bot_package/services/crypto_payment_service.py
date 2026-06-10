@@ -280,3 +280,31 @@ class CryptoPaymentService:
     @staticmethod
     async def get_invoice(session: AsyncSession, invoice_id: int) -> Optional[CryptoInvoice]:
         return await session.get(CryptoInvoice, invoice_id)
+
+    # --- User-facing helpers ------------------------------------------------------
+
+    @staticmethod
+    async def list_pending_for_user(session: AsyncSession, telegram_id: int) -> list[CryptoInvoice]:
+        """Return the user's still-open (pending, not yet expired) invoices."""
+        now = datetime.now(timezone.utc)
+        rows = await session.execute(
+            select(CryptoInvoice)
+            .where(CryptoInvoice.user_id == telegram_id, CryptoInvoice.status == "pending")
+            .order_by(CryptoInvoice.created_at.desc())
+        )
+        invoices = list(rows.scalars().all())
+        return [inv for inv in invoices if not (inv.expires_at and inv.expires_at < now)]
+
+    @staticmethod
+    async def cancel_pending(session: AsyncSession, telegram_id: int) -> int:
+        """Cancel all of the user's pending invoices. Returns how many were cancelled."""
+        rows = await session.execute(
+            select(CryptoInvoice)
+            .where(CryptoInvoice.user_id == telegram_id, CryptoInvoice.status == "pending")
+        )
+        invoices = list(rows.scalars().all())
+        for inv in invoices:
+            inv.status = "cancelled"
+        if invoices:
+            await session.commit()
+        return len(invoices)

@@ -2626,6 +2626,7 @@ _CRYPTO_STATUS_FA = {
     "credited": "✅ موفق",
     "underpaid": "⚠️ کسری پرداخت",
     "expired": "⛔️ منقضی",
+    "cancelled": "🚫 لغو شده",
     "error": "❌ خطا",
 }
 

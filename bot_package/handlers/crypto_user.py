@@ -31,6 +31,9 @@ _MIN_TOMAN = 1000
 RECOMMENDED_COIN_KEY = "TON"
 RECOMMENDED_TAG = "⭐ پیشنهادی"
 
+# Button shown when the user already has an open invoice.
+CANCEL_PENDING_LABEL = "🗑 لغو پرداخت قبلی و شروع مجدد"
+
 
 def _display_label(key: str) -> str:
     """Coin button label, with a recommended marker on the preferred coin."""
@@ -50,6 +53,14 @@ def _coin_keyboard() -> ReplyKeyboardMarkup:
 
 def _back_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup([[KeyboardButton(BACK_TO_MAIN)]], resize_keyboard=True)
+
+
+def _pending_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton(CANCEL_PENDING_LABEL)], [KeyboardButton(BACK_TO_MAIN)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
 
 
 def _coin_key_for_label(label: str) -> str | None:
@@ -74,10 +85,36 @@ async def charge_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "پرداخت با ارز دیجیتال در حال حاضر فعال نیست. لطفا با پشتیبانی در تماس باشید.",
         )
         return
+
+    # If the user already has an open invoice, warn them and let them cancel it
+    # before starting a fresh one (only one active invoice at a time).
+    async with async_session() as session:
+        pending = await CryptoPaymentService.list_pending_for_user(session, update.effective_user.id)
+    if pending:
+        await _prompt_pending_decision(update, context, pending[0])
+        return
+
+    await _prompt_coin_selection(update, context)
+
+
+async def _prompt_pending_decision(update: Update, context: ContextTypes.DEFAULT_TYPE, invoice) -> None:
+    context.user_data[STEP_KEY] = "pending_decision"
+    context.user_data.pop(COIN_KEY, None)
+    await update.message.reply_text(
+        "⚠️ *شما یک پرداخت در انتظار دارید*\n\n"
+        f"مبلغ: *{invoice.quoted_toman:,} تومان* | ارز: *{invoice.coin}*\n\n"
+        "اگر هنوز واریز نکرده‌اید، می‌توانید این پرداخت را لغو کنید و از نو شروع کنید. "
+        "اگر واریز کرده‌اید، چند لحظه صبر کنید تا به‌صورت خودکار تایید شود.",
+        reply_markup=_pending_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+
+
+async def _prompt_coin_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data[STEP_KEY] = "choose_coin"
     context.user_data.pop(COIN_KEY, None)
     note = ""
-    if RECOMMENDED_COIN_KEY in coins:
+    if RECOMMENDED_COIN_KEY in available_coins():
         note = "\n\n🌟 *پیشنهاد ما: TON* — سریع‌تر، کم‌هزینه‌تر و مطمئن‌تر."
     await update.message.reply_text(
         "💎 *شارژ کیف پول با ارز دیجیتال*\n\nارز مورد نظر خود را انتخاب کنید:" + note,
@@ -103,12 +140,29 @@ async def handle_step(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     step = context.user_data.get(STEP_KEY)
-    if step == "choose_coin":
+    if step == "pending_decision":
+        await _handle_pending_decision(update, context, text)
+    elif step == "choose_coin":
         await _handle_choose_coin(update, context, text)
     elif step == "enter_amount":
         await _handle_enter_amount(update, context, text)
     else:
         await _cancel(update, context)
+
+
+async def _handle_pending_decision(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    if text != CANCEL_PENDING_LABEL:
+        await update.message.reply_text(
+            "لطفا یکی از گزینه‌های زیر را انتخاب کنید.",
+            reply_markup=_pending_keyboard(),
+        )
+        return
+    async with async_session() as session:
+        count = await CryptoPaymentService.cancel_pending(session, update.effective_user.id)
+    await update.message.reply_text(
+        f"✅ پرداخت‌های قبلی لغو شد ({count} مورد). حالا می‌توانید پرداخت جدید را شروع کنید."
+    )
+    await _prompt_coin_selection(update, context)
 
 
 async def _handle_choose_coin(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
@@ -151,15 +205,16 @@ async def _handle_enter_amount(update: Update, context: ContextTypes.DEFAULT_TYP
             )
         except CryptoPaymentError as exc:
             if "Too many open invoices" in str(exc):
-                message = (
-                    "شما چند صورتحساب باز دارید. لطفا یکی از پرداخت‌های قبلی را کامل کنید "
-                    "یا تا منقضی‌شدن آن صبر کنید، سپس دوباره تلاش کنید."
+                # Offer to clear the open invoice(s) and start over.
+                pending = await CryptoPaymentService.list_pending_for_user(
+                    session, update.effective_user.id
                 )
-            else:
-                message = (
-                    "متاسفانه ساخت صورتحساب ممکن نشد. لطفا بعدا دوباره تلاش کنید یا با پشتیبانی تماس بگیرید."
-                )
-            await update.message.reply_text(message)
+                if pending:
+                    await _prompt_pending_decision(update, context, pending[0])
+                    return
+            await update.message.reply_text(
+                "متاسفانه ساخت صورتحساب ممکن نشد. لطفا بعدا دوباره تلاش کنید یا با پشتیبانی تماس بگیرید."
+            )
             await _cancel(update, context)
             return
 
