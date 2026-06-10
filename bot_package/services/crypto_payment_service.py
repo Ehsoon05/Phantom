@@ -44,6 +44,14 @@ class CryptoPaymentError(Exception):
     pass
 
 
+def _as_aware(dt):
+    """Treat a DB datetime as UTC. SQLite returns naive datetimes; comparing
+    those against an aware datetime.now(timezone.utc) raises TypeError."""
+    if dt is not None and dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def is_coin_available(coin_key: str) -> bool:
     """Whether the infrastructure for a payment method is configured."""
     spec = SUPPORTED_COINS.get(coin_key)
@@ -90,7 +98,7 @@ class CryptoPaymentService:
         ).scalars().all()
         active = 0
         for old in existing:
-            if old.expires_at and old.expires_at < now:
+            if old.expires_at and _as_aware(old.expires_at) < now:
                 old.status = "expired"
             else:
                 active += 1
@@ -253,7 +261,7 @@ class CryptoPaymentService:
 
             # Only expire after a *successful* fetch found no payment, so a
             # transient API error doesn't strand a real payment.
-            if not matched and fetch_ok and invoice.expires_at and invoice.expires_at < now:
+            if not matched and fetch_ok and invoice.expires_at and _as_aware(invoice.expires_at) < now:
                 invoice.status = "expired"
                 await session.commit()
         return credited
@@ -293,7 +301,7 @@ class CryptoPaymentService:
             .order_by(CryptoInvoice.created_at.desc())
         )
         invoices = list(rows.scalars().all())
-        return [inv for inv in invoices if not (inv.expires_at and inv.expires_at < now)]
+        return [inv for inv in invoices if not (inv.expires_at and _as_aware(inv.expires_at) < now)]
 
     @staticmethod
     async def cancel_pending(session: AsyncSession, telegram_id: int) -> int:
