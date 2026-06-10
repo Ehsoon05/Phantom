@@ -15,7 +15,7 @@ except ImportError:
         del version
         return text.replace("\\", "\\\\").replace("_", "\\_").replace("*", "\\*").replace("`", "\\`").replace("[", "\\[")
 
-from . import crypto_user
+from . import crypto_user, rial_user
 from ..database import async_session
 from ..models import Purchase, Transaction, User
 from ..services.coupon_service import CouponError, CouponService
@@ -104,6 +104,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("pending_purchase_volume", None)
     context.user_data.pop("pending_purchase_plan_id", None)
     context.user_data.pop("selected_plan_category", None)
+    rial_user.clear_state(context)
     if not await ensure_required_membership(update, context):
         return
     db_user = await get_or_create_user(user.id, user.first_name, user.username, payload)
@@ -763,6 +764,10 @@ async def shop_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         selected_category = context.user_data.get("selected_plan_category")
         plan_id = await ShopCustomizationService.plan_for_text(session, text, discounted_prices, selected_category)
 
+    if context.user_data.get(rial_user.STEP_KEY):
+        await rial_user.handle_text(update, context)
+        return
+
     if context.user_data.get(crypto_user.STEP_KEY):
         await crypto_user.handle_step(update, context)
         return
@@ -809,6 +814,8 @@ async def shop_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await apply_coupon_start(update, context)
     elif action == "charge_crypto":
         await crypto_user.charge_start(update, context)
+    elif action == "charge_rial":
+        await rial_user.charge_start(update, context)
     elif action and action.startswith("custom_message:"):
         async with async_session() as session:
             message = await ShopCustomizationService.get_message(session, action)
@@ -828,11 +835,13 @@ user_handlers = [
     CommandHandler("buy", buy_menu),
     CommandHandler("wallet", wallet_menu),
     CommandHandler("charge", crypto_user.charge_start),
+    CommandHandler("rial", rial_user.charge_start),
     CommandHandler("referrals", referral_menu),
     CommandHandler("account", account_info_menu),
     CommandHandler("help", help_menu),
     CommandHandler("support", support_menu),
     CommandHandler("cancel", cancel_coupon),
     CallbackQueryHandler(service_details_callback, pattern=r"^(service:\d+|service_qr:\d+|services:list)$"),
+    MessageHandler(filters.CONTACT, rial_user.handle_contact),
     MessageHandler(filters.TEXT & ~filters.COMMAND, shop_text_router),
 ]

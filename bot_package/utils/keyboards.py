@@ -10,6 +10,7 @@ REFERRALS = "👥 دعوت دوستان"
 ACCOUNT_INFO = "👤 اطلاعات حساب"
 APPLY_COUPON = "🎁 کد تخفیف"
 CHARGE_CRYPTO = "💎 شارژ با کریپتو"
+CHARGE_RIAL = "💳 پرداخت ریالی (کارت‌به‌کارت)"
 BACK_TO_MAIN = "⬅️ بازگشت به منوی اصلی"
 
 ADMIN_INVENTORY = "📦 مدیریت موجودی"
@@ -30,6 +31,11 @@ ADMIN_CRYPTO_TOGGLE_MODE = "🔁 تغییر حالت نرخ (آنلاین/دست
 ADMIN_CRYPTO_SET_MARGIN = "✏️ تنظیم کارمزد (٪)"
 ADMIN_CRYPTO_SET_USDT = "✏️ نرخ دستی USDT"
 ADMIN_CRYPTO_SET_TON = "✏️ نرخ دستی TON"
+ADMIN_RIAL_HISTORY = "📋 درخواست‌های کارت‌به‌کارت"
+ADMIN_RIAL_SETTINGS = "💳 تنظیمات کارت‌به‌کارت"
+ADMIN_RIAL_SET_MIN = "✏️ حداقل پرداخت ریالی"
+ADMIN_RIAL_TOGGLE_PHONE = "📱 دریافت شماره تماس"
+ADMIN_RIAL_SET_SUPPORT = "👤 آیدی پشتیبانی ریالی"
 
 ADMIN_ADD_CONFIG = "➕ افزودن کانفیگ"
 ADMIN_STOCK_STATUS = "📋 وضعیت موجودی"
@@ -231,6 +237,7 @@ def admin_crypto_keyboard() -> ReplyKeyboardMarkup:
         [
             [_button(ADMIN_CRYPTO_HISTORY), _button(ADMIN_CRYPTO_SEARCH)],
             [_button(ADMIN_CRYPTO_RATES)],
+            [_button(ADMIN_RIAL_HISTORY), _button(ADMIN_RIAL_SETTINGS)],
             [_button(ADMIN_BACK)],
         ]
     )
@@ -242,6 +249,17 @@ def admin_crypto_rates_keyboard() -> ReplyKeyboardMarkup:
             [_button(ADMIN_CRYPTO_TOGGLE_MODE)],
             [_button(ADMIN_CRYPTO_SET_MARGIN)],
             [_button(ADMIN_CRYPTO_SET_USDT), _button(ADMIN_CRYPTO_SET_TON)],
+            [_button(ADMIN_BACK)],
+        ]
+    )
+
+
+def admin_rial_settings_keyboard() -> ReplyKeyboardMarkup:
+    return _keyboard(
+        [
+            [_button(ADMIN_RIAL_SET_MIN)],
+            [_button(ADMIN_RIAL_TOGGLE_PHONE)],
+            [_button(ADMIN_RIAL_SET_SUPPORT)],
             [_button(ADMIN_BACK)],
         ]
     )

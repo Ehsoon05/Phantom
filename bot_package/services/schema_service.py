@@ -76,6 +76,18 @@ class SchemaService:
                     },
                 )
                 await SchemaService._drop_sqlite_shop_plan_volume_unique(conn)
+            if "rial_payment_requests" in tables:
+                await SchemaService._add_missing_columns(
+                    conn,
+                    "rial_payment_requests",
+                    {
+                        "phone_number": "VARCHAR",
+                        "support_handle": "VARCHAR DEFAULT '@PhantomHubsSupport' NOT NULL",
+                        "request_text": "TEXT DEFAULT '' NOT NULL",
+                        "status": "VARCHAR DEFAULT 'pending' NOT NULL",
+                        "updated_at": "DATETIME",
+                    },
+                )
 
     @staticmethod
     async def _add_missing_columns(conn, table_name: str, columns: dict[str, str]) -> None:

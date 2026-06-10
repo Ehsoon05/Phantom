@@ -17,6 +17,7 @@ from ..utils.keyboards import (
     APPLY_COUPON,
     BACK_TO_MAIN,
     BUY_SUBSCRIPTION,
+    CHARGE_RIAL,
     CHARGE_CRYPTO,
     HELP,
     PURCHASE_HISTORY,
@@ -60,6 +61,7 @@ class RenderedMessage(str):
 
 def _markdown_to_telegram_html(value: str) -> str:
     escaped = html.escape(value, quote=False)
+    escaped = re.sub(r"```(?:[A-Za-z0-9_-]+)?\n?(.*?)```", r"<pre>\1</pre>", escaped, flags=re.DOTALL)
     escaped = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped, flags=re.DOTALL)
     escaped = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", escaped)
     escaped = re.sub(
@@ -93,6 +95,7 @@ class PlanDefinition:
     premium_emoji_id: str | None = None
     category_key: str = "default"
     emoji_position: str = "left"
+    price: int | None = None
 
 
 @dataclass(frozen=True)
@@ -128,20 +131,22 @@ def _button_default(action: str, menu: str, label: str, style: str, row: int, co
 
 
 DEFAULT_BUTTONS: tuple[ButtonDefinition, ...] = (
-    _button_default("buy_subscription", "shop_main", BUY_SUBSCRIPTION, STYLE_SUCCESS, 0, 0),
-    _button_default("wallet", "shop_main", WALLET, STYLE_PRIMARY, 1, 0),
-    _button_default("purchase_history", "shop_main", PURCHASE_HISTORY, STYLE_PRIMARY, 1, 1),
-    _button_default("referrals", "shop_main", REFERRALS, STYLE_SUCCESS, 2, 0),
-    _button_default("account_info", "shop_main", ACCOUNT_INFO, STYLE_PRIMARY, 2, 1),
-    _button_default("support", "shop_main", SUPPORT, STYLE_PRIMARY, 3, 0),
-    _button_default("help", "shop_main", HELP, STYLE_PRIMARY, 3, 1),
-    _button_default("charge_crypto", "shop_wallet", CHARGE_CRYPTO, STYLE_SUCCESS, 0, 0),
-    _button_default("apply_coupon", "shop_wallet", APPLY_COUPON, STYLE_SUCCESS, 0, 1),
-    _button_default("referrals", "shop_wallet", REFERRALS, STYLE_PRIMARY, 1, 0),
-    _button_default("support", "shop_wallet", SUPPORT, STYLE_SUCCESS, 1, 1),
-    _button_default("back_to_main", "shop_wallet", BACK_TO_MAIN, STYLE_DANGER, 2, 0),
+    ButtonDefinition("custom_message:shop_main:1780731124", "shop_main", "تعرفه ها", None, None, 0, 0, "5884491244360438851"),
+    ButtonDefinition("buy_subscription", "shop_main", "خرید سرویس", None, STYLE_PRIMARY, 0, 1, "5922272602784534896"),
+    ButtonDefinition("wallet", "shop_main", "کیف پول", None, None, 1, 0, "5769126056262898415"),
+    ButtonDefinition("purchase_history", "shop_main", "سرویس های من", None, None, 1, 1, "5805550320985578625"),
+    ButtonDefinition("referrals", "shop_main", "دعوت دوستان", None, None, 2, 0, "6033125983572201397"),
+    ButtonDefinition("account_info", "shop_main", "اطلاعات حساب", None, None, 2, 1, "5904630315946611415"),
+    ButtonDefinition("support", "shop_main", "پشتیبانی", None, None, 3, 0, "6037421444789440735"),
+    ButtonDefinition("help", "shop_main", "آموزش اتصال", None, None, 3, 1, "5776233299424843260"),
+    _button_default("charge_rial", "shop_wallet", CHARGE_RIAL, STYLE_SUCCESS, 0, 0),
+    _button_default("charge_crypto", "shop_wallet", CHARGE_CRYPTO, STYLE_SUCCESS, 0, 1),
+    _button_default("apply_coupon", "shop_wallet", APPLY_COUPON, STYLE_SUCCESS, 1, 0),
+    _button_default("referrals", "shop_wallet", REFERRALS, STYLE_PRIMARY, 1, 1),
+    _button_default("support", "shop_wallet", SUPPORT, STYLE_SUCCESS, 2, 0),
+    _button_default("back_to_main", "shop_wallet", BACK_TO_MAIN, STYLE_DANGER, 3, 0),
     _button_default("back_to_main", "shop_back", BACK_TO_MAIN, STYLE_DANGER, 0, 0),
-    _button_default("back_to_main", "shop_buy", BACK_TO_MAIN, STYLE_DANGER, 99, 0),
+    ButtonDefinition("back_to_main", "shop_buy", "بازگشت به منوی اصلی", None, None, 99, 0, "6039539366177541657"),
 )
 
 
@@ -186,6 +191,62 @@ DEFAULT_MESSAGES: dict[str, str] = {
         "تعداد کانفیگ: **{config_count}**\n"
         "تاریخ خرید: **{purchased_at}**\n"
         "مبلغ پرداختی: **{price} تومان**"
+    ),
+    "rial_amount_prompt": (
+        "**پرداخت ریالی (کارت‌به‌کارت)**\n\n"
+        "مبلغی که می‌خواهید کیف پول شما شارژ شود را به تومان وارد کنید.\n"
+        "حداقل پرداخت: **{minimum} تومان**"
+    ),
+    "rial_amount_invalid": "مبلغ معتبر نیست. حداقل مبلغ پرداخت ریالی **{minimum} تومان** است.",
+    "rial_phone_prompt": (
+        "**تایید شماره تماس**\n\n"
+        "شماره اکانت تلگرام خودتان را با دکمه پایین به اشتراک بگذارید.\n"
+        "فقط شماره ایران پذیرفته می‌شود."
+    ),
+    "rial_phone_invalid": (
+        "شماره ارسال‌شده متعلق به اکانت شما نیست یا شماره ایران نیست.\n"
+        "پرداخت ریالی برای این شماره قابل ادامه نیست؛ لطفا با {support_handle} تماس بگیرید."
+    ),
+    "rial_card_prompt": (
+        "**شماره کارت مبدا**\n\n"
+        "شماره کارت بانکی ۱۶ رقمی که واریز را از آن انجام می‌دهید وارد کنید."
+    ),
+    "rial_card_invalid": "شماره کارت معتبر نیست. شماره کارت مبدا را به‌صورت ۱۶ رقم وارد کنید.",
+    "rial_payment_request": (
+        "**درخواست ثبت پرداخت کارت‌به‌کارت**\n\n"
+        "لطفاً متن زیر را به‌طور کامل کپی کرده و به آیدی زیر ارسال کنید:\n"
+        "📩 {support_handle}\n\n"
+        "```\n{copy_text}\n```\n"
+        "📋 برای کپی، روی متن بالا یا دکمه کپی بزنید.\n\n"
+        "🧾 کد پیگیری: `{tracking_code}`\n"
+        "⚠️ لطفاً متن فوق را بدون هیچ تغییری به آیدی ذکرشده ارسال کنید.\n"
+        "🚀 پس از تأیید پرداخت، کیف پول شما به‌صورت خودکار شارژ می‌شود."
+    ),
+    "custom_message:shop_main:1780731124": (
+        '<tg-emoji emoji-id="4990387969408893849">⚡️</tg-emoji> <b>Phantom Express - فانتوم اکسپرس</b>\n'
+        'لوکیشن آلمان <tg-emoji emoji-id="5420468891870571663">🇩🇪</tg-emoji>\n'
+        'بدون محدودیت کاربر <tg-emoji emoji-id="5379694495291940508">✨</tg-emoji>\n'
+        'یک‌ماهه\n\n'
+        '<tg-emoji emoji-id="4999127510596715733">🟦</tg-emoji> 10 گیگ -&gt; 89 تومان\n'
+        '<tg-emoji emoji-id="4999127510596715733">🟦</tg-emoji> 20 گیگ -&gt; 148 تومان\n'
+        '<tg-emoji emoji-id="4999127510596715733">🟦</tg-emoji> 30 گیگ -&gt; 198 تومان\n'
+        '<tg-emoji emoji-id="4999127510596715733">🟦</tg-emoji> 50 گیگ -&gt; 298 تومان\n'
+        '<tg-emoji emoji-id="4999127510596715733">🟦</tg-emoji> 100 گیگ -&gt; 398 تومان\n\n'
+        '<tg-emoji emoji-id="5780517739756000213">♾</tg-emoji> <b>Phantom Unlimited - فانتوم آنلیمیتد</b>\n'
+        'لوکیشن آلمان <tg-emoji emoji-id="5420468891870571663">🇩🇪</tg-emoji>\n'
+        'حجم نامحدود <tg-emoji emoji-id="5379694495291940508">✨</tg-emoji>\n'
+        'یک‌ماهه\n\n'
+        '<tg-emoji emoji-id="4999127510596715733">🟦</tg-emoji> 1 کاربره -&gt; 448 تومان\n'
+        '<tg-emoji emoji-id="4999127510596715733">🟦</tg-emoji> 2 کاربره -&gt; 528 تومان\n'
+        '<tg-emoji emoji-id="4999127510596715733">🟦</tg-emoji> 3 کاربره -&gt; 598 تومان\n\n'
+        '<tg-emoji emoji-id="6030811868078018748">💎</tg-emoji> <b>Phantom No Limits - فانتوم نو لیمیت</b>\n'
+        'مولتی لوکیشن\n'
+        'بدون محدودیت تعداد کاربر <tg-emoji emoji-id="5379694495291940508">✨</tg-emoji>\n'
+        'مدت زمان نامحدود <tg-emoji emoji-id="5379694495291940508">✨</tg-emoji>\n\n'
+        '<tg-emoji emoji-id="4999127510596715733">🟦</tg-emoji> 10 گیگ -&gt; 160 تومان\n'
+        '<tg-emoji emoji-id="4999127510596715733">🟦</tg-emoji> 20 گیگ -&gt; 300 تومان\n'
+        '<tg-emoji emoji-id="4999127510596715733">🟦</tg-emoji> 30 گیگ -&gt; 400 تومان\n'
+        '<tg-emoji emoji-id="4999127510596715733">🟦</tg-emoji> 50 گیگ -&gt; 500 تومان'
     ),
     "invalid_plan": "پلن انتخاب‌شده معتبر نیست. لطفا دوباره از منوی خرید انتخاب کنید.",
     "service_name_prompt": (
@@ -232,19 +293,49 @@ DEFAULT_MESSAGES: dict[str, str] = {
     ),
 }
 
+DEFAULT_MESSAGE_PARSE_MODES = {
+    "custom_message:shop_main:1780731124": "HTML",
+}
+
 
 DEFAULT_CATEGORIES: tuple[CategoryDefinition, ...] = (
     CategoryDefinition("default", "سرویس‌های VPN", "🛡", STYLE_PRIMARY, 0, SHOP_BUTTON_CUSTOM_EMOJI_ID),
+    CategoryDefinition(
+        "___phantom_express_-_فانتوم_اکسپرس",
+        "Phantom Express\nفانتوم اکسپرس",
+        None,
+        STYLE_PRIMARY,
+        1,
+        "5881806211195605908",
+    ),
+    CategoryDefinition(
+        "unlimited",
+        "Phantom Unlimited- فانتوم آنلیمیتد",
+        None,
+        STYLE_PRIMARY,
+        2,
+        "5780517739756000213",
+    ),
 )
 
 
 DEFAULT_PLANS: tuple[PlanDefinition, ...] = (
-    PlanDefinition(1, "1 گیگ", "📦", STYLE_SUCCESS, 0, SHOP_BUTTON_CUSTOM_EMOJI_ID),
-    PlanDefinition(2, "2 گیگ", "📦", STYLE_SUCCESS, 1, SHOP_BUTTON_CUSTOM_EMOJI_ID),
-    PlanDefinition(3, "3 گیگ", "📦", STYLE_SUCCESS, 2, SHOP_BUTTON_CUSTOM_EMOJI_ID),
-    PlanDefinition(5, "5 گیگ", "📦", STYLE_SUCCESS, 3, SHOP_BUTTON_CUSTOM_EMOJI_ID),
-    PlanDefinition(10, "10 گیگ", "📦", STYLE_SUCCESS, 4, SHOP_BUTTON_CUSTOM_EMOJI_ID),
-    PlanDefinition(20, "20 گیگ", "📦", STYLE_SUCCESS, 5, SHOP_BUTTON_CUSTOM_EMOJI_ID),
+    PlanDefinition(1, "1 گیگ", "📦", STYLE_SUCCESS, 0, SHOP_BUTTON_CUSTOM_EMOJI_ID, price=18818),
+    PlanDefinition(2, "2 گیگ", "📦", STYLE_SUCCESS, 1, SHOP_BUTTON_CUSTOM_EMOJI_ID, price=420000),
+    PlanDefinition(3, "3 گیگ", "📦", STYLE_SUCCESS, 2, SHOP_BUTTON_CUSTOM_EMOJI_ID, price=600000),
+    PlanDefinition(5, "5 گیگ", "📦", STYLE_SUCCESS, 3, SHOP_BUTTON_CUSTOM_EMOJI_ID, price=950000),
+    PlanDefinition(10, "10 گیگ", "📦", STYLE_SUCCESS, 4, SHOP_BUTTON_CUSTOM_EMOJI_ID, price=1800000),
+    PlanDefinition(20, "20 گیگ", "📦", STYLE_SUCCESS, 5, SHOP_BUTTON_CUSTOM_EMOJI_ID, price=3200000),
+    PlanDefinition(
+        10,
+        "10 گیگ اکسپرس",
+        "📦",
+        STYLE_SUCCESS,
+        6,
+        SHOP_BUTTON_CUSTOM_EMOJI_ID,
+        category_key="___phantom_express_-_فانتوم_اکسپرس",
+        price=89000,
+    ),
 )
 
 
@@ -255,15 +346,24 @@ class ShopCustomizationService:
             result = await session.execute(select(ShopMessage).where(ShopMessage.key == key))
             message = result.scalar_one_or_none()
             if message is None:
-                session.add(ShopMessage(key=key, text=text, parse_mode=PARSE_MODE_MARKDOWN))
+                session.add(
+                    ShopMessage(
+                        key=key,
+                        text=text,
+                        parse_mode=DEFAULT_MESSAGE_PARSE_MODES.get(key, PARSE_MODE_MARKDOWN),
+                    )
+                )
             elif key == "purchase_success" and "{service_name}" not in message.text:
                 message.text = _insert_after_heading(message.text, "نام سرویس: **{service_name}**\n")
             elif key == "purchase_history_item" and "{service_name}" not in message.text:
                 message.text = "نام سرویس: **{service_name}**\n" + message.text
 
+        added_rial_button = False
         for definition in DEFAULT_BUTTONS:
             result = await session.execute(select(ShopButton).where(ShopButton.action == definition.action, ShopButton.menu == definition.menu))
             if result.scalar_one_or_none() is None:
+                if definition.action == "charge_rial":
+                    added_rial_button = True
                 session.add(
                     ShopButton(
                         action=definition.action,
@@ -271,11 +371,28 @@ class ShopCustomizationService:
                         text=definition.text,
                         emoji=definition.emoji,
                         premium_emoji_id=definition.premium_emoji_id,
+                        premium_emoji_position=definition.emoji_position,
+                        emoji_position=definition.emoji_position,
                         style=definition.style,
                         row=definition.row,
                         col=definition.col,
                     )
                 )
+
+        if added_rial_button:
+            wallet_positions = {
+                "charge_rial": (0, 0),
+                "charge_crypto": (0, 1),
+                "apply_coupon": (1, 0),
+                "referrals": (1, 1),
+                "support": (2, 0),
+                "back_to_main": (3, 0),
+            }
+            result = await session.execute(select(ShopButton).where(ShopButton.menu == "shop_wallet"))
+            for button in result.scalars().all():
+                position = wallet_positions.get(button.action)
+                if position:
+                    button.row, button.col = position
 
         for definition in DEFAULT_CATEGORIES:
             result = await session.execute(select(ShopPlanCategory).where(ShopPlanCategory.key == definition.key))
@@ -307,7 +424,7 @@ class ShopCustomizationService:
                     ShopPlan(
                         volume_gb=definition.volume_gb,
                         title=definition.title,
-                        price=price_row.price if price_row else None,
+                        price=definition.price if definition.price is not None else (price_row.price if price_row else None),
                         emoji=definition.emoji,
                         premium_emoji_id=definition.premium_emoji_id,
                         category_key=definition.category_key,
@@ -316,8 +433,8 @@ class ShopCustomizationService:
                         display_order=definition.display_order,
                     )
                 )
-            elif plan.price is None and price_row:
-                plan.price = price_row.price
+            elif plan.price is None:
+                plan.price = definition.price if definition.price is not None else (price_row.price if price_row else None)
 
         existing_plans = await session.execute(select(ShopPlan))
         for plan in existing_plans.scalars().all():

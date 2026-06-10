@@ -24,6 +24,7 @@ async def setup_main_bot():
             BotCommand("start", "شروع و نمایش منوی اصلی"),
             BotCommand("buy", "خرید سرویس"),
             BotCommand("wallet", "کیف پول"),
+            BotCommand("rial", "پرداخت ریالی کارت‌به‌کارت"),
             BotCommand("referrals", "دعوت دوستان"),
             BotCommand("account", "اطلاعات حساب"),
             BotCommand("help", "راهنما"),

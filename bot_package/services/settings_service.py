@@ -12,6 +12,9 @@ RATE_MARGIN = "crypto_margin_percent"     # float string, e.g. "2.5"
 MANUAL_RATE_USDT = "crypto_manual_rate_usdt"  # toman per 1 USDT
 MANUAL_RATE_TON = "crypto_manual_rate_ton"    # toman per 1 TON
 BRANDED_SUBSCRIPTION_LINKS = "branded_subscription_links_enabled"
+RIAL_MIN_AMOUNT = "rial_min_amount"
+RIAL_REQUIRE_PHONE = "rial_require_phone"
+RIAL_SUPPORT_HANDLE = "rial_support_handle"
 
 DEFAULTS = {
     RATE_MODE: "online",
@@ -19,6 +22,9 @@ DEFAULTS = {
     MANUAL_RATE_USDT: "0",
     MANUAL_RATE_TON: "0",
     BRANDED_SUBSCRIPTION_LINKS: "true",
+    RIAL_MIN_AMOUNT: "100000",
+    RIAL_REQUIRE_PHONE: "true",
+    RIAL_SUPPORT_HANDLE: "@PhantomHubsSupport",
 }
 
 
@@ -94,3 +100,35 @@ class SettingsService:
     @staticmethod
     async def set_branded_links_enabled(session: AsyncSession, enabled: bool) -> None:
         await SettingsService.set(session, BRANDED_SUBSCRIPTION_LINKS, "true" if enabled else "false")
+
+    @staticmethod
+    async def get_rial_min_amount(session: AsyncSession) -> int:
+        try:
+            return max(1, int(await SettingsService.get(session, RIAL_MIN_AMOUNT) or 100000))
+        except (TypeError, ValueError):
+            return 100000
+
+    @staticmethod
+    async def set_rial_min_amount(session: AsyncSession, amount: int) -> None:
+        await SettingsService.set(session, RIAL_MIN_AMOUNT, str(max(1, int(amount))))
+
+    @staticmethod
+    async def rial_phone_required(session: AsyncSession) -> bool:
+        value = await SettingsService.get(session, RIAL_REQUIRE_PHONE, "true")
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    async def set_rial_phone_required(session: AsyncSession, enabled: bool) -> None:
+        await SettingsService.set(session, RIAL_REQUIRE_PHONE, "true" if enabled else "false")
+
+    @staticmethod
+    async def get_rial_support_handle(session: AsyncSession) -> str:
+        value = (await SettingsService.get(session, RIAL_SUPPORT_HANDLE, "@PhantomHubsSupport") or "").strip()
+        if not value:
+            return "@PhantomHubsSupport"
+        return value if value.startswith("@") else f"@{value}"
+
+    @staticmethod
+    async def set_rial_support_handle(session: AsyncSession, handle: str) -> None:
+        value = handle.strip().lstrip("@")
+        await SettingsService.set(session, RIAL_SUPPORT_HANDLE, f"@{value}")

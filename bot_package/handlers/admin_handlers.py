@@ -13,6 +13,7 @@ from ..services.admin_service import ALL_PERMISSIONS, AdminService, normalize_pe
 from ..services.coupon_service import CouponError, CouponService
 from ..services.crypto_payment_service import CryptoPaymentService, available_coins
 from ..services.rate_service import RateService
+from ..services.rial_payment_service import RialPaymentService
 from ..services.settings_service import SettingsService
 from ..services.inventory_service import InventoryService
 from ..services.price_service import PriceService
@@ -40,6 +41,11 @@ from ..utils.keyboards import (
     ADMIN_CRYPTO_SET_TON,
     ADMIN_CRYPTO_SET_USDT,
     ADMIN_CRYPTO_TOGGLE_MODE,
+    ADMIN_RIAL_HISTORY,
+    ADMIN_RIAL_SETTINGS,
+    ADMIN_RIAL_SET_MIN,
+    ADMIN_RIAL_SET_SUPPORT,
+    ADMIN_RIAL_TOGGLE_PHONE,
     ADMIN_CREATE_COUPON,
     ADMIN_DEACTIVATE_COUPON,
     ADMIN_DELETE_BUTTON,
@@ -107,6 +113,7 @@ from ..utils.keyboards import (
     admin_coupons_keyboard,
     admin_crypto_keyboard,
     admin_crypto_rates_keyboard,
+    admin_rial_settings_keyboard,
     admin_inventory_keyboard,
     admin_main_keyboard,
     admin_management_keyboard,
@@ -208,7 +215,9 @@ from ..utils.validators import extract_links_from_text
     CRYPTO_SET_MARGIN_VALUE,
     CRYPTO_SET_USDT_VALUE,
     CRYPTO_SET_TON_VALUE,
-) = range(54)
+    RIAL_SET_MIN_VALUE,
+    RIAL_SET_SUPPORT_VALUE,
+) = range(56)
 
 
 SHOP_MENU_LABELS = {
@@ -280,6 +289,12 @@ MESSAGE_PLACEHOLDER_HINTS = {
         "`{expiry_text}` `{remaining_time}` `{config_count}`\n"
         "`{purchased_at}` `{price}`\n"
         "هر خطی را که نمی‌خواهید نمایش داده شود، از متن قالب حذف کنید."
+    ),
+    "rial_payment_request": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{support_handle}` `{amount}` `{source_card}`\n"
+        "`{tracking_code}` `{phone_number}` `{copy_text}`\n"
+        "نام کلیدها را تغییر ندهید؛ فقط متن و جای آن‌ها را عوض کنید."
     ),
 }
 
@@ -2652,10 +2667,9 @@ async def crypto_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "وضعیت: ✅ فعال" if enabled else "وضعیت: ⛔️ غیرفعال (تنظیمات کیف‌پول/شبکه ناقص است)"
     )
     await update.message.reply_text(
-        "**پرداخت کریپتو**\n\n"
+        "**مدیریت پرداخت‌ها**\n\n"
         f"{status_line}\n\n"
-        "از این بخش می‌توانید تراکنش‌های کریپتو را ببینید، تراکنش‌های یک کاربر را جستجو کنید "
-        "و نرخ تبدیل را تنظیم کنید.",
+        "از این بخش می‌توانید تراکنش‌های کریپتو، درخواست‌های کارت‌به‌کارت و تنظیمات هر روش پرداخت را مدیریت کنید.",
         reply_markup=admin_crypto_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
@@ -2840,6 +2854,111 @@ async def crypto_set_ton_save(update: Update, context: ContextTypes.DEFAULT_TYPE
         await SettingsService.set_manual_rate(session, "TON", amount)
     await update.message.reply_text(f"نرخ دستی TON روی {amount:,} تومان تنظیم شد.")
     await crypto_rates_menu(update, context)
+    return ConversationHandler.END
+
+
+def _format_rial_request(request) -> str:
+    when = request.created_at.strftime("%Y-%m-%d %H:%M") if request.created_at else "-"
+    phone = request.phone_number or "دریافت نشده"
+    return (
+        f"#{request.id} | {request.status}\n"
+        f"👤 کاربر: `{request.user_id}`\n"
+        f"💰 مبلغ: **{request.amount_toman:,} تومان**\n"
+        f"📱 تماس: `{phone}`\n"
+        f"💳 کارت مبدا: `{request.source_card}`\n"
+        f"🧾 کد پیگیری: `{request.tracking_code}`\n"
+        f"🕒 {when}"
+    )
+
+
+@require_auth(permission="users")
+async def rial_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        requests = await RialPaymentService.list_recent(session, limit=10)
+    if not requests:
+        await update.message.reply_text(
+            "هنوز درخواست کارت‌به‌کارتی ثبت نشده است.",
+            reply_markup=admin_crypto_keyboard(),
+        )
+        return
+    await update.message.reply_text(
+        "**آخرین درخواست‌های کارت‌به‌کارت**\n\n"
+        + "\n\n".join(_format_rial_request(request) for request in requests),
+        reply_markup=admin_crypto_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+
+
+@require_auth(permission="users")
+async def rial_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        minimum = await SettingsService.get_rial_min_amount(session)
+        require_phone = await SettingsService.rial_phone_required(session)
+        support_handle = await SettingsService.get_rial_support_handle(session)
+    await update.message.reply_text(
+        "**تنظیمات کارت‌به‌کارت**\n\n"
+        f"حداقل مبلغ: **{minimum:,} تومان**\n"
+        f"دریافت شماره تماس: **{'روشن' if require_phone else 'خاموش'}**\n"
+        f"آیدی پشتیبانی: **{support_handle}**",
+        reply_markup=admin_rial_settings_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+
+
+@require_auth(permission="users")
+async def rial_toggle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        enabled = not await SettingsService.rial_phone_required(session)
+        await SettingsService.set_rial_phone_required(session, enabled)
+    await update.message.reply_text(
+        f"دریافت شماره تماس برای پرداخت ریالی **{'روشن' if enabled else 'خاموش'}** شد.",
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    await rial_settings_menu(update, context)
+
+
+@require_auth(permission="users")
+async def rial_set_min_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "حداقل مبلغ پرداخت ریالی را به تومان وارد کنید:",
+        reply_markup=_cancel_back_keyboard(),
+    )
+    return RIAL_SET_MIN_VALUE
+
+
+@require_auth(permission="users")
+async def rial_set_min_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    amount = _parse_amount(update.message.text)
+    if amount is None or amount <= 0:
+        await update.message.reply_text("مبلغ معتبر نیست. یک عدد مثبت وارد کنید.")
+        return RIAL_SET_MIN_VALUE
+    async with async_session() as session:
+        await SettingsService.set_rial_min_amount(session, amount)
+    await update.message.reply_text(f"حداقل پرداخت ریالی روی **{amount:,} تومان** تنظیم شد.", parse_mode=constants.ParseMode.MARKDOWN)
+    await rial_settings_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="users")
+async def rial_set_support_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "یوزرنیم پشتیبانی را با یا بدون @ ارسال کنید.\nمثال: `@PhantomHubsSupport`",
+        reply_markup=_cancel_back_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return RIAL_SET_SUPPORT_VALUE
+
+
+@require_auth(permission="users")
+async def rial_set_support_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    username = update.message.text.strip().lstrip("@")
+    if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", username):
+        await update.message.reply_text("یوزرنیم معتبر نیست. دوباره ارسال کنید.")
+        return RIAL_SET_SUPPORT_VALUE
+    async with async_session() as session:
+        await SettingsService.set_rial_support_handle(session, username)
+    await update.message.reply_text(f"آیدی پشتیبانی ریالی روی **@{username}** تنظیم شد.", parse_mode=constants.ParseMode.MARKDOWN)
+    await rial_settings_menu(update, context)
     return ConversationHandler.END
 
 
@@ -3379,6 +3498,30 @@ crypto_set_ton_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
 )
 
+rial_set_min_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_RIAL_SET_MIN), rial_set_min_start)],
+    states={
+        RIAL_SET_MIN_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, rial_set_min_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+rial_set_support_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_RIAL_SET_SUPPORT), rial_set_support_start)],
+    states={
+        RIAL_SET_SUPPORT_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, rial_set_support_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
 admin_handlers = [
     CommandHandler("start", admin_start),
     CommandHandler("admins", list_admins),
@@ -3406,10 +3549,15 @@ admin_handlers = [
     crypto_set_margin_conv,
     crypto_set_usdt_conv,
     crypto_set_ton_conv,
+    rial_set_min_conv,
+    rial_set_support_conv,
     MessageHandler(_exact_filter(ADMIN_CRYPTO), crypto_menu),
     MessageHandler(_exact_filter(ADMIN_CRYPTO_HISTORY), crypto_history),
     MessageHandler(_exact_filter(ADMIN_CRYPTO_RATES), crypto_rates_menu),
     MessageHandler(_exact_filter(ADMIN_CRYPTO_TOGGLE_MODE), crypto_toggle_mode),
+    MessageHandler(_exact_filter(ADMIN_RIAL_HISTORY), rial_history),
+    MessageHandler(_exact_filter(ADMIN_RIAL_SETTINGS), rial_settings_menu),
+    MessageHandler(_exact_filter(ADMIN_RIAL_TOGGLE_PHONE), rial_toggle_phone),
     MessageHandler(_exact_filter(ADMIN_LOGOUT), admin_logout),
     MessageHandler(_exact_filter(ADMIN_ADMINS), admin_management_menu),
     MessageHandler(_exact_filter(ADMIN_REFRESH_ADMINS), list_admins),
