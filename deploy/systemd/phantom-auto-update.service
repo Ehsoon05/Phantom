@@ -7,6 +7,6 @@ Wants=network-online.target
 Type=oneshot
 Environment=APP_DIR=/opt/phantom
 Environment=REMOTE=origin
-Environment=BRANCH=main
+Environment=BRANCH=WIP
 Environment=SERVICE_NAME=phantom-bot.service
 ExecStart=/usr/local/bin/phantom-update-from-git

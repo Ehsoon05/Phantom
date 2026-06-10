@@ -15,16 +15,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config_loader import BotConfig
 from ..models import CryptoInvoice, Transaction, User
-from . import ton_watcher, tron_watcher
+from . import bsc_watcher, ton_watcher, tron_watcher
 from .rate_service import RateError, RateService
 
 logger = logging.getLogger(__name__)
 
 # Selectable payment methods. ``rate_coin`` picks the market used for conversion.
+# USDC is priced off the USDT market (both peg ~$1), so it needs no separate rate.
 SUPPORTED_COINS: dict[str, dict] = {
     "USDT_TRC20": {"coin": "USDT", "network": "TRC20", "rate_coin": "USDT", "label": "USDT (TRON · TRC20)"},
     "TON": {"coin": "TON", "network": "TON", "rate_coin": "TON", "label": "TON"},
     "USDT_TON": {"coin": "USDT", "network": "TON", "rate_coin": "USDT", "label": "USDT (TON)"},
+    "USDC_BEP20": {"coin": "USDC", "network": "BEP20", "rate_coin": "USDT", "label": "USDC (BNB Smart Chain · BEP20)"},
 }
 
 # Cap on simultaneously-open invoices per user. Bounds the number of addresses
@@ -35,7 +37,7 @@ MAX_PENDING_PER_USER = 3
 # Per-coin dust floor: payments below this are ignored (spam/dust protection),
 # but anything above it is credited at its *actual* value (see credit logic),
 # so honest underpayments are no longer silently lost.
-DUST_FLOOR: dict[str, Decimal] = {"USDT": Decimal("0.01"), "TON": Decimal("0.05")}
+DUST_FLOOR: dict[str, Decimal] = {"USDT": Decimal("0.01"), "USDC": Decimal("0.01"), "TON": Decimal("0.05")}
 
 
 class CryptoPaymentError(Exception):
@@ -49,12 +51,14 @@ def is_coin_available(coin_key: str) -> bool:
         return False
     if spec["network"] == "TRC20":
         return bool(BotConfig.TRON_XPUB)
+    if spec["network"] == "BEP20":
+        return bool(BotConfig.BSC_XPUB)
     if spec["network"] == "TON":
         if not BotConfig.TON_DEPOSIT_ADDRESS:
             return False
         if spec["coin"] == "USDT":
             return bool(BotConfig.TON_USDT_JETTON_MASTER)
-        return True
+        return True  # native TON
     return False
 
 
@@ -118,6 +122,9 @@ class CryptoPaymentService:
             if spec["network"] == "TRC20":
                 invoice.address_index = invoice.id
                 invoice.deposit_address = tron_watcher.derive_address(invoice.id)
+            elif spec["network"] == "BEP20":
+                invoice.address_index = invoice.id
+                invoice.deposit_address = bsc_watcher.derive_address(invoice.id)
             else:  # TON family: shared address + unique, unpredictable memo
                 invoice.deposit_address = BotConfig.TON_DEPOSIT_ADDRESS
                 invoice.memo = "SVN" + secrets.token_hex(16)
@@ -136,9 +143,13 @@ class CryptoPaymentService:
 
         if invoice.network == "TRC20":
             return await tron_watcher.fetch_incoming_usdt(invoice.deposit_address, min_amount)
+        if invoice.network == "BEP20":
+            return await bsc_watcher.fetch_incoming_usdc(invoice.deposit_address, min_amount)
         if invoice.network == "TON":
             if invoice.coin == "USDT":
-                return await ton_watcher.fetch_incoming_usdt_ton(invoice.memo, min_amount)
+                return await ton_watcher.fetch_incoming_jetton_ton(
+                    invoice.memo, BotConfig.TON_USDT_JETTON_MASTER, BotConfig.TON_USDT_DECIMALS, min_amount
+                )
             return await ton_watcher.fetch_incoming_ton(invoice.memo, min_amount)
         return []
 

@@ -203,6 +203,24 @@ class BotSetting(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class RialPaymentRequest(Base):
+    __tablename__ = "rial_payment_requests"
+
+    id = Column(Integer, primary_key=True)
+    tracking_code = Column(String, unique=True, nullable=False)
+    user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
+    amount_toman = Column(Integer, nullable=False)
+    phone_number = Column(String, nullable=True)
+    source_card = Column(String, nullable=False)
+    support_handle = Column(String, nullable=False)
+    request_text = Column(Text, nullable=False)
+    status = Column(String, nullable=False, default="pending")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User")
+
+
 class CryptoInvoice(Base):
     """A single crypto top-up request and its on-chain settlement state.
 

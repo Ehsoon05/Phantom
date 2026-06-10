@@ -10,6 +10,7 @@ REFERRALS = "👥 دعوت دوستان"
 ACCOUNT_INFO = "👤 اطلاعات حساب"
 APPLY_COUPON = "🎁 کد تخفیف"
 CHARGE_CRYPTO = "💎 شارژ با کریپتو"
+CHARGE_RIAL = "💳 پرداخت ریالی (کارت‌به‌کارت)"
 BACK_TO_MAIN = "⬅️ بازگشت به منوی اصلی"
 
 ADMIN_INVENTORY = "📦 مدیریت موجودی"
@@ -30,6 +31,11 @@ ADMIN_CRYPTO_TOGGLE_MODE = "🔁 تغییر حالت نرخ (آنلاین/دست
 ADMIN_CRYPTO_SET_MARGIN = "✏️ تنظیم کارمزد (٪)"
 ADMIN_CRYPTO_SET_USDT = "✏️ نرخ دستی USDT"
 ADMIN_CRYPTO_SET_TON = "✏️ نرخ دستی TON"
+ADMIN_RIAL_HISTORY = "📋 درخواست‌های کارت‌به‌کارت"
+ADMIN_RIAL_SETTINGS = "💳 تنظیمات کارت‌به‌کارت"
+ADMIN_RIAL_SET_MIN = "✏️ حداقل پرداخت ریالی"
+ADMIN_RIAL_TOGGLE_PHONE = "📱 دریافت شماره تماس"
+ADMIN_RIAL_SET_SUPPORT = "👤 آیدی پشتیبانی ریالی"
 
 ADMIN_ADD_CONFIG = "➕ افزودن کانفیگ"
 ADMIN_STOCK_STATUS = "📋 وضعیت موجودی"
@@ -54,6 +60,7 @@ ADMIN_SHOP_BUTTONS = "🔘 مدیریت دکمه‌ها"
 ADMIN_SHOP_PLANS = "📦 مدیریت سرویس‌ها"
 ADMIN_SHOP_CATEGORIES = "🗂 مدیریت دسته‌ها"
 ADMIN_REQUIRED_CHANNELS = "📣 عضویت اجباری"
+ADMIN_TOGGLE_BRANDED_LINKS = "🔗 لینک اختصاصی ساب"
 ADMIN_SHOP_RESET_DEFAULTS = "↩️ بازگشت فروشگاه به پیش‌فرض"
 ADMIN_SHOP_MENU_MAIN = "منوی اصلی فروش"
 ADMIN_SHOP_MENU_WALLET = "منوی کیف پول"
@@ -70,6 +77,7 @@ ADMIN_ADD_BUTTON = "➕ افزودن دکمه سفارشی"
 ADMIN_DELETE_BUTTON = "🗑 حذف دکمه"
 ADMIN_ADD_PLAN = "➕ افزودن سرویس"
 ADMIN_ADD_CATEGORY = "➕ افزودن دسته"
+ADMIN_DELETE_CATEGORY = "🗑 حذف دسته"
 ADMIN_ADD_CHANNEL = "➕ افزودن کانال"
 ADMIN_DELETE_CHANNEL = "🗑 حذف کانال"
 ADMIN_EDIT_TITLE = "✏️ تغییر عنوان"
@@ -229,6 +237,7 @@ def admin_crypto_keyboard() -> ReplyKeyboardMarkup:
         [
             [_button(ADMIN_CRYPTO_HISTORY), _button(ADMIN_CRYPTO_SEARCH)],
             [_button(ADMIN_CRYPTO_RATES)],
+            [_button(ADMIN_RIAL_HISTORY), _button(ADMIN_RIAL_SETTINGS)],
             [_button(ADMIN_BACK)],
         ]
     )
@@ -240,6 +249,17 @@ def admin_crypto_rates_keyboard() -> ReplyKeyboardMarkup:
             [_button(ADMIN_CRYPTO_TOGGLE_MODE)],
             [_button(ADMIN_CRYPTO_SET_MARGIN)],
             [_button(ADMIN_CRYPTO_SET_USDT), _button(ADMIN_CRYPTO_SET_TON)],
+            [_button(ADMIN_BACK)],
+        ]
+    )
+
+
+def admin_rial_settings_keyboard() -> ReplyKeyboardMarkup:
+    return _keyboard(
+        [
+            [_button(ADMIN_RIAL_SET_MIN)],
+            [_button(ADMIN_RIAL_TOGGLE_PHONE)],
+            [_button(ADMIN_RIAL_SET_SUPPORT)],
             [_button(ADMIN_BACK)],
         ]
     )
@@ -330,7 +350,7 @@ def admin_shop_settings_keyboard() -> ReplyKeyboardMarkup:
         [
             [_button(ADMIN_SHOP_MESSAGES), _button(ADMIN_SHOP_BUTTONS)],
             [_button(ADMIN_SHOP_PLANS), _button(ADMIN_SHOP_CATEGORIES)],
-            [_button(ADMIN_REQUIRED_CHANNELS)],
+            [_button(ADMIN_REQUIRED_CHANNELS), _button(ADMIN_TOGGLE_BRANDED_LINKS)],
             [_button(ADMIN_SHOP_RESET_DEFAULTS)],
             [_button(ADMIN_BACK)],
         ]
@@ -377,6 +397,20 @@ def admin_shop_plan_edit_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
+def admin_shop_category_edit_keyboard() -> ReplyKeyboardMarkup:
+    return _keyboard(
+        [
+            [_button(ADMIN_EDIT_TITLE), _button(ADMIN_EDIT_EMOJI)],
+            [_button(ADMIN_EDIT_PREMIUM_EMOJI), _button(ADMIN_EDIT_EMOJI_POSITION)],
+            [_button(ADMIN_EDIT_STYLE), _button(ADMIN_EDIT_ORDER)],
+            [_button(ADMIN_TOGGLE_ENABLED)],
+            [_button(ADMIN_DELETE_CATEGORY)],
+            [_button(CANCEL), _button(ADMIN_BACK)],
+        ],
+        one_time_keyboard=True,
+    )
+
+
 def admin_style_keyboard() -> ReplyKeyboardMarkup:
     return _keyboard(
         [
@@ -403,6 +437,7 @@ def admin_response_button_keyboard() -> ReplyKeyboardMarkup:
         [
             [_button(ADMIN_RESPONSE_TEXT), _button(ADMIN_RESPONSE_INLINE_COPY)],
             [_button(ADMIN_RESPONSE_INLINE_URL), _button(ADMIN_RESPONSE_REPLY_KEYBOARD)],
+            [_button(ADMIN_EDIT_PREMIUM_EMOJI), _button(ADMIN_EDIT_PREMIUM_EMOJI_POSITION)],
             [_button(CANCEL), _button(ADMIN_BACK)],
         ],
         one_time_keyboard=True,

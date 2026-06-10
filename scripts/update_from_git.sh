@@ -3,7 +3,7 @@ set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/phantom}"
 REMOTE="${REMOTE:-origin}"
-BRANCH="${BRANCH:-main}"
+BRANCH="${BRANCH:-WIP}"
 SERVICE_NAME="${SERVICE_NAME:-phantom-bot.service}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 VENV_DIR="${VENV_DIR:-$APP_DIR/venv}"

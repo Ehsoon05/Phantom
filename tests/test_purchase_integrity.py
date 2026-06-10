@@ -131,6 +131,173 @@ async def test_purchase_history_can_load_config_link(db):
     assert purchase.config.sub_link == "vless://one"
 
 
+@pytest.mark.asyncio
+async def test_shop_category_can_be_fully_customized(db):
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    async with db.async_session() as session:
+        category = await ShopCustomizationService.ensure_category(session, "vip", "VIP")
+        updated = await ShopCustomizationService.update_category(
+            session,
+            category.key,
+            title="سرورهای ویژه",
+            emoji="🚀",
+            premium_emoji_id="5373141891321699086",
+            emoji_position="right",
+            style="danger",
+            display_order=7,
+            is_active=False,
+        )
+
+    assert updated.title == "سرورهای ویژه"
+    assert updated.emoji == "🚀"
+    assert updated.premium_emoji_id == "5373141891321699086"
+    assert updated.emoji_position == "right"
+    assert updated.style == "danger"
+    assert updated.display_order == 7
+    assert updated.is_active is False
+
+
+def test_admin_category_button_label_is_short_and_hides_internal_key():
+    from types import SimpleNamespace
+
+    from bot_package.handlers.admin_handlers import _category_label
+
+    category = SimpleNamespace(
+        key="reality_servers_internal",
+        title="سرورهای Reality",
+        emoji="🌐",
+        is_active=True,
+    )
+
+    label = _category_label(category)
+
+    assert label == "✅ 🌐 سرورهای Reality"
+    assert category.key not in label
+
+
+@pytest.mark.asyncio
+async def test_shop_category_can_be_deleted_while_in_use(db):
+    from bot_package.models import Config
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    async with db.async_session() as session:
+        category = await ShopCustomizationService.ensure_category(session, "vip", "VIP")
+        session.add(Config(volume_gb=10, category_key=category.key, sub_link="vless://vip"))
+        await session.commit()
+
+        plan_count, config_count = await ShopCustomizationService.category_usage(session, category.key)
+        deleted = await ShopCustomizationService.delete_category(session, category.key)
+        saved_category = await ShopCustomizationService.get_category(session, category.key)
+        saved_config = (await session.execute(select(Config).where(Config.category_key == category.key))).scalar_one()
+
+    assert (plan_count, config_count) == (0, 1)
+    assert deleted is True
+    assert saved_category is None
+    assert saved_config.sub_link == "vless://vip"
+
+
+@pytest.mark.asyncio
+async def test_unused_shop_category_can_be_deleted(db):
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    async with db.async_session() as session:
+        category = await ShopCustomizationService.ensure_category(session, "unused", "Unused")
+        await session.commit()
+        deleted = await ShopCustomizationService.delete_category(session, category.key)
+        saved = await ShopCustomizationService.get_category(session, category.key)
+
+    assert deleted is True
+    assert saved is None
+
+
+@pytest.mark.asyncio
+async def test_shop_message_renders_premium_emoji_and_keeps_markdown_formatting(db):
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    async with db.async_session() as session:
+        await ShopCustomizationService.init_defaults(session)
+        await ShopCustomizationService.update_message_settings(
+            session,
+            "account_info",
+            premium_emoji_id="5373141891321699086",
+            premium_emoji_position="right",
+        )
+        rendered = await ShopCustomizationService.get_message(
+            session,
+            "account_info",
+            telegram_id=1001,
+            first_name="Test",
+            username="@test",
+            wallet_balance="1,000",
+            total_count=1,
+            total_gb=10,
+            total_spent="15,000",
+            referral_count=2,
+        )
+
+    assert rendered.parse_mode == "HTML"
+    assert '<tg-emoji emoji-id="5373141891321699086">' in rendered
+    assert "<b>اطلاعات حساب</b>" in rendered
+    assert rendered.endswith("</tg-emoji>")
+
+
+@pytest.mark.asyncio
+async def test_shop_message_preserves_inline_premium_emojis(db):
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    inline_emoji = '<tg-emoji emoji-id="5373141891321699086">🔥</tg-emoji>'
+    async with db.async_session() as session:
+        await ShopCustomizationService.init_defaults(session)
+        await ShopCustomizationService.update_message(
+            session,
+            "account_info",
+            f"{inline_emoji} سلام {{first_name}}",
+            parse_mode="HTML",
+        )
+        rendered = await ShopCustomizationService.get_message(
+            session,
+            "account_info",
+            first_name="<Ehsan>",
+        )
+
+    assert rendered.parse_mode == "HTML"
+    assert inline_emoji in rendered
+    assert "&lt;Ehsan&gt;" in rendered
+
+
+def test_admin_message_storage_uses_telegram_html_for_custom_emoji():
+    from types import SimpleNamespace
+
+    from bot_package.handlers.admin_handlers import _message_text_for_storage
+
+    message = SimpleNamespace(
+        text="🔥 پیام",
+        text_html='<tg-emoji emoji-id="5373141891321699086">🔥</tg-emoji> پیام',
+        entities=[
+            SimpleNamespace(
+                type="custom_emoji",
+                custom_emoji_id="5373141891321699086",
+            )
+        ],
+    )
+
+    text, parse_mode = _message_text_for_storage(message)
+
+    assert parse_mode == "HTML"
+    assert 'emoji-id="5373141891321699086"' in text
+
+
+@pytest.mark.asyncio
+async def test_branded_subscription_link_setting_can_be_toggled(db):
+    from bot_package.services.settings_service import SettingsService
+
+    async with db.async_session() as session:
+        assert await SettingsService.branded_links_enabled(session) is True
+        await SettingsService.set_branded_links_enabled(session, False)
+        assert await SettingsService.branded_links_enabled(session) is False
+
+
 def test_purchase_flow_locks_user_row_with_for_update():
     """Regression for the wallet double-spend race: the purchase handler must
     request a row-level lock on the user when reading the wallet, so two

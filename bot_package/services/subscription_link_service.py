@@ -80,3 +80,24 @@ class SubscriptionLinkService:
                 response.raise_for_status()
         except httpx.HTTPError:
             logger.warning("Failed to sync subscription config %s to panel", config.id, exc_info=True)
+
+    @staticmethod
+    async def fetch_metadata(token: str) -> dict | None:
+        if not BotConfig.SUBSCRIPTION_PANEL_SYNC_TOKEN:
+            return None
+        url = (
+            f"{BotConfig.SUBSCRIPTION_PUBLIC_BASE_URL}/internal/configs/"
+            f"{quote(token, safe='')}/metadata"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.get(
+                    url,
+                    headers={"Authorization": f"Bearer {BotConfig.SUBSCRIPTION_PANEL_SYNC_TOKEN}"},
+                )
+                response.raise_for_status()
+                payload = response.json()
+                return payload if isinstance(payload, dict) else None
+        except (httpx.HTTPError, ValueError):
+            logger.warning("Failed to fetch subscription metadata for %s", token, exc_info=True)
+            return None

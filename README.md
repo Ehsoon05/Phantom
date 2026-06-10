@@ -152,7 +152,7 @@ Install the auto-update timer:
 
 ```bash
 cd /opt/phantom
-sudo APP_DIR=/opt/phantom REMOTE=origin BRANCH=main SERVICE_NAME=phantom-bot.service bash scripts/install_auto_update.sh
+sudo APP_DIR=/opt/phantom REMOTE=origin BRANCH=WIP SERVICE_NAME=phantom-bot.service bash scripts/install_auto_update.sh
 ```
 
 Check logs:
@@ -165,7 +165,7 @@ journalctl -u phantom-auto-update.service -n 100 --no-pager
 Run one update manually:
 
 ```bash
-sudo APP_DIR=/opt/phantom REMOTE=origin BRANCH=main SERVICE_NAME=phantom-bot.service /usr/local/bin/phantom-update-from-git
+sudo APP_DIR=/opt/phantom REMOTE=origin BRANCH=WIP SERVICE_NAME=phantom-bot.service /usr/local/bin/phantom-update-from-git
 ```
 
 ## Current Capabilities

@@ -75,17 +75,23 @@ async def fetch_incoming_ton(memo: str, min_amount: Optional[Decimal] = None) ->
     return results
 
 
-async def fetch_incoming_usdt_ton(memo: str, min_amount: Optional[Decimal] = None) -> list[dict]:
-    """Return USDT-jetton transfers to the deposit address whose comment == memo.
+async def fetch_incoming_jetton_ton(
+    memo: str,
+    jetton_master: str,
+    decimals: int,
+    min_amount: Optional[Decimal] = None,
+) -> list[dict]:
+    """Return jetton transfers (any token) to the deposit address whose comment == memo.
 
-    Requires TON_USDT_JETTON_MASTER to be configured; otherwise returns [].
+    Works for USDT, USDC, or any other TON jetton — the caller supplies the
+    jetton master address and its decimals.
     """
-    if not (BotConfig.TON_DEPOSIT_ADDRESS and BotConfig.TON_USDT_JETTON_MASTER):
+    if not (BotConfig.TON_DEPOSIT_ADDRESS and jetton_master):
         return []
     url = f"{TONCENTER_V3}/jetton/transfers"
     params = {
         "dest": BotConfig.TON_DEPOSIT_ADDRESS,
-        "jetton_master": BotConfig.TON_USDT_JETTON_MASTER,
+        "jetton_master": jetton_master,
         "limit": 50,
         "direction": "in",
     }
@@ -106,7 +112,7 @@ async def fetch_incoming_usdt_ton(memo: str, min_amount: Optional[Decimal] = Non
         raw_value = tr.get("amount")
         if raw_value is None:
             continue
-        amount = Decimal(str(raw_value)) / (Decimal(10) ** TON_USDT_DECIMALS)
+        amount = Decimal(str(raw_value)) / (Decimal(10) ** decimals)
         if min_amount is not None and amount < min_amount:
             continue
         results.append(
@@ -118,3 +124,10 @@ async def fetch_incoming_usdt_ton(memo: str, min_amount: Optional[Decimal] = Non
             }
         )
     return results
+
+
+async def fetch_incoming_usdt_ton(memo: str, min_amount: Optional[Decimal] = None) -> list[dict]:
+    """Backwards-compatible USDT-on-TON wrapper around fetch_incoming_jetton_ton."""
+    return await fetch_incoming_jetton_ton(
+        memo, BotConfig.TON_USDT_JETTON_MASTER, TON_USDT_DECIMALS, min_amount
+    )
