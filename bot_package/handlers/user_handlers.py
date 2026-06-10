@@ -1,8 +1,9 @@
-import html
+import io
 import re
 from datetime import datetime, timezone
 from urllib.parse import quote
 
+import qrcode
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update, constants
@@ -585,7 +586,8 @@ async def service_details_callback(update: Update, context: ContextTypes.DEFAULT
         return
 
     try:
-        purchase_id = int(query.data.split(":", 1)[1])
+        action, raw_purchase_id = query.data.split(":", 1)
+        purchase_id = int(raw_purchase_id)
     except (AttributeError, IndexError, ValueError):
         await query.answer("سرویس نامعتبر است.", show_alert=True)
         return
@@ -600,7 +602,6 @@ async def service_details_callback(update: Update, context: ContextTypes.DEFAULT
         if not purchase:
             await query.answer("این سرویس پیدا نشد.", show_alert=True)
             return
-        await query.answer()
         if await SettingsService.branded_links_enabled(session):
             sub_link = await SubscriptionLinkService.public_link_for_config(session, purchase.config)
             await SubscriptionLinkService.sync_to_panel(purchase.config, purchase.service_name)
@@ -610,6 +611,27 @@ async def service_details_callback(update: Update, context: ContextTypes.DEFAULT
             token = None
         await session.commit()
 
+    if action == "service_qr":
+        await query.answer("QR Code ساخته شد.")
+        image = qrcode.make(sub_link)
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        buffer.seek(0)
+        buffer.name = f"service-{purchase.id}-qr.png"
+        keyboard = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("باز کردن لینک اشتراک", url=sub_link)],
+                [InlineKeyboardButton("کپی لینک", api_kwargs={"copy_text": {"text": sub_link}})],
+            ]
+        )
+        await query.message.reply_photo(
+            photo=buffer,
+            caption=f"QR Code سرویس «{purchase.service_name or f'{purchase.volume_gb} گیگ'}»",
+            reply_markup=keyboard,
+        )
+        return
+
+    await query.answer()
     metadata = await SubscriptionLinkService.fetch_metadata(token) if token else None
     expiry_text, remaining_time = _format_expiry(metadata.get("expire") if metadata else None)
     original_title = metadata.get("title") if metadata else "نامشخص"
@@ -617,27 +639,31 @@ async def service_details_callback(update: Update, context: ContextTypes.DEFAULT
     used_volume = _format_service_bytes(metadata.get("used")) if metadata else "نامشخص"
     total_volume = _format_service_bytes(metadata.get("total")) if metadata else f"{purchase.volume_gb} گیگابایت"
     config_count = metadata.get("config_count", "نامشخص") if metadata else "نامشخص"
-    text = (
-        f"<b>{html.escape(purchase.service_name or f'{purchase.volume_gb} گیگ')}</b>\n\n"
-        f"نام اصلی اشتراک: <b>{html.escape(str(original_title))}</b>\n"
-        f"دسته‌بندی: <b>{html.escape(purchase.category_key or 'default')}</b>\n"
-        f"حجم کل: <b>{total_volume}</b>\n"
-        f"حجم مصرف‌شده: <b>{used_volume}</b>\n"
-        f"حجم باقی‌مانده: <b>{remaining_volume}</b>\n"
-        f"تاریخ انقضا: <b>{expiry_text}</b>\n"
-        f"زمان باقی‌مانده: <b>{remaining_time}</b>\n"
-        f"تعداد کانفیگ: <b>{config_count}</b>\n"
-        f"تاریخ خرید: <b>{purchase.purchased_at.strftime('%Y-%m-%d %H:%M')}</b>\n"
-        f"مبلغ پرداختی: <b>{purchase.price:,} تومان</b>"
-    )
+    async with async_session() as session:
+        text = await ShopCustomizationService.get_message(
+            session,
+            "service_details",
+            service_name=purchase.service_name or f"{purchase.volume_gb} گیگ",
+            original_title=original_title,
+            category_key=purchase.category_key or "default",
+            total_volume=total_volume,
+            used_volume=used_volume,
+            remaining_volume=remaining_volume,
+            expiry_text=expiry_text,
+            remaining_time=remaining_time,
+            config_count=config_count,
+            purchased_at=purchase.purchased_at.strftime("%Y-%m-%d %H:%M"),
+            price=f"{purchase.price:,}",
+        )
     keyboard = InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("باز کردن لینک اشتراک", url=sub_link)],
             [InlineKeyboardButton("کپی لینک", api_kwargs={"copy_text": {"text": sub_link}})],
+            [InlineKeyboardButton("ساخت QR Code", callback_data=f"service_qr:{purchase.id}")],
             [InlineKeyboardButton("بازگشت به سرویس‌ها", callback_data="services:list")],
         ]
     )
-    await query.edit_message_text(text, reply_markup=keyboard, parse_mode=constants.ParseMode.HTML)
+    await query.edit_message_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
 
 
 async def cancel_coupon(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -807,6 +833,6 @@ user_handlers = [
     CommandHandler("help", help_menu),
     CommandHandler("support", support_menu),
     CommandHandler("cancel", cancel_coupon),
-    CallbackQueryHandler(service_details_callback, pattern=r"^(service:\d+|services:list)$"),
+    CallbackQueryHandler(service_details_callback, pattern=r"^(service:\d+|service_qr:\d+|services:list)$"),
     MessageHandler(filters.TEXT & ~filters.COMMAND, shop_text_router),
 ]

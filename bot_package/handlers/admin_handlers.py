@@ -272,6 +272,18 @@ def _message_label(key: str) -> str:
     return f"📝 {key}"
 
 
+MESSAGE_PLACEHOLDER_HINTS = {
+    "service_details": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{service_name}` `{original_title}` `{category_key}`\n"
+        "`{total_volume}` `{used_volume}` `{remaining_volume}`\n"
+        "`{expiry_text}` `{remaining_time}` `{config_count}`\n"
+        "`{purchased_at}` `{price}`\n"
+        "هر خطی را که نمی‌خواهید نمایش داده شود، از متن قالب حذف کنید."
+    ),
+}
+
+
 def _button_label(button) -> str:
     status = "فعال" if button.is_enabled else "غیرفعال"
     emoji = f"{button.emoji} " if button.emoji else ""
@@ -1782,8 +1794,9 @@ async def _show_shop_message_editor(update: Update, context: ContextTypes.DEFAUL
         "برای تنظیم لینک یا متن قابل کپی بنویسید: لینک دکمه: https://example.com\n"
         "برای حذف لینک/متن کپی بنویسید: لینک دکمه: -"
     )
+    placeholder_note = MESSAGE_PLACEHOLDER_HINTS.get(key, "")
     await update.message.reply_text(
-        f"ویرایش پیام {key}\n\nمتن فعلی:\n\n{message.text}{extra_note}\n\nمتن جدید را ارسال کنید.",
+        f"ویرایش پیام {key}\n\nمتن فعلی:\n\n{message.text}{placeholder_note}{extra_note}\n\nمتن جدید را ارسال کنید.",
         reply_markup=admin_response_button_keyboard(),
     )
     return SHOP_MESSAGE_TEXT

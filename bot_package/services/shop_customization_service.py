@@ -174,6 +174,19 @@ DEFAULT_MESSAGES: dict[str, str] = {
     "help": default_messages.HELP_TEXT,
     "no_purchase": default_messages.NO_PURCHASE,
     "purchase_history_header": "**آخرین خریدهای شما**\n\n",
+    "service_details": (
+        "**{service_name}**\n\n"
+        "نام اصلی اشتراک: **{original_title}**\n"
+        "دسته‌بندی: **{category_key}**\n"
+        "حجم کل: **{total_volume}**\n"
+        "حجم مصرف‌شده: **{used_volume}**\n"
+        "حجم باقی‌مانده: **{remaining_volume}**\n"
+        "تاریخ انقضا: **{expiry_text}**\n"
+        "زمان باقی‌مانده: **{remaining_time}**\n"
+        "تعداد کانفیگ: **{config_count}**\n"
+        "تاریخ خرید: **{purchased_at}**\n"
+        "مبلغ پرداختی: **{price} تومان**"
+    ),
     "invalid_plan": "پلن انتخاب‌شده معتبر نیست. لطفا دوباره از منوی خرید انتخاب کنید.",
     "service_name_prompt": (
         "**نام دلخواه سرویس را وارد کنید**\n\n"
