@@ -97,6 +97,10 @@ from ..utils.keyboards import (
     ADMIN_STOCK_STATUS,
     ADMIN_TOGGLE_ENABLED,
     ADMIN_TOGGLE_BRANDED_LINKS,
+    ADMIN_TRIAL_SETTINGS,
+    ADMIN_TRIAL_SET_DURATION,
+    ADMIN_TRIAL_SET_VOLUME,
+    ADMIN_TRIAL_TOGGLE,
     ADMIN_USERS,
     ADMIN_USER_STATS,
     ADMIN_EMOJI_LEFT,
@@ -134,6 +138,7 @@ from ..utils.keyboards import (
     admin_reset_confirm_keyboard,
     admin_required_channel_keyboard,
     admin_style_keyboard,
+    admin_trial_settings_keyboard,
     admin_user_confirm_keyboard,
     admin_users_keyboard,
     coupon_target_keyboard,
@@ -225,7 +230,9 @@ from ..utils.validators import extract_links_from_text
     RIAL_SET_SUPPORT_VALUE,
     SHOP_RESET_CONFIRM,
     SHOP_RESET_PASSWORD,
-) = range(58)
+    TRIAL_SET_VOLUME_VALUE,
+    TRIAL_SET_DURATION_VALUE,
+) = range(60)
 
 
 SHOP_MENU_LABELS = {
@@ -264,6 +271,7 @@ SHOP_SETTINGS_LABELS = {
     ADMIN_SHOP_RESET_DEFAULTS,
     ADMIN_REQUIRED_CHANNELS,
     ADMIN_TOGGLE_BRANDED_LINKS,
+    ADMIN_TRIAL_SETTINGS,
 }
 
 
@@ -359,6 +367,8 @@ async def _leave_shop_flow_if_navigation(update: Update, context: ContextTypes.D
             await required_channels_start(update, context)
         elif text == ADMIN_TOGGLE_BRANDED_LINKS:
             await toggle_branded_subscription_links(update, context)
+        elif text == ADMIN_TRIAL_SETTINGS:
+            await trial_settings_menu(update, context)
         elif text == ADMIN_SHOP_RESET_DEFAULTS:
             await update.message.reply_text(
                 "از روند فعلی خارج شدید. برای بازگردانی، دکمه قرمز «بازگشت فروشگاه به پیش‌فرض» را دوباره بزنید.",
@@ -1758,6 +1768,84 @@ async def toggle_branded_subscription_links(update: Update, context: ContextType
         reply_markup=admin_shop_settings_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
+
+
+@require_auth(permission="shop")
+async def trial_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        enabled = await SettingsService.trial_enabled(session)
+        volume_mb = await SettingsService.get_trial_volume_mb(session)
+        duration_hours = await SettingsService.get_trial_duration_hours(session)
+    await update.message.reply_text(
+        "**تنظیمات کانفیگ تست**\n\n"
+        f"وضعیت: **{'روشن' if enabled else 'خاموش'}**\n"
+        f"حجم: **{volume_mb} مگابایت**\n"
+        f"مدت: **{duration_hours} ساعت از اولین اتصال**\n"
+        "هر حساب تلگرام فقط یک‌بار می‌تواند تست دریافت کند.",
+        reply_markup=admin_trial_settings_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+
+
+@require_auth(permission="shop")
+async def trial_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        enabled = not await SettingsService.trial_enabled(session)
+        await SettingsService.set_trial_enabled(session, enabled)
+    await update.message.reply_text(f"دریافت تست {'روشن' if enabled else 'خاموش'} شد.")
+    await trial_settings_menu(update, context)
+
+
+@require_auth(permission="shop")
+async def trial_set_volume_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "حجم تست را به مگابایت وارد کنید. مثال: `500`",
+        reply_markup=_cancel_back_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return TRIAL_SET_VOLUME_VALUE
+
+
+@require_auth(permission="shop")
+async def trial_set_volume_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        value = int(update.message.text.replace(",", "").strip())
+    except ValueError:
+        value = 0
+    if value <= 0:
+        await update.message.reply_text("حجم باید یک عدد مثبت برحسب مگابایت باشد.")
+        return TRIAL_SET_VOLUME_VALUE
+    async with async_session() as session:
+        await SettingsService.set_trial_volume_mb(session, value)
+    await update.message.reply_text("حجم کانفیگ تست ذخیره شد.")
+    await trial_settings_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="shop")
+async def trial_set_duration_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "مدت تست را به ساعت وارد کنید. مثال: `24`",
+        reply_markup=_cancel_back_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return TRIAL_SET_DURATION_VALUE
+
+
+@require_auth(permission="shop")
+async def trial_set_duration_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        value = int(update.message.text.replace(",", "").strip())
+    except ValueError:
+        value = 0
+    if value <= 0:
+        await update.message.reply_text("مدت باید یک عدد مثبت برحسب ساعت باشد.")
+        return TRIAL_SET_DURATION_VALUE
+    async with async_session() as session:
+        await SettingsService.set_trial_duration_hours(session, value)
+    await update.message.reply_text("مدت کانفیگ تست ذخیره شد.")
+    await trial_settings_menu(update, context)
+    return ConversationHandler.END
 
 
 @require_auth(permission="shop")
@@ -3658,6 +3746,30 @@ rial_set_support_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
 )
 
+trial_set_volume_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_TRIAL_SET_VOLUME), trial_set_volume_start)],
+    states={
+        TRIAL_SET_VOLUME_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, trial_set_volume_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+trial_set_duration_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_TRIAL_SET_DURATION), trial_set_duration_start)],
+    states={
+        TRIAL_SET_DURATION_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, trial_set_duration_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
 shop_reset_defaults_conv = ConversationHandler(
     entry_points=[MessageHandler(_exact_filter(ADMIN_SHOP_RESET_DEFAULTS), shop_reset_defaults)],
     states={
@@ -3705,6 +3817,8 @@ admin_handlers = [
     crypto_set_ton_conv,
     rial_set_min_conv,
     rial_set_support_conv,
+    trial_set_volume_conv,
+    trial_set_duration_conv,
     shop_reset_defaults_conv,
     MessageHandler(_exact_filter(ADMIN_CRYPTO), crypto_menu),
     MessageHandler(_exact_filter(ADMIN_CRYPTO_HISTORY), crypto_history),
@@ -3717,6 +3831,8 @@ admin_handlers = [
     MessageHandler(_exact_filter(ADMIN_ADMINS), admin_management_menu),
     MessageHandler(_exact_filter(ADMIN_REFRESH_ADMINS), list_admins),
     MessageHandler(_exact_filter(ADMIN_SHOP_SETTINGS), shop_settings_menu),
+    MessageHandler(_exact_filter(ADMIN_TRIAL_SETTINGS), trial_settings_menu),
+    MessageHandler(_exact_filter(ADMIN_TRIAL_TOGGLE), trial_toggle),
     MessageHandler(_exact_filter(ADMIN_TOGGLE_BRANDED_LINKS), toggle_branded_subscription_links),
     MessageHandler(
         filters.Regex(

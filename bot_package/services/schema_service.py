@@ -19,6 +19,8 @@ class SchemaService:
                         "referred_by_user_id": "BIGINT",
                         "referred_at": "DATETIME",
                         "accepted_rules_at": "DATETIME",
+                        "trial_claimed_at": "DATETIME",
+                        "trial_panel_username": "VARCHAR",
                     },
                 )
             if "configs" in tables:

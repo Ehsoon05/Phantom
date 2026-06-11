@@ -17,6 +17,8 @@ class User(Base):
     referred_by_user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=True)
     referred_at = Column(DateTime, nullable=True)
     accepted_rules_at = Column(DateTime, nullable=True)
+    trial_claimed_at = Column(DateTime, nullable=True)
+    trial_panel_username = Column(String, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     purchases = relationship("Purchase", back_populates="user")
     referrals = relationship(

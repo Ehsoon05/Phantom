@@ -18,10 +18,11 @@ except ImportError:
 
 from . import crypto_user, rial_user
 from ..database import async_session
-from ..models import Purchase, Transaction, User
+from ..models import Config, Purchase, Transaction, User
 from ..services.coupon_service import CouponError, CouponService
 from ..services.settings_service import SettingsService
 from ..services.inventory_service import InventoryService
+from ..services.marzban_trial_service import MarzbanTrialError, MarzbanTrialService
 from ..services.price_service import PriceService
 from ..services.referral_service import ReferralService
 from ..services.required_channel_service import RequiredChannelService
@@ -541,6 +542,96 @@ async def history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
 
 
+async def trial_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        if not await SettingsService.trial_enabled(session):
+            text = await ShopCustomizationService.get_message(session, "trial_disabled")
+            keyboard = await ShopCustomizationService.main_menu_keyboard(session)
+            await update.effective_message.reply_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
+            return
+
+        result = await session.execute(
+            select(User)
+            .where(User.telegram_id == update.effective_user.id)
+            .with_for_update()
+        )
+        user = result.scalar_one_or_none()
+        if not user:
+            user = User(
+                telegram_id=update.effective_user.id,
+                first_name=update.effective_user.first_name,
+                username=update.effective_user.username,
+            )
+            session.add(user)
+            await session.flush()
+
+        if user.trial_claimed_at or user.trial_panel_username:
+            text = await ShopCustomizationService.get_message(session, "trial_already_claimed")
+            keyboard = await ShopCustomizationService.main_menu_keyboard(session)
+            await update.effective_message.reply_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
+            return
+
+        volume_mb = await SettingsService.get_trial_volume_mb(session)
+        duration_hours = await SettingsService.get_trial_duration_hours(session)
+        try:
+            trial = await MarzbanTrialService.create_or_get(
+                user.telegram_id,
+                volume_mb,
+                duration_hours,
+            )
+        except MarzbanTrialError:
+            await session.rollback()
+            async with async_session() as error_session:
+                text = await ShopCustomizationService.get_message(error_session, "trial_unavailable")
+                keyboard = await ShopCustomizationService.main_menu_keyboard(error_session)
+            await update.effective_message.reply_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
+            return
+
+        config_result = await session.execute(select(Config).where(Config.sub_link == trial.subscription_url))
+        config = config_result.scalar_one_or_none()
+        if not config:
+            config = Config(
+                volume_gb=0,
+                category_key="trial",
+                sub_link=trial.subscription_url,
+                is_sold=True,
+                sold_to_user_id=user.telegram_id,
+                sold_at=datetime.now(timezone.utc),
+            )
+            session.add(config)
+            await session.flush()
+
+        purchase = Purchase(
+            user_id=user.telegram_id,
+            config_id=config.id,
+            volume_gb=0,
+            category_key="trial",
+            price=0,
+            original_price=0,
+            discount_amount=0,
+            service_name="تست رایگان",
+        )
+        session.add(purchase)
+        user.trial_claimed_at = datetime.now(timezone.utc)
+        user.trial_panel_username = trial.username
+        await session.flush()
+        if await SettingsService.branded_links_enabled(session):
+            await SubscriptionLinkService.public_link_for_config(session, config)
+            await SubscriptionLinkService.sync_to_panel(config, purchase.service_name)
+        await session.commit()
+
+        text = await ShopCustomizationService.get_message(
+            session,
+            "trial_success",
+            volume_mb=volume_mb,
+            duration_hours=duration_hours,
+        )
+        keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("مشاهده سرویس تست", callback_data=f"service:{purchase.id}")]]
+        )
+    await update.effective_message.reply_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
+
+
 def _format_service_bytes(value: int | None) -> str:
     if value is None:
         return "نامشخص"
@@ -821,6 +912,8 @@ async def _dispatch_shop_action(update: Update, context: ContextTypes.DEFAULT_TY
         await crypto_user.charge_start(update, context)
     elif action == "charge_rial":
         await rial_user.charge_start(update, context)
+    elif action == "trial_config":
+        await trial_config(update, context)
     elif action and action.startswith("custom_message:"):
         async with async_session() as session:
             message = await ShopCustomizationService.get_message(session, action)

@@ -81,6 +81,7 @@ def test_current_shop_snapshot_is_the_code_default():
     plans = {(plan.category_key, plan.volume_gb, plan.price) for plan in DEFAULT_PLANS}
 
     assert ("shop_main", "custom_message:shop_main:1780731124") in actions
+    assert ("shop_main", "trial_config") in actions
     assert ("shop_wallet", "charge_rial") in actions
     assert "___phantom_express_-_فانتوم_اکسپرس" in categories
     assert ("___phantom_express_-_فانتوم_اکسپرس", 10, 89_000) in plans

@@ -133,12 +133,13 @@ def _button_default(action: str, menu: str, label: str, style: str, row: int, co
 DEFAULT_BUTTONS: tuple[ButtonDefinition, ...] = (
     ButtonDefinition("custom_message:shop_main:1780731124", "shop_main", "تعرفه ها", None, None, 0, 0, "5884491244360438851"),
     ButtonDefinition("buy_subscription", "shop_main", "خرید سرویس", None, STYLE_PRIMARY, 0, 1, "5922272602784534896"),
-    ButtonDefinition("wallet", "shop_main", "کیف پول", None, None, 1, 0, "5769126056262898415"),
-    ButtonDefinition("purchase_history", "shop_main", "سرویس های من", None, None, 1, 1, "5805550320985578625"),
-    ButtonDefinition("referrals", "shop_main", "دعوت دوستان", None, None, 2, 0, "6033125983572201397"),
-    ButtonDefinition("account_info", "shop_main", "اطلاعات حساب", None, None, 2, 1, "5904630315946611415"),
-    ButtonDefinition("support", "shop_main", "پشتیبانی", None, None, 3, 0, "6037421444789440735"),
-    ButtonDefinition("help", "shop_main", "آموزش اتصال", None, None, 3, 1, "5776233299424843260"),
+    ButtonDefinition("trial_config", "shop_main", "دریافت کانفیگ تست", "🧪", STYLE_SUCCESS, 1, 0, "5373141891321699086"),
+    ButtonDefinition("wallet", "shop_main", "کیف پول", None, None, 2, 0, "5769126056262898415"),
+    ButtonDefinition("purchase_history", "shop_main", "سرویس های من", None, None, 2, 1, "5805550320985578625"),
+    ButtonDefinition("referrals", "shop_main", "دعوت دوستان", None, None, 3, 0, "6033125983572201397"),
+    ButtonDefinition("account_info", "shop_main", "اطلاعات حساب", None, None, 3, 1, "5904630315946611415"),
+    ButtonDefinition("support", "shop_main", "پشتیبانی", None, None, 4, 0, "6037421444789440735"),
+    ButtonDefinition("help", "shop_main", "آموزش اتصال", None, None, 4, 1, "5776233299424843260"),
     _button_default("charge_rial", "shop_wallet", CHARGE_RIAL, STYLE_SUCCESS, 0, 0),
     _button_default("charge_crypto", "shop_wallet", CHARGE_CRYPTO, STYLE_SUCCESS, 0, 1),
     _button_default("apply_coupon", "shop_wallet", APPLY_COUPON, STYLE_SUCCESS, 1, 0),
@@ -152,6 +153,22 @@ DEFAULT_BUTTONS: tuple[ButtonDefinition, ...] = (
 
 DEFAULT_MESSAGES: dict[str, str] = {
     "main_menu": default_messages.MAIN_MENU_TEXT,
+    "trial_success": (
+        "**کانفیگ تست شما آماده شد**\n\n"
+        "حجم: **{volume_mb} مگابایت**\n"
+        "مدت: **{duration_hours} ساعت از اولین اتصال**\n\n"
+        "سرویس با نام **تست رایگان** در بخش «سرویس‌های من» ثبت شد."
+    ),
+    "trial_already_claimed": (
+        "**کانفیگ تست قبلاً دریافت شده است**\n\n"
+        "برای هر حساب تلگرام فقط یک کانفیگ تست قابل دریافت است.\n"
+        "سرویس خود را از بخش «سرویس‌های من» مشاهده کنید."
+    ),
+    "trial_unavailable": (
+        "**ساخت کانفیگ تست انجام نشد**\n\n"
+        "لطفاً کمی بعد دوباره تلاش کنید یا با پشتیبانی در ارتباط باشید."
+    ),
+    "trial_disabled": "**دریافت کانفیگ تست در حال حاضر غیرفعال است.**",
     "buy_menu": default_messages.BUY_MENU_TEXT,
     "rules_text": (
         "**قوانین استفاده از فانتوم**\n\n"
@@ -357,6 +374,15 @@ class ShopCustomizationService:
                 message.text = _insert_after_heading(message.text, "نام سرویس: **{service_name}**\n")
             elif key == "purchase_history_item" and "{service_name}" not in message.text:
                 message.text = "نام سرویس: **{service_name}**\n" + message.text
+
+        trial_result = await session.execute(
+            select(ShopButton).where(ShopButton.action == "trial_config", ShopButton.menu == "shop_main")
+        )
+        if trial_result.scalar_one_or_none() is None:
+            existing_main_buttons = await session.execute(select(ShopButton).where(ShopButton.menu == "shop_main"))
+            for button in existing_main_buttons.scalars().all():
+                if button.row >= 1:
+                    button.row += 1
 
         added_rial_button = False
         for definition in DEFAULT_BUTTONS:

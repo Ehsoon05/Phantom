@@ -86,6 +86,9 @@ class BotConfig:
     SUBSCRIPTION_PUBLIC_BASE_URL = os.getenv("SUBSCRIPTION_PUBLIC_BASE_URL", "https://api.phantomhubs.shop").strip().rstrip("/")
     SUBSCRIPTION_PANEL_SYNC_URL = os.getenv("SUBSCRIPTION_PANEL_SYNC_URL", "").strip().rstrip("/")
     SUBSCRIPTION_PANEL_SYNC_TOKEN = os.getenv("SUBSCRIPTION_PANEL_SYNC_TOKEN", "").strip()
+    MARZBAN_API_URL = os.getenv("MARZBAN_API_URL", "").strip().rstrip("/")
+    MARZBAN_API_USERNAME = os.getenv("MARZBAN_API_USERNAME", "").strip()
+    MARZBAN_API_PASSWORD = os.getenv("MARZBAN_API_PASSWORD", "").strip()
     SESSION_TIMEOUT_MINUTES = _parse_int_env("SESSION_TIMEOUT_MINUTES", 60)
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().upper()
 

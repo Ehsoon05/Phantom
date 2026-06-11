@@ -294,6 +294,23 @@ async def test_shop_message_preserves_inline_premium_emojis(db):
     assert "&lt;Ehsan&gt;" in rendered
 
 
+@pytest.mark.asyncio
+async def test_trial_button_occupies_its_own_second_row(db):
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    async with db.async_session() as session:
+        await ShopCustomizationService.init_defaults(session)
+        buttons = await ShopCustomizationService.list_buttons(session, "shop_main")
+
+    trial = next(button for button in buttons if button.action == "trial_config")
+    second_row = [button for button in buttons if button.row == 1]
+    wallet = next(button for button in buttons if button.action == "wallet")
+
+    assert second_row == [trial]
+    assert trial.col == 0
+    assert wallet.row == 2
+
+
 def test_admin_message_storage_uses_telegram_html_for_custom_emoji():
     from types import SimpleNamespace
 

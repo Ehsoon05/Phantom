@@ -15,6 +15,9 @@ BRANDED_SUBSCRIPTION_LINKS = "branded_subscription_links_enabled"
 RIAL_MIN_AMOUNT = "rial_min_amount"
 RIAL_REQUIRE_PHONE = "rial_require_phone"
 RIAL_SUPPORT_HANDLE = "rial_support_handle"
+TRIAL_ENABLED = "trial_enabled"
+TRIAL_VOLUME_MB = "trial_volume_mb"
+TRIAL_DURATION_HOURS = "trial_duration_hours"
 
 DEFAULTS = {
     RATE_MODE: "online",
@@ -25,6 +28,9 @@ DEFAULTS = {
     RIAL_MIN_AMOUNT: "100000",
     RIAL_REQUIRE_PHONE: "true",
     RIAL_SUPPORT_HANDLE: "@PhantomHubsSupport",
+    TRIAL_ENABLED: "true",
+    TRIAL_VOLUME_MB: "500",
+    TRIAL_DURATION_HOURS: "24",
 }
 
 
@@ -132,3 +138,34 @@ class SettingsService:
     async def set_rial_support_handle(session: AsyncSession, handle: str) -> None:
         value = handle.strip().lstrip("@")
         await SettingsService.set(session, RIAL_SUPPORT_HANDLE, f"@{value}")
+
+    @staticmethod
+    async def trial_enabled(session: AsyncSession) -> bool:
+        value = await SettingsService.get(session, TRIAL_ENABLED, "true")
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    async def set_trial_enabled(session: AsyncSession, enabled: bool) -> None:
+        await SettingsService.set(session, TRIAL_ENABLED, "true" if enabled else "false")
+
+    @staticmethod
+    async def get_trial_volume_mb(session: AsyncSession) -> int:
+        try:
+            return max(1, int(await SettingsService.get(session, TRIAL_VOLUME_MB) or 500))
+        except (TypeError, ValueError):
+            return 500
+
+    @staticmethod
+    async def set_trial_volume_mb(session: AsyncSession, volume_mb: int) -> None:
+        await SettingsService.set(session, TRIAL_VOLUME_MB, str(max(1, int(volume_mb))))
+
+    @staticmethod
+    async def get_trial_duration_hours(session: AsyncSession) -> int:
+        try:
+            return max(1, int(await SettingsService.get(session, TRIAL_DURATION_HOURS) or 24))
+        except (TypeError, ValueError):
+            return 24
+
+    @staticmethod
+    async def set_trial_duration_hours(session: AsyncSession, hours: int) -> None:
+        await SettingsService.set(session, TRIAL_DURATION_HOURS, str(max(1, int(hours))))
