@@ -497,7 +497,16 @@ class ShopCustomizationService:
         message = await ShopCustomizationService.get_message_row(session, key)
         if not message:
             return None
-        allowed = {"premium_emoji_id", "premium_emoji_position", "response_button_type", "response_button_text", "response_button_url"}
+        allowed = {
+            "premium_emoji_id",
+            "premium_emoji_position",
+            "response_button_type",
+            "response_button_text",
+            "response_button_url",
+            "response_button_style",
+            "response_button_premium_emoji_id",
+            "response_button_source_id",
+        }
         for field, value in values.items():
             if field in allowed:
                 setattr(message, field, value)
@@ -955,20 +964,59 @@ class ShopCustomizationService:
     ):
         message = await ShopCustomizationService.get_message_row(session, key)
         button_type = (message.response_button_type if message else "text") or "text"
-        button_text = (message.response_button_text if message else None) or "ادامه"
+        source_button = None
+        if message and message.response_button_source_id:
+            source_button = await ShopCustomizationService.get_button(session, message.response_button_source_id)
+        button_text = (
+            (message.response_button_text if message else None)
+            or (ShopCustomizationService.button_label(source_button) if source_button else None)
+            or "ادامه"
+        )
         payload = (message.response_button_url if message else None) or default_url
+        style = (message.response_button_style if message else None) or (source_button.style if source_button else None)
+        premium_emoji_id = (
+            (message.response_button_premium_emoji_id if message else None)
+            or (source_button.premium_emoji_id if source_button else None)
+        )
+        api_kwargs = {}
+        if style:
+            api_kwargs["style"] = style
+        if _is_valid_custom_emoji_id(premium_emoji_id):
+            api_kwargs["icon_custom_emoji_id"] = str(premium_emoji_id).strip()
         if button_type == "inline_copy":
             copy_payload = payload or copy_text
             if not copy_payload:
                 return fallback_markup
+            api_kwargs["copy_text"] = {"text": copy_payload}
             return InlineKeyboardMarkup(
-                [[InlineKeyboardButton(button_text, api_kwargs={"copy_text": {"text": copy_payload}})]]
+                [[InlineKeyboardButton(button_text, api_kwargs=api_kwargs)]]
             )
         if button_type == "inline_url" and payload and payload.startswith(("http://", "https://", "tg://")):
-            return InlineKeyboardMarkup([[InlineKeyboardButton(button_text, url=payload)]])
+            return InlineKeyboardMarkup([[InlineKeyboardButton(button_text, url=payload, api_kwargs=api_kwargs or None)]])
+        if button_type == "inline_action" and source_button:
+            return InlineKeyboardMarkup(
+                [[InlineKeyboardButton(
+                    button_text,
+                    callback_data=f"shop_response:{message.id}",
+                    api_kwargs=api_kwargs or None,
+                )]]
+            )
         if button_type == "reply_keyboard":
+            if source_button:
+                return _reply_keyboard([[ShopCustomizationService._button_from_model(source_button)]])
             return fallback_markup
         return fallback_markup
+
+    @staticmethod
+    async def response_button_action(session: AsyncSession, message_id: int) -> str | None:
+        result = await session.execute(select(ShopMessage).where(ShopMessage.id == message_id))
+        message = result.scalar_one_or_none()
+        if not message or not message.response_button_source_id:
+            return None
+        button = await ShopCustomizationService.get_button(session, message.response_button_source_id)
+        if not button or not button.is_enabled:
+            return None
+        return button.action
 
     @staticmethod
     async def purchase_success_reply_markup(session: AsyncSession, sub_link: str):

@@ -1,6 +1,7 @@
 import io
 import re
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from urllib.parse import quote
 
 import qrcode
@@ -794,6 +795,10 @@ async def shop_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await ask_service_name(update, context, plan_id)
         return
 
+    await _dispatch_shop_action(update, context, action)
+
+
+async def _dispatch_shop_action(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str | None):
     if action == "back_to_main":
         await main_menu(update, context)
     elif action == "buy_subscription":
@@ -830,6 +835,30 @@ async def shop_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await main_menu(update, context)
 
 
+async def response_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    try:
+        message_id = int(query.data.split(":", 1)[1])
+    except (AttributeError, IndexError, ValueError):
+        await query.answer("دکمه معتبر نیست.", show_alert=True)
+        return
+
+    async with async_session() as session:
+        action = await ShopCustomizationService.response_button_action(session, message_id)
+    if not action:
+        await query.answer("این دکمه غیرفعال یا حذف شده است.", show_alert=True)
+        return
+
+    await query.answer()
+    callback_update = SimpleNamespace(
+        message=query.message,
+        effective_message=query.message,
+        effective_user=query.from_user,
+        callback_query=query,
+    )
+    await _dispatch_shop_action(callback_update, context, action)
+
+
 user_handlers = [
     CommandHandler("start", start),
     CommandHandler("buy", buy_menu),
@@ -841,6 +870,7 @@ user_handlers = [
     CommandHandler("help", help_menu),
     CommandHandler("support", support_menu),
     CommandHandler("cancel", cancel_coupon),
+    CallbackQueryHandler(response_button_callback, pattern=r"^shop_response:\d+$"),
     CallbackQueryHandler(service_details_callback, pattern=r"^(service:\d+|service_qr:\d+|services:list)$"),
     MessageHandler(filters.CONTACT, rial_user.handle_contact),
     MessageHandler(filters.TEXT & ~filters.COMMAND, shop_text_router),

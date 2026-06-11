@@ -74,9 +74,14 @@ from ..utils.keyboards import (
     ADMIN_REMOVE_ADMIN,
     ADMIN_REPORTS,
     ADMIN_RESPONSE_INLINE_COPY,
+    ADMIN_RESPONSE_INLINE_ACTION,
     ADMIN_RESPONSE_INLINE_URL,
+    ADMIN_RESPONSE_EDIT_PREMIUM_EMOJI,
+    ADMIN_RESPONSE_EDIT_STYLE,
     ADMIN_RESPONSE_REPLY_KEYBOARD,
+    ADMIN_RESPONSE_SELECT_EXISTING,
     ADMIN_RESPONSE_TEXT,
+    ADMIN_RESET_CONFIRM,
     ADMIN_SEARCH_USER,
     ADMIN_SET_WALLET,
     ADMIN_SHOP_BUTTONS,
@@ -126,6 +131,7 @@ from ..utils.keyboards import (
     admin_shop_settings_keyboard,
     admin_emoji_position_keyboard,
     admin_response_button_keyboard,
+    admin_reset_confirm_keyboard,
     admin_required_channel_keyboard,
     admin_style_keyboard,
     admin_user_confirm_keyboard,
@@ -217,7 +223,9 @@ from ..utils.validators import extract_links_from_text
     CRYPTO_SET_TON_VALUE,
     RIAL_SET_MIN_VALUE,
     RIAL_SET_SUPPORT_VALUE,
-) = range(56)
+    SHOP_RESET_CONFIRM,
+    SHOP_RESET_PASSWORD,
+) = range(58)
 
 
 SHOP_MENU_LABELS = {
@@ -233,6 +241,7 @@ RESPONSE_BUTTON_VALUES = {
     ADMIN_RESPONSE_TEXT: "text",
     ADMIN_RESPONSE_INLINE_COPY: "inline_copy",
     ADMIN_RESPONSE_INLINE_URL: "inline_url",
+    ADMIN_RESPONSE_INLINE_ACTION: "inline_action",
     ADMIN_RESPONSE_REPLY_KEYBOARD: "reply_keyboard",
 }
 
@@ -314,7 +323,7 @@ def _plan_label(plan) -> str:
 def _category_label(category) -> str:
     status = "✅" if category.is_active else "⏸"
     emoji = f"{category.emoji} " if category.emoji else ""
-    return f"{status} {emoji}{category.title}"
+    return f"#{category.id} {status} {emoji}{category.title}"
 
 
 def _parse_hash_id(text: str) -> int | None:
@@ -351,7 +360,10 @@ async def _leave_shop_flow_if_navigation(update: Update, context: ContextTypes.D
         elif text == ADMIN_TOGGLE_BRANDED_LINKS:
             await toggle_branded_subscription_links(update, context)
         elif text == ADMIN_SHOP_RESET_DEFAULTS:
-            await shop_reset_defaults(update, context)
+            await update.message.reply_text(
+                "از روند فعلی خارج شدید. برای بازگردانی، دکمه قرمز «بازگشت فروشگاه به پیش‌فرض» را دوباره بزنید.",
+                reply_markup=admin_shop_settings_keyboard(),
+            )
         return True
     return False
 
@@ -1750,12 +1762,49 @@ async def toggle_branded_subscription_links(update: Update, context: ContextType
 
 @require_auth(permission="shop")
 async def shop_reset_defaults(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["shop_reset_pending"] = True
+    await update.message.reply_text(
+        "⚠️ با این کار تمام متن‌ها، دکمه‌ها، رنگ‌ها، ایموجی‌ها، دسته‌ها و سرویس‌های قابل فروش "
+        "به نسخه پیش‌فرض برمی‌گردند.\n\nبرای ادامه، دکمه قرمز زیر را بزنید.",
+        reply_markup=admin_reset_confirm_keyboard(),
+    )
+    return SHOP_RESET_CONFIRM
+
+
+@require_auth(permission="shop")
+async def shop_reset_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text != ADMIN_RESET_CONFIRM:
+        await update.message.reply_text("بازگردانی لغو شد.", reply_markup=admin_shop_settings_keyboard())
+        context.user_data.pop("shop_reset_pending", None)
+        return ConversationHandler.END
+    await update.message.reply_text(
+        "برای تأیید نهایی، رمز ورود ربات ادمین را وارد کنید.\nرمز پس از بررسی از گفتگو حذف می‌شود.",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    return SHOP_RESET_PASSWORD
+
+
+@require_auth(permission="shop")
+async def shop_reset_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    password = update.message.text
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+    if password != BotConfig.ADMIN_PASSWORD:
+        await update.effective_message.reply_text(
+            "رمز اشتباه است؛ هیچ تغییری انجام نشد. دوباره رمز را وارد کنید یا /cancel بزنید."
+        )
+        return SHOP_RESET_PASSWORD
+
     async with async_session() as session:
         await ShopCustomizationService.reset_defaults(session)
+    context.user_data.pop("shop_reset_pending", None)
     await update.message.reply_text(
         "تنظیمات ربات فروش به حالت پیش‌فرض برگشت.",
         reply_markup=admin_shop_settings_keyboard(),
     )
+    return ConversationHandler.END
 
 
 @require_auth(permission="shop")
@@ -1790,6 +1839,9 @@ async def _show_shop_message_editor(update: Update, context: ContextTypes.DEFAUL
     button_type = message.response_button_type or "text"
     button_text = message.response_button_text or "-"
     button_url = message.response_button_url or "-"
+    button_style = message.response_button_style or "default"
+    button_premium_emoji = message.response_button_premium_emoji_id or "-"
+    source_button_id = message.response_button_source_id or "-"
     premium_emoji = message.premium_emoji_id or "-"
     premium_position = {
         "left": "چپ",
@@ -1803,7 +1855,10 @@ async def _show_shop_message_editor(update: Update, context: ContextTypes.DEFAUL
         "\n\nتنظیم دکمه جواب همین پیام:\n"
         f"نوع فعلی: {button_type}\n"
         f"متن دکمه: {button_text}\n"
-        f"لینک/متن کپی: {button_url}\n\n"
+        f"لینک/متن کپی: {button_url}\n"
+        f"رنگ دکمه جواب: {button_style}\n"
+        f"ایموجی پریمیوم دکمه جواب: {button_premium_emoji}\n"
+        f"دکمه متصل: #{source_button_id}\n\n"
         "برای تغییر نوع دکمه، یکی از گزینه‌های کیبورد را بزنید.\n"
         "برای تغییر متن دکمه بنویسید: متن دکمه: دریافت لینک\n"
         "برای تنظیم لینک یا متن قابل کپی بنویسید: لینک دکمه: https://example.com\n"
@@ -1855,6 +1910,49 @@ async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         await update.message.reply_text("جای ایموجی پریمیوم پیام ذخیره شد.")
         return await _show_shop_message_editor(update, context, key)
+    if pending_field == "response_button_style":
+        style = raw_value if raw_value in STYLE_VALUES else None
+        if style is None:
+            await update.message.reply_text("رنگ معتبر نیست.", reply_markup=admin_style_keyboard())
+            return SHOP_MESSAGE_TEXT
+        async with async_session() as session:
+            await ShopCustomizationService.update_message_settings(
+                session,
+                key,
+                response_button_style=None if style == "default" else style,
+            )
+        await update.message.reply_text("رنگ دکمه جواب ذخیره شد.")
+        return await _show_shop_message_editor(update, context, key)
+    if pending_field == "response_button_premium_emoji_id":
+        premium_emoji_id = _read_custom_emoji_id(update.message, raw_value)
+        if premium_emoji_id == "":
+            await update.message.reply_text("ایموجی پریمیوم معتبر بفرستید یا برای حذف `-` ارسال کنید.")
+            return SHOP_MESSAGE_TEXT
+        async with async_session() as session:
+            await ShopCustomizationService.update_message_settings(
+                session,
+                key,
+                response_button_premium_emoji_id=premium_emoji_id,
+            )
+        await update.message.reply_text("ایموجی پریمیوم دکمه جواب ذخیره شد.")
+        return await _show_shop_message_editor(update, context, key)
+    if pending_field == "response_button_source_id":
+        button_id = _parse_hash_id(raw_value)
+        async with async_session() as session:
+            button = await ShopCustomizationService.get_button(session, button_id) if button_id else None
+            if button:
+                await ShopCustomizationService.update_message_settings(
+                    session,
+                    key,
+                    response_button_source_id=button.id,
+                    response_button_type="inline_action",
+                    response_button_text=None,
+                )
+        if not button:
+            await update.message.reply_text("دکمه معتبر نیست؛ یکی از دکمه‌های فهرست را انتخاب کنید.")
+            return SHOP_MESSAGE_TEXT
+        await update.message.reply_text("دکمه موجود به جواب متصل شد و اکشن آن حفظ می‌شود.")
+        return await _show_shop_message_editor(update, context, key)
     if raw_value == ADMIN_EDIT_PREMIUM_EMOJI:
         context.user_data["shop_message_field"] = "premium_emoji_id"
         await update.message.reply_text(
@@ -1868,6 +1966,30 @@ async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "جای نمایش ایموجی پریمیوم را انتخاب کنید.",
             reply_markup=admin_emoji_position_keyboard(),
+        )
+        return SHOP_MESSAGE_TEXT
+    if raw_value == ADMIN_RESPONSE_EDIT_STYLE:
+        context.user_data["shop_message_field"] = "response_button_style"
+        await update.message.reply_text("رنگ دکمه جواب را انتخاب کنید.", reply_markup=admin_style_keyboard())
+        return SHOP_MESSAGE_TEXT
+    if raw_value == ADMIN_RESPONSE_EDIT_PREMIUM_EMOJI:
+        context.user_data["shop_message_field"] = "response_button_premium_emoji_id"
+        await update.message.reply_text(
+            "ایموجی پریمیوم دکمه جواب را بفرستید تا آیدی آن خودکار خوانده شود. برای حذف `-` بفرستید.",
+            reply_markup=_cancel_back_keyboard(),
+        )
+        return SHOP_MESSAGE_TEXT
+    if raw_value == ADMIN_RESPONSE_SELECT_EXISTING:
+        async with async_session() as session:
+            buttons = await ShopCustomizationService.list_buttons(session)
+        labels = [_button_label(button) for button in buttons if button.is_enabled]
+        if not labels:
+            await update.message.reply_text("دکمه فعالی برای اتصال وجود ندارد.")
+            return SHOP_MESSAGE_TEXT
+        context.user_data["shop_message_field"] = "response_button_source_id"
+        await update.message.reply_text(
+            "دکمه‌ای را انتخاب کنید. دکمه شیشه‌ای جواب، همان اکشن این دکمه را اجرا خواهد کرد.",
+            reply_markup=_rows(labels, width=1),
         )
         return SHOP_MESSAGE_TEXT
     if raw_value in RESPONSE_BUTTON_VALUES:
@@ -2192,9 +2314,15 @@ async def shop_category_select(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return SHOP_CATEGORY_ADD
 
+    category_id = _parse_hash_id(update.message.text)
     async with async_session() as session:
         categories = await ShopCustomizationService.list_categories(session)
-    matches = [category for category in categories if _category_label(category) == update.message.text]
+    matches = [
+        category
+        for category in categories
+        if (category_id is not None and category.id == category_id)
+        or _category_label(category) == update.message.text
+    ]
     if len(matches) != 1:
         await update.message.reply_text("دسته انتخاب‌شده معتبر نیست.")
         return SHOP_CATEGORY_SELECT
@@ -2569,13 +2697,20 @@ async def shop_plan_add_category(update: Update, context: ContextTypes.DEFAULT_T
     if await _leave_shop_flow_if_navigation(update, context):
         context.user_data.pop("shop_new_plan", None)
         return ConversationHandler.END
-    category_key = None
-    if update.message.text.startswith("#"):
-        category_key = update.message.text.split(" ", 1)[0].lstrip("#")
-    else:
-        category_key = update.message.text.strip()
+    category_id = _parse_hash_id(update.message.text)
+    category_key = update.message.text.strip()
     async with async_session() as session:
-        category = await ShopCustomizationService.get_category(session, category_key)
+        categories = await ShopCustomizationService.list_categories(session, active_only=True)
+    category = next(
+        (
+            item
+            for item in categories
+            if (category_id is not None and item.id == category_id)
+            or item.key == category_key
+            or _category_label(item) == update.message.text
+        ),
+        None,
+    )
     if not category:
         await update.message.reply_text("دسته معتبر نیست. از لیست دکمه‌ها انتخاب کنید.")
         return SHOP_PLAN_ADD_CATEGORY
@@ -3523,6 +3658,24 @@ rial_set_support_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
 )
 
+shop_reset_defaults_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_SHOP_RESET_DEFAULTS), shop_reset_defaults)],
+    states={
+        SHOP_RESET_CONFIRM: [
+            MessageHandler(_exact_filter(ADMIN_RESET_CONFIRM), shop_reset_confirm),
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_reset_confirm),
+        ],
+        SHOP_RESET_PASSWORD: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_reset_password),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
 admin_handlers = [
     CommandHandler("start", admin_start),
     CommandHandler("admins", list_admins),
@@ -3552,6 +3705,7 @@ admin_handlers = [
     crypto_set_ton_conv,
     rial_set_min_conv,
     rial_set_support_conv,
+    shop_reset_defaults_conv,
     MessageHandler(_exact_filter(ADMIN_CRYPTO), crypto_menu),
     MessageHandler(_exact_filter(ADMIN_CRYPTO_HISTORY), crypto_history),
     MessageHandler(_exact_filter(ADMIN_CRYPTO_RATES), crypto_rates_menu),
@@ -3564,7 +3718,6 @@ admin_handlers = [
     MessageHandler(_exact_filter(ADMIN_REFRESH_ADMINS), list_admins),
     MessageHandler(_exact_filter(ADMIN_SHOP_SETTINGS), shop_settings_menu),
     MessageHandler(_exact_filter(ADMIN_TOGGLE_BRANDED_LINKS), toggle_branded_subscription_links),
-    MessageHandler(_exact_filter(ADMIN_SHOP_RESET_DEFAULTS), shop_reset_defaults),
     MessageHandler(
         filters.Regex(
             f"^({re.escape(ADMIN_BACK)}|{re.escape(ADMIN_INVENTORY)}|{re.escape(ADMIN_PRICES)}|"

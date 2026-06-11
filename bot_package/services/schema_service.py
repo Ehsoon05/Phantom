@@ -53,6 +53,9 @@ class SchemaService:
                         "response_button_type": "VARCHAR DEFAULT 'text' NOT NULL",
                         "response_button_text": "VARCHAR",
                         "response_button_url": "VARCHAR",
+                        "response_button_style": "VARCHAR",
+                        "response_button_premium_emoji_id": "VARCHAR",
+                        "response_button_source_id": "INTEGER",
                     },
                 )
             if "shop_buttons" in tables:

@@ -142,6 +142,9 @@ class ShopMessage(Base):
     response_button_type = Column(String, nullable=False, default="text")
     response_button_text = Column(String, nullable=True)
     response_button_url = Column(String, nullable=True)
+    response_button_style = Column(String, nullable=True)
+    response_button_premium_emoji_id = Column(String, nullable=True)
+    response_button_source_id = Column(Integer, nullable=True)
     is_active = Column(Boolean, default=True)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 

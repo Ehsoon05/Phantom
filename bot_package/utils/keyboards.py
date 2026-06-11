@@ -88,7 +88,12 @@ ADMIN_EDIT_RESPONSE_BUTTON = "🔗 نوع دکمه جواب"
 ADMIN_RESPONSE_TEXT = "متن عادی"
 ADMIN_RESPONSE_INLINE_COPY = "دکمه شیشه‌ای کپی"
 ADMIN_RESPONSE_INLINE_URL = "دکمه شیشه‌ای لینک"
+ADMIN_RESPONSE_INLINE_ACTION = "دکمه شیشه‌ای اکشن"
 ADMIN_RESPONSE_REPLY_KEYBOARD = "کیبورد معمولی"
+ADMIN_RESPONSE_EDIT_STYLE = "🎨 رنگ دکمه جواب"
+ADMIN_RESPONSE_EDIT_PREMIUM_EMOJI = "💎 ایموجی دکمه جواب"
+ADMIN_RESPONSE_SELECT_EXISTING = "🔗 اتصال به دکمه موجود"
+ADMIN_RESET_CONFIRM = "⚠️ بله، بازگردانی شود"
 ADMIN_EMOJI_LEFT = "چپ"
 ADMIN_EMOJI_RIGHT = "راست"
 
@@ -118,8 +123,11 @@ STYLE_DEFAULT = "default"
 SHOP_BUTTON_CUSTOM_EMOJI_ID = "5373141891321699086"
 
 
-def _button(text: str) -> KeyboardButton:
-    return KeyboardButton(text=text)
+def _button(text: str, *, style: str | None = None) -> KeyboardButton:
+    try:
+        return KeyboardButton(text=text, api_kwargs={"style": style} if style else None)
+    except TypeError:
+        return KeyboardButton(text=text)
 
 
 def _shop_button(text: str, *, style: str = STYLE_PRIMARY) -> KeyboardButton:
@@ -351,7 +359,7 @@ def admin_shop_settings_keyboard() -> ReplyKeyboardMarkup:
             [_button(ADMIN_SHOP_MESSAGES), _button(ADMIN_SHOP_BUTTONS)],
             [_button(ADMIN_SHOP_PLANS), _button(ADMIN_SHOP_CATEGORIES)],
             [_button(ADMIN_REQUIRED_CHANNELS), _button(ADMIN_TOGGLE_BRANDED_LINKS)],
-            [_button(ADMIN_SHOP_RESET_DEFAULTS)],
+            [_button(ADMIN_SHOP_RESET_DEFAULTS, style=STYLE_DANGER)],
             [_button(ADMIN_BACK)],
         ]
     )
@@ -436,8 +444,20 @@ def admin_response_button_keyboard() -> ReplyKeyboardMarkup:
     return _keyboard(
         [
             [_button(ADMIN_RESPONSE_TEXT), _button(ADMIN_RESPONSE_INLINE_COPY)],
-            [_button(ADMIN_RESPONSE_INLINE_URL), _button(ADMIN_RESPONSE_REPLY_KEYBOARD)],
+            [_button(ADMIN_RESPONSE_INLINE_URL), _button(ADMIN_RESPONSE_INLINE_ACTION)],
+            [_button(ADMIN_RESPONSE_REPLY_KEYBOARD), _button(ADMIN_RESPONSE_SELECT_EXISTING)],
+            [_button(ADMIN_RESPONSE_EDIT_STYLE), _button(ADMIN_RESPONSE_EDIT_PREMIUM_EMOJI)],
             [_button(ADMIN_EDIT_PREMIUM_EMOJI), _button(ADMIN_EDIT_PREMIUM_EMOJI_POSITION)],
+            [_button(CANCEL), _button(ADMIN_BACK)],
+        ],
+        one_time_keyboard=True,
+    )
+
+
+def admin_reset_confirm_keyboard() -> ReplyKeyboardMarkup:
+    return _keyboard(
+        [
+            [_button(ADMIN_RESET_CONFIRM, style=STYLE_DANGER)],
             [_button(CANCEL), _button(ADMIN_BACK)],
         ],
         one_time_keyboard=True,

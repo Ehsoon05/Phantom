@@ -164,6 +164,7 @@ def test_admin_category_button_label_is_short_and_hides_internal_key():
     from bot_package.handlers.admin_handlers import _category_label
 
     category = SimpleNamespace(
+        id=12,
         key="reality_servers_internal",
         title="سرورهای Reality",
         emoji="🌐",
@@ -172,8 +173,35 @@ def test_admin_category_button_label_is_short_and_hides_internal_key():
 
     label = _category_label(category)
 
-    assert label == "✅ 🌐 سرورهای Reality"
+    assert label == "#12 ✅ 🌐 سرورهای Reality"
     assert category.key not in label
+
+
+@pytest.mark.asyncio
+async def test_message_can_use_existing_button_action_with_style_and_premium_emoji(db):
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    async with db.async_session() as session:
+        await ShopCustomizationService.init_defaults(session)
+        buttons = await ShopCustomizationService.list_buttons(session)
+        source = next(button for button in buttons if button.action == "wallet")
+        message = await ShopCustomizationService.get_message_row(session, "account_info")
+        await ShopCustomizationService.update_message_settings(
+            session,
+            "account_info",
+            response_button_type="inline_action",
+            response_button_source_id=source.id,
+            response_button_style="danger",
+            response_button_premium_emoji_id="5373141891321699086",
+        )
+        markup = await ShopCustomizationService.message_reply_markup(session, "account_info")
+        action = await ShopCustomizationService.response_button_action(session, message.id)
+
+    button = markup.inline_keyboard[0][0]
+    assert button.callback_data == f"shop_response:{message.id}"
+    assert button.api_kwargs["style"] == "danger"
+    assert button.api_kwargs["icon_custom_emoji_id"] == "5373141891321699086"
+    assert action == "wallet"
 
 
 @pytest.mark.asyncio
