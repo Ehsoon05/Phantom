@@ -5,10 +5,13 @@ import { Gift, ShoppingBag, Wallet } from "lucide-react";
 import Link from "next/link";
 
 import { AuthGate } from "@/components/auth-gate";
+import BlurText from "@/components/reactbits/BlurText";
+import CountUp from "@/components/reactbits/CountUp";
+import ShinyText from "@/components/reactbits/ShinyText";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatToman, getMe } from "@/lib/api";
+import { getMe } from "@/lib/api";
 
 function HomeContent() {
   const { data: me, isLoading } = useQuery({ queryKey: ["me"], queryFn: getMe });
@@ -16,18 +19,31 @@ function HomeContent() {
   return (
     <div className="space-y-5">
       <header className="flex items-center justify-between">
-        <h1 className="text-lg font-bold">
-          سلام{me ? `، ${me.first_name}` : ""} 👋
-        </h1>
+        {/* animateBy="words" only — letter splitting breaks Persian script joining */}
+        <BlurText
+          text={`سلام${me ? `، ${me.first_name}` : ""} 👋`}
+          animateBy="words"
+          delay={120}
+          className="text-lg font-bold"
+        />
       </header>
 
       <Card className="bg-primary text-primary-foreground">
         <CardContent className="space-y-1 p-5">
-          <p className="text-xs opacity-80">موجودی کیف پول</p>
+          <ShinyText
+            text="موجودی کیف پول"
+            speed={3}
+            color="rgba(255,255,255,0.75)"
+            shineColor="#ffffff"
+            className="text-xs"
+          />
           {isLoading ? (
             <Skeleton className="h-8 w-32 bg-primary-foreground/20" />
           ) : (
-            <p className="text-2xl font-bold">{formatToman(me?.wallet_balance ?? 0)}</p>
+            <p className="text-2xl font-bold">
+              <CountUp to={me?.wallet_balance ?? 0} duration={1.2} separator="٬" locale="fa-IR" />{" "}
+              تومان
+            </p>
           )}
         </CardContent>
       </Card>

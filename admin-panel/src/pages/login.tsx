@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+import Aurora from "@/components/reactbits/Aurora";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -28,8 +29,11 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-muted/40 p-4">
-      <Card className="w-full max-w-sm">
+    <div className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-[#0b0b14] p-4">
+      <div className="absolute inset-0" dir="ltr">
+        <Aurora colorStops={["#3b5bff", "#7c5cff", "#3b5bff"]} amplitude={1.1} blend={0.6} />
+      </div>
+      <Card className="relative z-10 w-full max-w-sm border-white/10 bg-black/40 text-white backdrop-blur-md">
         <CardContent className="p-6">
           <form onSubmit={onSubmit} className="space-y-4">
             <div className="space-y-1 text-center">

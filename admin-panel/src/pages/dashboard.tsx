@@ -9,23 +9,36 @@ import {
   YAxis,
 } from "recharts";
 
+import CountUp from "@/components/reactbits/CountUp";
+import SpotlightCard from "@/components/reactbits/SpotlightCard";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatToman, getRevenueDaily, getStats, getStock, hasPermission } from "@/lib/api";
 
-function StatCard({ title, value }: { title: string; value: string | number | undefined }) {
+function StatCard({
+  title,
+  value,
+  suffix,
+}: {
+  title: string;
+  value: number | undefined;
+  suffix?: string;
+}) {
   return (
-    <Card>
-      <CardContent className="space-y-1 p-4">
+    <SpotlightCard spotlightColor="rgba(80, 120, 255, 0.18)">
+      <div className="space-y-1 p-4">
         <p className="text-xs text-muted-foreground">{title}</p>
         {value === undefined ? (
           <Skeleton className="h-7 w-24" />
         ) : (
-          <p className="text-xl font-bold">{value}</p>
+          <p className="text-xl font-bold">
+            <CountUp to={value} duration={1} separator="٬" locale="fa-IR" />
+            {suffix ? ` ${suffix}` : ""}
+          </p>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </SpotlightCard>
   );
 }
 
@@ -60,16 +73,11 @@ export function DashboardPage() {
           <StatCard title="کاربر جدید امروز" value={stats?.new_users_today} />
           <StatCard
             title="مجموع موجودی کیف پول‌ها"
-            value={stats ? formatToman(stats.total_wallet_balance) : undefined}
+            value={stats?.total_wallet_balance}
+            suffix="تومان"
           />
-          <StatCard
-            title="حجم فروخته‌شده"
-            value={stats ? `${stats.total_gb_purchased} GB` : undefined}
-          />
-          <StatCard
-            title="مجموع فروش"
-            value={stats ? formatToman(stats.total_spent) : undefined}
-          />
+          <StatCard title="حجم فروخته‌شده" value={stats?.total_gb_purchased} suffix="GB" />
+          <StatCard title="مجموع فروش" value={stats?.total_spent} suffix="تومان" />
         </div>
       )}
 

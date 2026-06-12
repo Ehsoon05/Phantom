@@ -1,6 +1,7 @@
 import { CreditCard, LayoutDashboard, LogOut, Users } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 
+import ShinyText from "@/components/reactbits/ShinyText";
 import { Button } from "@/components/ui/button";
 import { logout } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -17,7 +18,13 @@ export function Layout() {
       <aside className="flex shrink-0 items-center justify-between border-b bg-card px-4 py-3 md:w-56 md:flex-col md:items-stretch md:border-b-0 md:border-l md:px-3 md:py-6">
         <div className="flex items-center gap-2 md:mb-8 md:px-2">
           <span className="text-xl">👻</span>
-          <span className="font-bold">فانتوم ادمین</span>
+          <ShinyText
+            text="فانتوم ادمین"
+            speed={4}
+            color="var(--foreground)"
+            shineColor="var(--primary)"
+            className="font-bold"
+          />
         </div>
         <nav className="flex gap-1 md:flex-1 md:flex-col">
           {navItems.map(({ to, label, icon: Icon, end }) => (

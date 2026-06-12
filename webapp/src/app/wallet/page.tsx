@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import QRCode from "react-qr-code";
 
 import { AuthGate } from "@/components/auth-gate";
+import CountUp from "@/components/reactbits/CountUp";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -373,7 +374,10 @@ function WalletContent() {
           {isLoading ? (
             <Skeleton className="h-8 w-32 bg-primary-foreground/20" />
           ) : (
-            <p className="text-2xl font-bold">{formatToman(me?.wallet_balance ?? 0)}</p>
+            <p className="text-2xl font-bold">
+              <CountUp to={me?.wallet_balance ?? 0} duration={1.2} separator="٬" locale="fa-IR" />{" "}
+              تومان
+            </p>
           )}
         </CardContent>
       </Card>
