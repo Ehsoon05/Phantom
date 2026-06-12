@@ -36,6 +36,30 @@ class MarzbanTrialService:
         return []
 
     @staticmethod
+    def group_ids(payload) -> list[int]:
+        if not isinstance(payload, dict):
+            return []
+        groups = payload.get("groups")
+        if not isinstance(groups, list):
+            return []
+
+        enabled_groups = [
+            group
+            for group in groups
+            if isinstance(group, dict)
+            and not group.get("is_disabled", False)
+            and isinstance(group.get("id"), int)
+        ]
+        multilocation = [
+            group["id"]
+            for group in enabled_groups
+            if str(group.get("name") or "").strip().casefold() == "multilocation"
+        ]
+        if multilocation:
+            return multilocation
+        return [group["id"] for group in enabled_groups]
+
+    @staticmethod
     async def _token(client: httpx.AsyncClient) -> str:
         if not all(
             (
@@ -76,15 +100,33 @@ class MarzbanTrialService:
             async with httpx.AsyncClient(timeout=25.0) as client:
                 token = await MarzbanTrialService._token(client)
                 headers = {"Authorization": f"Bearer {token}"}
-                inbounds_response = await client.get(
-                    f"{BotConfig.MARZBAN_API_URL}/api/inbounds",
+                group_ids: list[int] = []
+                groups_response = await client.get(
+                    f"{BotConfig.MARZBAN_API_URL}/api/groups",
                     headers=headers,
                 )
-                inbounds_response.raise_for_status()
-                inbound_payload = inbounds_response.json()
-                vless_tags = MarzbanTrialService.inbound_tags(inbound_payload)
-                if not vless_tags:
-                    raise MarzbanTrialError("No VLESS inbound is available")
+                if groups_response.status_code == 200:
+                    group_ids = MarzbanTrialService.group_ids(groups_response.json())
+
+                access_fields: dict = {}
+                if group_ids:
+                    access_fields["group_ids"] = group_ids
+                else:
+                    inbounds_response = await client.get(
+                        f"{BotConfig.MARZBAN_API_URL}/api/inbounds",
+                        headers=headers,
+                    )
+                    inbounds_response.raise_for_status()
+                    inbound_payload = inbounds_response.json()
+                    vless_tags = MarzbanTrialService.inbound_tags(inbound_payload)
+                    if not vless_tags:
+                        raise MarzbanTrialError("No VLESS inbound is available")
+                    access_fields.update(
+                        {
+                            "proxies": {"vless": {}},
+                            "inbounds": {"vless": vless_tags},
+                        }
+                    )
 
                 response = await client.post(
                     f"{BotConfig.MARZBAN_API_URL}/api/user",
@@ -95,9 +137,8 @@ class MarzbanTrialService:
                         "data_limit": int(volume_mb) * 1024 * 1024,
                         "data_limit_reset_strategy": "no_reset",
                         "on_hold_expire_duration": int(duration_hours) * 3600,
-                        "proxies": {"vless": {}},
-                        "inbounds": {"vless": vless_tags},
                         "note": f"Telegram trial for {telegram_id}",
+                        **access_fields,
                     },
                 )
                 if response.status_code == 409:
@@ -105,6 +146,14 @@ class MarzbanTrialService:
                         f"{BotConfig.MARZBAN_API_URL}/api/user/{username}",
                         headers=headers,
                     )
+                    response.raise_for_status()
+                    existing_user = response.json()
+                    if group_ids and not existing_user.get("group_ids"):
+                        response = await client.put(
+                            f"{BotConfig.MARZBAN_API_URL}/api/user/{username}",
+                            headers=headers,
+                            json={"group_ids": group_ids},
+                        )
                 response.raise_for_status()
                 return MarzbanTrialService._result(response.json())
         except (httpx.HTTPError, ValueError, TypeError) as exc:

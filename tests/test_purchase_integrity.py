@@ -331,6 +331,34 @@ def test_pasarguard_and_marzban_inbound_formats_are_supported():
     ) == ["reality", "ws"]
 
 
+def test_pasarguard_multilocation_group_is_preferred():
+    from bot_package.services.marzban_trial_service import MarzbanTrialService
+
+    assert MarzbanTrialService.group_ids(
+        {
+            "groups": [
+                {"id": 2, "name": "Other", "is_disabled": False},
+                {"id": 1, "name": "MultiLocation", "is_disabled": False},
+                {"id": 3, "name": "Disabled", "is_disabled": True},
+            ]
+        }
+    ) == [1]
+
+
+def test_all_enabled_pasarguard_groups_are_selected_without_multilocation():
+    from bot_package.services.marzban_trial_service import MarzbanTrialService
+
+    assert MarzbanTrialService.group_ids(
+        {
+            "groups": [
+                {"id": 2, "name": "Germany", "is_disabled": False},
+                {"id": 4, "name": "Finland", "is_disabled": False},
+                {"id": 5, "name": "Disabled", "is_disabled": True},
+            ]
+        }
+    ) == [2, 4]
+
+
 @pytest.mark.asyncio
 async def test_trial_button_occupies_its_own_second_row(db):
     from bot_package.services.shop_customization_service import ShopCustomizationService
