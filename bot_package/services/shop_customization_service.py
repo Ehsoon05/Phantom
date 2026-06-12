@@ -183,6 +183,12 @@ DEFAULT_MESSAGES: dict[str, str] = {
         "برای شارژ کیف پول، به پشتیبانی پیام بدهید:\n"
         "{support_handle}"
     ),
+    "wallet_charge_notification": (
+        "✅ **کیف پول شما شارژ شد**\n\n"
+        "مبلغ شارژ: **{amount} تومان**\n"
+        "موجودی جدید: **{wallet_balance} تومان**\n\n"
+        "اکنون می‌توانید سرویس موردنظرتان را تهیه کنید."
+    ),
     "purchase_success": (
         "**خرید با موفقیت انجام شد**\n\n"
         "نام سرویس: **{service_name}**\n"

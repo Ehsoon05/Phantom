@@ -261,8 +261,18 @@ class CryptoPaymentService:
                     continue
                 amount = await CryptoPaymentService.credit_from_payment(session, invoice, payment)
                 if amount > 0:
+                    wallet_balance = (
+                        await session.execute(
+                            select(User.wallet_balance).where(User.telegram_id == invoice.user_id)
+                        )
+                    ).scalar_one()
                     credited.append(
-                        {"user_id": invoice.user_id, "invoice_id": invoice.id, "credited_toman": amount}
+                        {
+                            "user_id": invoice.user_id,
+                            "invoice_id": invoice.id,
+                            "credited_toman": amount,
+                            "wallet_balance": int(wallet_balance or 0),
+                        }
                     )
                     matched = True
                     break

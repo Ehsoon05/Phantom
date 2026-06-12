@@ -1,15 +1,17 @@
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
-from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, Update, constants
+from telegram import Bot, ReplyKeyboardMarkup, ReplyKeyboardRemove, Update, constants
 from telegram.ext import CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
 from ..auth import AuthManager
 from ..config_loader import BotConfig
 from ..database import async_session
-from ..models import Purchase, ReferralRewardRule
+from ..models import Purchase, ReferralRewardRule, User
 from ..services.admin_service import ALL_PERMISSIONS, AdminService, normalize_permissions
+from ..services.broadcast_service import BroadcastService
 from ..services.coupon_service import CouponError, CouponService
 from ..services.crypto_payment_service import CryptoPaymentService, available_coins
 from ..services.rate_service import RateService
@@ -31,6 +33,8 @@ from ..utils.keyboards import (
     ADMIN_ADD_PLAN,
     ADMIN_ADD_CONFIG,
     ADMIN_BACK,
+    ADMIN_BROADCAST,
+    ADMIN_BROADCAST_SEND,
     ADMIN_CHANGE_ADMIN_PERMS,
     ADMIN_CHARGE_WALLET,
     ADMIN_COUPONS,
@@ -176,6 +180,8 @@ from ..utils.messages import (
 )
 from ..utils.validators import extract_links_from_text
 
+logger = logging.getLogger(__name__)
+
 
 (
     CHOOSE_VOLUME_ADD,
@@ -246,7 +252,9 @@ from ..utils.validators import extract_links_from_text
     REFERRAL_RULE_REWARD_TYPE,
     REFERRAL_RULE_REWARD_VALUE,
     REFERRAL_RULE_OPTION,
-) = range(68)
+    BROADCAST_MESSAGE,
+    BROADCAST_CONFIRM,
+) = range(70)
 
 
 SHOP_MENU_LABELS = {
@@ -441,6 +449,14 @@ def _message_text_for_storage(message) -> tuple[str, str]:
         if isinstance(text_html, str) and text_html:
             return text_html, constants.ParseMode.HTML
     return message.text, constants.ParseMode.MARKDOWN
+
+
+def _broadcast_text(message) -> tuple[str, str | None]:
+    if message.entities:
+        text_html = getattr(message, "text_html", None)
+        if isinstance(text_html, str) and text_html:
+            return text_html, constants.ParseMode.HTML
+    return message.text or "", None
 
 
 def _admin_user_preview(user) -> str:
@@ -869,15 +885,140 @@ async def charge_wallet_execute(update: Update, context: ContextTypes.DEFAULT_TY
 
     async with async_session() as session:
         success = await UserService.charge_wallet(session, user_id, amount, update.effective_user.id)
+        if success:
+            user = (
+                await session.execute(select(User).where(User.telegram_id == user_id))
+            ).scalar_one()
+            notification = await ShopCustomizationService.get_message(
+                session,
+                "wallet_charge_notification",
+                amount=f"{amount:,}",
+                wallet_balance=f"{user.wallet_balance:,}",
+            )
+            notification_keyboard = await ShopCustomizationService.main_menu_keyboard(session)
 
     if success:
+        try:
+            async with Bot(BotConfig.MAIN_BOT_TOKEN) as main_bot:
+                await main_bot.send_message(
+                    chat_id=user_id,
+                    text=notification,
+                    parse_mode=getattr(notification, "parse_mode", constants.ParseMode.MARKDOWN),
+                    reply_markup=notification_keyboard,
+                )
+            notification_status = "\nپیام شارژ نیز برای کاربر ارسال شد."
+        except Exception as exc:
+            logger.info("Could not notify wallet charge for user %s: %s", user_id, exc)
+            notification_status = "\nشارژ ثبت شد، اما ارسال پیام به کاربر ممکن نبود."
         await update.message.reply_text(
-            CHARGE_SUCCESS.format(user_id, f"{amount:,}", datetime.now().strftime("%H:%M:%S")),
+            CHARGE_SUCCESS.format(user_id, f"{amount:,}", datetime.now().strftime("%H:%M:%S"))
+            + notification_status,
             reply_markup=admin_users_keyboard(),
             parse_mode=constants.ParseMode.MARKDOWN,
         )
     else:
         await update.message.reply_text("کاربر پیدا نشد.", reply_markup=admin_users_keyboard())
+
+
+async def _execute_broadcast(
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    admin_chat_id: int,
+    text: str,
+    parse_mode: str | None,
+) -> None:
+    try:
+        async with async_session() as session:
+            user_ids = await BroadcastService.recipient_ids(session)
+        stats = await BroadcastService.send_text(user_ids, text=text, parse_mode=parse_mode)
+        await context.bot.send_message(
+            chat_id=admin_chat_id,
+            text=(
+                "✅ **ارسال همگانی تمام شد**\n\n"
+                f"کل مخاطبان: **{stats['total']:,}**\n"
+                f"ارسال موفق: **{stats['sent']:,}**\n"
+                f"مسدود یا چت غیرفعال: **{stats['blocked']:,}**\n"
+                f"خطاهای دیگر: **{stats['failed']:,}**"
+            ),
+            parse_mode=constants.ParseMode.MARKDOWN,
+            reply_markup=admin_main_keyboard(),
+        )
+    except Exception:
+        logger.exception("Broadcast failed")
+        await context.bot.send_message(
+            chat_id=admin_chat_id,
+            text="ارسال همگانی به دلیل خطای داخلی متوقف شد. جزئیات در لاگ سرور ثبت شد.",
+            reply_markup=admin_main_keyboard(),
+        )
+
+
+@require_auth(permission="users")
+async def broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("broadcast_text", None)
+    context.user_data.pop("broadcast_parse_mode", None)
+    await update.message.reply_text(
+        "📢 **ارسال پیام همگانی**\n\n"
+        "متن موردنظر را ارسال کنید. قالب‌بندی متن و ایموجی پریمیوم حفظ می‌شود.\n"
+        "پس از آن پیش‌نمایش و تأیید نهایی نمایش داده می‌شود.",
+        reply_markup=_cancel_back_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return BROADCAST_MESSAGE
+
+
+@require_auth(permission="users")
+async def broadcast_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text, parse_mode = _broadcast_text(update.message)
+    if not text.strip():
+        await update.message.reply_text("متن پیام نمی‌تواند خالی باشد.")
+        return BROADCAST_MESSAGE
+    if len(text) > 4096:
+        await update.message.reply_text("متن پیام بیشتر از محدودیت ۴۰۹۶ کاراکتری تلگرام است.")
+        return BROADCAST_MESSAGE
+
+    context.user_data["broadcast_text"] = text
+    context.user_data["broadcast_parse_mode"] = parse_mode
+    await update.message.reply_text("پیش‌نمایش پیام:")
+    await update.message.reply_text(
+        text,
+        parse_mode=parse_mode,
+        reply_markup=ReplyKeyboardMarkup(
+            [[ADMIN_BROADCAST_SEND], [CANCEL, ADMIN_BACK]],
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        ),
+    )
+    return BROADCAST_CONFIRM
+
+
+@require_auth(permission="users")
+async def broadcast_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text != ADMIN_BROADCAST_SEND:
+        await update.message.reply_text("برای ارسال، دکمه تأیید را انتخاب کنید.")
+        return BROADCAST_CONFIRM
+
+    text = context.user_data.pop("broadcast_text", None)
+    parse_mode = context.user_data.pop("broadcast_parse_mode", None)
+    if not text:
+        return await broadcast_start(update, context)
+
+    async with async_session() as session:
+        recipient_count = len(await BroadcastService.recipient_ids(session))
+    await update.message.reply_text(
+        f"ارسال پیام به {recipient_count:,} کاربر در پس‌زمینه شروع شد. پس از پایان، گزارش ارسال می‌شود.",
+        reply_markup=admin_main_keyboard(),
+    )
+    context.application.create_task(
+        _execute_broadcast(
+            context,
+            admin_chat_id=update.effective_chat.id,
+            text=text,
+            parse_mode=parse_mode,
+        ),
+        update=update,
+        name=f"broadcast-{update.effective_user.id}",
+    )
+    return ConversationHandler.END
 
     return ConversationHandler.END
 
@@ -4053,6 +4194,27 @@ referral_rewards_conv = ConversationHandler(
     allow_reentry=True,
 )
 
+broadcast_conv = ConversationHandler(
+    entry_points=[
+        MessageHandler(_exact_filter(ADMIN_BROADCAST), broadcast_start),
+        CommandHandler("broadcast", broadcast_start),
+    ],
+    states={
+        BROADCAST_MESSAGE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, broadcast_preview),
+        ],
+        BROADCAST_CONFIRM: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, broadcast_confirm),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+    allow_reentry=True,
+)
+
 admin_handlers = [
     CommandHandler("start", admin_start),
     CommandHandler("admins", list_admins),
@@ -4086,6 +4248,7 @@ admin_handlers = [
     trial_set_duration_conv,
     shop_reset_defaults_conv,
     referral_rewards_conv,
+    broadcast_conv,
     MessageHandler(_exact_filter(ADMIN_CRYPTO), crypto_menu),
     MessageHandler(_exact_filter(ADMIN_CRYPTO_HISTORY), crypto_history),
     MessageHandler(_exact_filter(ADMIN_CRYPTO_RATES), crypto_rates_menu),

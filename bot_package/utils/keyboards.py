@@ -22,6 +22,8 @@ ADMIN_CRYPTO = "💎 پرداخت کریپتو"
 ADMIN_ADMINS = "🛡 مدیریت ادمین‌ها"
 ADMIN_SHOP_SETTINGS = "⚙️ تنظیمات ربات فروش"
 ADMIN_LOGOUT = "🚪 خروج"
+ADMIN_BROADCAST = "📢 ارسال پیام همگانی"
+ADMIN_BROADCAST_SEND = "✅ ارسال به همه کاربران"
 ADMIN_BACK = "⬅️ بازگشت به پنل"
 
 ADMIN_CRYPTO_HISTORY = "📜 تراکنش‌های کریپتو"
@@ -244,6 +246,7 @@ def admin_main_keyboard() -> ReplyKeyboardMarkup:
             [_button(ADMIN_USERS), _button(ADMIN_REPORTS)],
             [_button(ADMIN_COUPONS), _button(ADMIN_CRYPTO)],
             [_button(ADMIN_SHOP_SETTINGS), _button(ADMIN_ADMINS)],
+            [_button(ADMIN_BROADCAST)],
             [_button(ADMIN_LOGOUT)],
         ]
     )

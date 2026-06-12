@@ -22,6 +22,7 @@ async def setup_admin_bot():
             BotCommand("addadmin", "افزودن ادمین"),
             BotCommand("removeadmin", "حذف ادمین"),
             BotCommand("setadminperms", "تغییر دسترسی ادمین"),
+            BotCommand("broadcast", "ارسال پیام همگانی"),
             BotCommand("cancel", "لغو عملیات"),
         ]
     )
