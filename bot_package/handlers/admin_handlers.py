@@ -20,6 +20,7 @@ from ..services.price_service import PriceService
 from ..services.referral_service import ReferralService
 from ..services.required_channel_service import RequiredChannelService
 from ..services.shop_customization_service import ShopCustomizationService
+from ..services.subscription_link_service import SubscriptionLinkService
 from ..services.user_service import UserService
 from ..utils.keyboards import (
     ADMIN_ADMINS,
@@ -71,6 +72,7 @@ from ..utils.keyboards import (
     ADMIN_REFERRAL_REPORT,
     ADMIN_REFERRAL_REWARDS,
     ADMIN_REFERRAL_ADD_RULE,
+    ADMIN_REFERRAL_RECALCULATE,
     ADMIN_REFERRAL_TOGGLE_RULE,
     ADMIN_REFERRAL_DELETE_RULE,
     ADMIN_REFRESH_ADMINS,
@@ -1056,7 +1058,11 @@ async def referral_rewards_start(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data.pop("referral_rule_id", None)
     async with async_session() as session:
         rules = await ReferralService.list_rules(session)
-    labels = [ADMIN_REFERRAL_ADD_RULE, *[_referral_rule_label(rule) for rule in rules]]
+    labels = [
+        ADMIN_REFERRAL_ADD_RULE,
+        ADMIN_REFERRAL_RECALCULATE,
+        *[_referral_rule_label(rule) for rule in rules],
+    ]
     await update.message.reply_text(
         "🎁 **مدیریت پاداش‌های رفرال**\n\n"
         "می‌توانید چند قانون هم‌زمان بسازید. قانون تکرارشونده در هر مضرب تعداد تعیین‌شده جایزه می‌دهد.",
@@ -1072,6 +1078,15 @@ async def referral_rule_select(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data["referral_rule_draft"] = {}
         await update.message.reply_text("یک عنوان کوتاه برای قانون بفرستید.", reply_markup=_cancel_back_keyboard())
         return REFERRAL_RULE_TITLE
+    if update.message.text == ADMIN_REFERRAL_RECALCULATE:
+        async with async_session() as session:
+            rewards = await ReferralService.evaluate_all_referrers(session)
+            await session.commit()
+        for reward in rewards:
+            if reward["config"] is not None:
+                await SubscriptionLinkService.sync_to_panel(reward["config"], reward["service_name"])
+        await update.message.reply_text(f"✅ محاسبه انجام شد و {len(rewards)} جایزه جدید ثبت شد.")
+        return await referral_rewards_start(update, context)
 
     rule_id = _parse_hash_id(update.message.text)
     if not rule_id:

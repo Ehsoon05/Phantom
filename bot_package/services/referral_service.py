@@ -290,6 +290,20 @@ class ReferralService:
         return await ReferralService.evaluate_referrer(session, int(referrer_user_id))
 
     @staticmethod
+    async def evaluate_all_referrers(session: AsyncSession) -> list[dict]:
+        result = await session.execute(
+            select(User.referred_by_user_id)
+            .where(User.referred_by_user_id.is_not(None))
+            .distinct()
+        )
+        rewards: list[dict] = []
+        for referrer_user_id in result.scalars().all():
+            rewards.extend(
+                await ReferralService.evaluate_referrer(session, int(referrer_user_id))
+            )
+        return rewards
+
+    @staticmethod
     async def referral_map(session: AsyncSession) -> list[tuple[int, int, datetime | None]]:
         result = await session.execute(
             select(User.telegram_id, User.referred_by_user_id, User.referred_at)
