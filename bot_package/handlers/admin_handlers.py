@@ -8,7 +8,7 @@ from telegram.ext import CommandHandler, ContextTypes, ConversationHandler, Mess
 from ..auth import AuthManager
 from ..config_loader import BotConfig
 from ..database import async_session
-from ..models import Purchase
+from ..models import Purchase, ReferralRewardRule
 from ..services.admin_service import ALL_PERMISSIONS, AdminService, normalize_permissions
 from ..services.coupon_service import CouponError, CouponService
 from ..services.crypto_payment_service import CryptoPaymentService, available_coins
@@ -69,6 +69,10 @@ from ..utils.keyboards import (
     ADMIN_LOGOUT,
     ADMIN_PRICES,
     ADMIN_REFERRAL_REPORT,
+    ADMIN_REFERRAL_REWARDS,
+    ADMIN_REFERRAL_ADD_RULE,
+    ADMIN_REFERRAL_TOGGLE_RULE,
+    ADMIN_REFERRAL_DELETE_RULE,
     ADMIN_REFRESH_ADMINS,
     ADMIN_REQUIRED_CHANNELS,
     ADMIN_REMOVE_ADMIN,
@@ -232,7 +236,15 @@ from ..utils.validators import extract_links_from_text
     SHOP_RESET_PASSWORD,
     TRIAL_SET_VOLUME_VALUE,
     TRIAL_SET_DURATION_VALUE,
-) = range(60)
+    REFERRAL_RULE_SELECT,
+    REFERRAL_RULE_TITLE,
+    REFERRAL_RULE_QUALIFICATION,
+    REFERRAL_RULE_COUNT,
+    REFERRAL_RULE_REPEAT,
+    REFERRAL_RULE_REWARD_TYPE,
+    REFERRAL_RULE_REWARD_VALUE,
+    REFERRAL_RULE_OPTION,
+) = range(68)
 
 
 SHOP_MENU_LABELS = {
@@ -1024,6 +1036,196 @@ async def referral_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=admin_users_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
+
+
+def _referral_rule_label(rule: ReferralRewardRule) -> str:
+    status = "✅" if rule.is_active else "⏸"
+    condition = ReferralService.QUALIFICATION_LABELS.get(rule.qualification_type, rule.qualification_type)
+    reward = (
+        f"{rule.wallet_amount or 0:,} تومان"
+        if rule.reward_type == "wallet"
+        else f"سرویس پلن #{rule.shop_plan_id}"
+    )
+    repeat = "هر بار" if rule.is_repeatable else "یک‌بار"
+    return f"#{rule.id} {status} {rule.title} | {rule.required_count} نفر | {condition} | {reward} | {repeat}"
+
+
+@require_auth(permission="users")
+async def referral_rewards_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("referral_rule_draft", None)
+    context.user_data.pop("referral_rule_id", None)
+    async with async_session() as session:
+        rules = await ReferralService.list_rules(session)
+    labels = [ADMIN_REFERRAL_ADD_RULE, *[_referral_rule_label(rule) for rule in rules]]
+    await update.message.reply_text(
+        "🎁 **مدیریت پاداش‌های رفرال**\n\n"
+        "می‌توانید چند قانون هم‌زمان بسازید. قانون تکرارشونده در هر مضرب تعداد تعیین‌شده جایزه می‌دهد.",
+        reply_markup=_rows(labels, width=1),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return REFERRAL_RULE_SELECT
+
+
+@require_auth(permission="users")
+async def referral_rule_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == ADMIN_REFERRAL_ADD_RULE:
+        context.user_data["referral_rule_draft"] = {}
+        await update.message.reply_text("یک عنوان کوتاه برای قانون بفرستید.", reply_markup=_cancel_back_keyboard())
+        return REFERRAL_RULE_TITLE
+
+    rule_id = _parse_hash_id(update.message.text)
+    if not rule_id:
+        await update.message.reply_text("قانون معتبر نیست.")
+        return REFERRAL_RULE_SELECT
+    async with async_session() as session:
+        rule = await session.get(ReferralRewardRule, rule_id)
+    if not rule:
+        await update.message.reply_text("این قانون پیدا نشد.")
+        return await referral_rewards_start(update, context)
+    context.user_data["referral_rule_id"] = rule_id
+    await update.message.reply_text(
+        _referral_rule_label(rule),
+        reply_markup=_rows([ADMIN_REFERRAL_TOGGLE_RULE, ADMIN_REFERRAL_DELETE_RULE], width=1),
+    )
+    return REFERRAL_RULE_OPTION
+
+
+@require_auth(permission="users")
+async def referral_rule_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    title = update.message.text.strip()
+    if not title:
+        await update.message.reply_text("عنوان نمی‌تواند خالی باشد.")
+        return REFERRAL_RULE_TITLE
+    context.user_data["referral_rule_draft"]["title"] = title
+    labels = list(ReferralService.QUALIFICATION_LABELS.values())
+    await update.message.reply_text("چه زمانی یک زیرمجموعه معتبر حساب شود؟", reply_markup=_rows(labels, width=1))
+    return REFERRAL_RULE_QUALIFICATION
+
+
+@require_auth(permission="users")
+async def referral_rule_qualification(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    reverse = {label: key for key, label in ReferralService.QUALIFICATION_LABELS.items()}
+    qualification = reverse.get(update.message.text)
+    if not qualification:
+        await update.message.reply_text("شرط معتبر نیست.")
+        return REFERRAL_RULE_QUALIFICATION
+    context.user_data["referral_rule_draft"]["qualification_type"] = qualification
+    await update.message.reply_text(
+        "جایزه بعد از چند زیرمجموعه معتبر داده شود؟ فقط عدد بفرستید.",
+        reply_markup=_cancel_back_keyboard(),
+    )
+    return REFERRAL_RULE_COUNT
+
+
+@require_auth(permission="users")
+async def referral_rule_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        count = int(update.message.text.strip())
+    except ValueError:
+        count = 0
+    if count <= 0:
+        await update.message.reply_text("تعداد باید یک عدد بزرگ‌تر از صفر باشد.")
+        return REFERRAL_RULE_COUNT
+    context.user_data["referral_rule_draft"]["required_count"] = count
+    await update.message.reply_text(
+        "این جایزه فقط یک‌بار داده شود یا در هر بار رسیدن به این تعداد تکرار شود؟",
+        reply_markup=_rows(["یک‌بار", "تکرارشونده"], width=2),
+    )
+    return REFERRAL_RULE_REPEAT
+
+
+@require_auth(permission="users")
+async def referral_rule_repeat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text not in {"یک‌بار", "تکرارشونده"}:
+        await update.message.reply_text("یکی از گزینه‌ها را انتخاب کنید.")
+        return REFERRAL_RULE_REPEAT
+    context.user_data["referral_rule_draft"]["is_repeatable"] = update.message.text == "تکرارشونده"
+    await update.message.reply_text(
+        "نوع جایزه را انتخاب کنید.",
+        reply_markup=_rows(list(ReferralService.REWARD_LABELS.values()), width=2),
+    )
+    return REFERRAL_RULE_REWARD_TYPE
+
+
+@require_auth(permission="users")
+async def referral_rule_reward_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    reverse = {label: key for key, label in ReferralService.REWARD_LABELS.items()}
+    reward_type = reverse.get(update.message.text)
+    if not reward_type:
+        await update.message.reply_text("نوع جایزه معتبر نیست.")
+        return REFERRAL_RULE_REWARD_TYPE
+    context.user_data["referral_rule_draft"]["reward_type"] = reward_type
+    if reward_type == "wallet":
+        await update.message.reply_text(
+            "مبلغ جایزه را به تومان و فقط به‌صورت عدد ارسال کنید.",
+            reply_markup=_cancel_back_keyboard(),
+        )
+    else:
+        async with async_session() as session:
+            plans = await ShopCustomizationService.list_plans(session, active_only=True)
+        if not plans:
+            await update.message.reply_text("هیچ سرویس فعالی برای جایزه وجود ندارد.")
+            return await referral_rewards_start(update, context)
+        await update.message.reply_text(
+            "سرویس رایگان را انتخاب کنید. تحویل جایزه به موجودی همین سرویس وابسته است.",
+            reply_markup=_rows([_plan_label(plan) for plan in plans], width=1),
+        )
+    return REFERRAL_RULE_REWARD_VALUE
+
+
+@require_auth(permission="users")
+async def referral_rule_reward_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    draft = context.user_data.get("referral_rule_draft", {})
+    if draft.get("reward_type") == "wallet":
+        try:
+            amount = int(update.message.text.replace(",", "").strip())
+        except ValueError:
+            amount = 0
+        if amount <= 0:
+            await update.message.reply_text("مبلغ باید بزرگ‌تر از صفر باشد.")
+            return REFERRAL_RULE_REWARD_VALUE
+        draft["wallet_amount"] = amount
+    else:
+        plan_id = _parse_hash_id(update.message.text)
+        if not plan_id:
+            await update.message.reply_text("سرویس معتبر نیست.")
+            return REFERRAL_RULE_REWARD_VALUE
+        draft["shop_plan_id"] = plan_id
+
+    try:
+        async with async_session() as session:
+            rule = await ReferralService.create_rule(
+                session,
+                created_by=update.effective_user.id,
+                **draft,
+            )
+            await session.commit()
+    except ValueError as exc:
+        await update.message.reply_text(f"ساخت قانون انجام نشد: {exc}")
+        return await referral_rewards_start(update, context)
+
+    context.user_data.pop("referral_rule_draft", None)
+    await update.message.reply_text(f"✅ قانون «{rule.title}» ساخته شد.")
+    return await referral_rewards_start(update, context)
+
+
+@require_auth(permission="users")
+async def referral_rule_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    rule_id = context.user_data.get("referral_rule_id")
+    if not rule_id:
+        return await referral_rewards_start(update, context)
+    async with async_session() as session:
+        if update.message.text == ADMIN_REFERRAL_TOGGLE_RULE:
+            rule = await ReferralService.toggle_rule(session, rule_id)
+            message = "وضعیت قانون تغییر کرد." if rule else "قانون پیدا نشد."
+        elif update.message.text == ADMIN_REFERRAL_DELETE_RULE:
+            deleted = await ReferralService.delete_rule(session, rule_id)
+            message = "قانون حذف شد." if deleted else "قانون پیدا نشد."
+        else:
+            await update.message.reply_text("گزینه معتبر نیست.")
+            return REFERRAL_RULE_OPTION
+    await update.message.reply_text(message)
+    return await referral_rewards_start(update, context)
 
 
 @require_auth(permission="coupons")
@@ -3788,6 +3990,54 @@ shop_reset_defaults_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
 )
 
+referral_rewards_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_REFERRAL_REWARDS), referral_rewards_start)],
+    states={
+        REFERRAL_RULE_SELECT: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, referral_rule_select),
+        ],
+        REFERRAL_RULE_TITLE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), referral_rewards_start),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, referral_rule_title),
+        ],
+        REFERRAL_RULE_QUALIFICATION: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), referral_rewards_start),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, referral_rule_qualification),
+        ],
+        REFERRAL_RULE_COUNT: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), referral_rewards_start),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, referral_rule_count),
+        ],
+        REFERRAL_RULE_REPEAT: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), referral_rewards_start),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, referral_rule_repeat),
+        ],
+        REFERRAL_RULE_REWARD_TYPE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), referral_rewards_start),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, referral_rule_reward_type),
+        ],
+        REFERRAL_RULE_REWARD_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), referral_rewards_start),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, referral_rule_reward_value),
+        ],
+        REFERRAL_RULE_OPTION: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), referral_rewards_start),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, referral_rule_option),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+    allow_reentry=True,
+)
+
 admin_handlers = [
     CommandHandler("start", admin_start),
     CommandHandler("admins", list_admins),
@@ -3820,6 +4070,7 @@ admin_handlers = [
     trial_set_volume_conv,
     trial_set_duration_conv,
     shop_reset_defaults_conv,
+    referral_rewards_conv,
     MessageHandler(_exact_filter(ADMIN_CRYPTO), crypto_menu),
     MessageHandler(_exact_filter(ADMIN_CRYPTO_HISTORY), crypto_history),
     MessageHandler(_exact_filter(ADMIN_CRYPTO_RATES), crypto_rates_menu),

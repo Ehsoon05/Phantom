@@ -46,6 +46,10 @@ ADMIN_CHARGE_WALLET = "➕ شارژ کیف پول"
 ADMIN_SET_WALLET = "✏️ تنظیم موجودی کیف پول"
 ADMIN_USER_STATS = "📈 آمار کاربران"
 ADMIN_REFERRAL_REPORT = "👥 گزارش دعوت‌ها"
+ADMIN_REFERRAL_REWARDS = "🎁 پاداش‌های رفرال"
+ADMIN_REFERRAL_ADD_RULE = "➕ قانون پاداش جدید"
+ADMIN_REFERRAL_TOGGLE_RULE = "⏯ فعال/غیرفعال"
+ADMIN_REFERRAL_DELETE_RULE = "🗑 حذف قانون"
 ADMIN_CREATE_COUPON = "➕ ساخت کد تخفیف"
 ADMIN_EDIT_COUPON = "✏️ ویرایش تخفیف"
 ADMIN_VIEW_COUPONS = "📋 مشاهده تخفیف‌ها"
@@ -321,6 +325,7 @@ def admin_users_keyboard() -> ReplyKeyboardMarkup:
             [_button(ADMIN_SEARCH_USER), _button(ADMIN_CHARGE_WALLET)],
             [_button(ADMIN_SET_WALLET)],
             [_button(ADMIN_USER_STATS), _button(ADMIN_REFERRAL_REPORT)],
+            [_button(ADMIN_REFERRAL_REWARDS)],
             [_button(ADMIN_BACK)],
         ]
     )

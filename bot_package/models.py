@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, relationship
 from datetime import datetime, timezone
 
@@ -66,6 +66,46 @@ class Transaction(Base):
     type = Column(String, nullable=False)
     description = Column(String, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ReferralRewardRule(Base):
+    __tablename__ = "referral_reward_rules"
+
+    id = Column(Integer, primary_key=True)
+    title = Column(String, nullable=False)
+    qualification_type = Column(String, nullable=False)
+    required_count = Column(Integer, nullable=False, default=1)
+    is_repeatable = Column(Boolean, nullable=False, default=False)
+    reward_type = Column(String, nullable=False)
+    wallet_amount = Column(Integer, nullable=True)
+    shop_plan_id = Column(Integer, ForeignKey("shop_plans.id"), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_by = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    shop_plan = relationship("ShopPlan")
+    grants = relationship("ReferralRewardGrant", back_populates="rule", cascade="all, delete-orphan")
+
+
+class ReferralRewardGrant(Base):
+    __tablename__ = "referral_reward_grants"
+    __table_args__ = (
+        UniqueConstraint("rule_id", "referrer_user_id", "milestone_count", name="uq_referral_reward_grant"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    rule_id = Column(Integer, ForeignKey("referral_reward_rules.id"), nullable=False)
+    referrer_user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
+    milestone_count = Column(Integer, nullable=False)
+    qualified_count = Column(Integer, nullable=False)
+    reward_type = Column(String, nullable=False)
+    wallet_amount = Column(Integer, nullable=True)
+    config_id = Column(Integer, ForeignKey("configs.id"), nullable=True)
+    purchase_id = Column(Integer, ForeignKey("purchases.id"), nullable=True)
+    granted_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    rule = relationship("ReferralRewardRule", back_populates="grants")
 
 class Price(Base):
     __tablename__ = "prices"

@@ -59,6 +59,37 @@ async def get_or_create_user(telegram_id: int, name: str, username: str | None, 
         return user
 
 
+async def _process_referral_rewards(context: ContextTypes.DEFAULT_TYPE, referred_user_id: int) -> None:
+    async with async_session() as session:
+        rewards = await ReferralService.evaluate_referred_user(session, referred_user_id)
+        if not rewards:
+            return
+        referrer_id = (
+            await session.execute(
+                select(User.referred_by_user_id).where(User.telegram_id == referred_user_id)
+            )
+        ).scalar_one()
+        await session.commit()
+
+    for reward in rewards:
+        if reward["config"] is not None:
+            await SubscriptionLinkService.sync_to_panel(reward["config"], reward["service_name"])
+    try:
+        lines = ["🎁 **پاداش دعوت دوستان برای شما ثبت شد!**", ""]
+        for reward in rewards:
+            lines.append(
+                f"• {reward['rule']}: **{reward['reward']}** "
+                f"(تعداد معتبر: {reward['qualified_count']})"
+            )
+        await context.bot.send_message(
+            chat_id=referrer_id,
+            text="\n".join(lines),
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
+    except Exception:
+        pass
+
+
 def _exact_filter(text: str):
     return filters.Regex(f"^{re.escape(text)}$")
 
@@ -226,6 +257,28 @@ async def referral_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with async_session() as session:
         count = await ReferralService.count_referrals(session, user.telegram_id)
         text = await ShopCustomizationService.get_message(session, "referral", link=link, count=count)
+        rules = await ReferralService.list_rules(session, active_only=True)
+        if rules:
+            progress_lines = ["", "", "🎁 **جایزه‌های فعال و پیشرفت شما**"]
+            for rule in rules:
+                qualified = await ReferralService.count_qualified(
+                    session, user.telegram_id, rule.qualification_type
+                )
+                target = (
+                    ((qualified // rule.required_count) + 1) * rule.required_count
+                    if rule.is_repeatable
+                    else rule.required_count
+                )
+                reward = (
+                    f"{rule.wallet_amount or 0:,} تومان"
+                    if rule.reward_type == "wallet"
+                    else "سرویس رایگان"
+                )
+                progress_lines.append(
+                    f"• {escape_markdown(rule.title, version=1)}: "
+                    f"**{qualified}/{target}** نفر معتبر ← {reward}"
+                )
+            text = f"{text}{''.join(line + chr(10) for line in progress_lines).rstrip()}"
         followup = await ShopCustomizationService.get_message(session, "referral_followup")
         keyboard = await ShopCustomizationService.main_menu_keyboard(session)
 
@@ -469,6 +522,7 @@ async def process_purchase(
         else:
             public_sub_link = config.sub_link
         await session.commit()
+        await _process_referral_rewards(context, db_user.telegram_id)
 
         text = await ShopCustomizationService.get_message(
             session,
@@ -833,6 +887,7 @@ async def accept_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await ReferralService.ensure_referral_code(session, user)
         text = await ShopCustomizationService.get_message(session, "rules_accepted")
         await session.commit()
+    await _process_referral_rewards(context, update.effective_user.id)
     await update.message.reply_text(text, parse_mode=_parse_mode(text))
     await main_menu(update, context)
 

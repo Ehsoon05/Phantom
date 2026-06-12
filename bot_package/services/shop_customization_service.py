@@ -603,8 +603,11 @@ class ShopCustomizationService:
         return button
 
     @staticmethod
-    async def list_plans(session: AsyncSession) -> list[ShopPlan]:
-        result = await session.execute(select(ShopPlan).order_by(ShopPlan.category_key, ShopPlan.display_order, ShopPlan.volume_gb))
+    async def list_plans(session: AsyncSession, active_only: bool = False) -> list[ShopPlan]:
+        stmt = select(ShopPlan)
+        if active_only:
+            stmt = stmt.where(ShopPlan.is_active.is_(True))
+        result = await session.execute(stmt.order_by(ShopPlan.category_key, ShopPlan.display_order, ShopPlan.volume_gb))
         return list(result.scalars().all())
 
     @staticmethod

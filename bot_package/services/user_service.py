@@ -37,7 +37,15 @@ class UserService:
             description=f"شارژ توسط ادمین {admin_id}"
         )
         session.add(transaction)
+        await session.flush()
+        from .referral_service import ReferralService
+        from .subscription_link_service import SubscriptionLinkService
+
+        rewards = await ReferralService.evaluate_referred_user(session, telegram_id)
         await session.commit()
+        for reward in rewards:
+            if reward["config"] is not None:
+                await SubscriptionLinkService.sync_to_panel(reward["config"], reward["service_name"])
         return True
 
     @staticmethod

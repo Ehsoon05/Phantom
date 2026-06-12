@@ -212,6 +212,11 @@ class CryptoPaymentService:
                 ),
             )
         )
+        await session.flush()
+        from .referral_service import ReferralService
+        from .subscription_link_service import SubscriptionLinkService
+
+        rewards = await ReferralService.evaluate_referred_user(session, invoice.user_id)
         try:
             await session.commit()
         except IntegrityError:
@@ -219,6 +224,9 @@ class CryptoPaymentService:
             await session.rollback()
             logger.info("Crypto credit skipped (duplicate tx) for invoice %s", invoice.id)
             return 0
+        for reward in rewards:
+            if reward["config"] is not None:
+                await SubscriptionLinkService.sync_to_panel(reward["config"], reward["service_name"])
         return credited_toman
 
     @staticmethod
