@@ -18,3 +18,4 @@ vpn_shop.db
 
 *.log
 .DS_Store
+.pytest-tmp/
