@@ -743,7 +743,13 @@ class ShopCustomizationService:
         return plan
 
     @staticmethod
-    async def get_message(session: AsyncSession, key: str, **values) -> RenderedMessage:
+    async def get_message(
+        session: AsyncSession,
+        key: str,
+        *,
+        escape_markdown_values: bool = False,
+        **values,
+    ) -> RenderedMessage:
         result = await session.execute(
             select(ShopMessage).where(ShopMessage.key == key, ShopMessage.is_active == True)
         )
@@ -751,7 +757,11 @@ class ShopCustomizationService:
         template = message.text if message else DEFAULT_MESSAGES[key]
         parse_mode = message.parse_mode if message and message.parse_mode else PARSE_MODE_MARKDOWN
         if values:
-            rendered = _safe_format_html(template, values) if parse_mode == "HTML" else _safe_format(template, values)
+            rendered = (
+                _safe_format_html(template, values)
+                if parse_mode == "HTML"
+                else _safe_format(template, values, escape_values=escape_markdown_values)
+            )
         else:
             rendered = template
         premium_id = message.premium_emoji_id if message else None
@@ -1091,9 +1101,14 @@ def _insert_after_heading(text: str, line: str) -> str:
     return line + text
 
 
-def _safe_format(template: str, values: dict) -> str:
+def _safe_format(template: str, values: dict, *, escape_values: bool = False) -> str:
     allowed_keys = {field_name for _, field_name, _, _ in Formatter().parse(template) if field_name}
-    safe_values = {key: values.get(key, "{" + key + "}") for key in allowed_keys}
+    safe_values = {}
+    for key in allowed_keys:
+        value = values.get(key, "{" + key + "}")
+        if escape_values:
+            value = re.sub(r"([_*`\[])", r"\\\1", str(value))
+        safe_values[key] = value
     return template.format(**safe_values)
 
 

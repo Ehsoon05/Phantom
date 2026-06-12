@@ -295,6 +295,43 @@ async def test_shop_message_preserves_inline_premium_emojis(db):
 
 
 @pytest.mark.asyncio
+async def test_shop_message_can_escape_dynamic_markdown_values(db):
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    async with db.async_session() as session:
+        await ShopCustomizationService.init_defaults(session)
+        rendered = await ShopCustomizationService.get_message(
+            session,
+            "service_details",
+            escape_markdown_values=True,
+            service_name="@Mmd1_1",
+            original_title="Phantom_Test",
+            category_key="express_v1",
+            total_volume="10 گیگ",
+            used_volume="0",
+            remaining_volume="10 گیگ",
+            expiry_text="2026-07-01",
+            remaining_time="18 روز",
+            config_count=10,
+            purchased_at="2026-06-12",
+            price="89,000",
+        )
+
+    assert "@Mmd1\\_1" in rendered
+    assert "Phantom\\_Test" in rendered
+    assert "express\\_v1" in rendered
+
+
+def test_pasarguard_and_marzban_inbound_formats_are_supported():
+    from bot_package.services.marzban_trial_service import MarzbanTrialService
+
+    assert MarzbanTrialService.inbound_tags(["one", "two"]) == ["one", "two"]
+    assert MarzbanTrialService.inbound_tags(
+        {"vless": [{"tag": "reality"}, {"tag": "ws"}]}
+    ) == ["reality", "ws"]
+
+
+@pytest.mark.asyncio
 async def test_trial_button_occupies_its_own_second_row(db):
     from bot_package.services.shop_customization_service import ShopCustomizationService
 

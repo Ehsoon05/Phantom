@@ -24,6 +24,18 @@ class MarzbanTrialService:
         return f"PhantomHubs_test_{telegram_id}"
 
     @staticmethod
+    def inbound_tags(payload) -> list[str]:
+        if isinstance(payload, list):
+            return [str(tag).strip() for tag in payload if str(tag).strip()]
+        if isinstance(payload, dict):
+            return [
+                item["tag"]
+                for item in payload.get("vless", [])
+                if isinstance(item, dict) and item.get("tag")
+            ]
+        return []
+
+    @staticmethod
     async def _token(client: httpx.AsyncClient) -> str:
         if not all(
             (
@@ -70,11 +82,7 @@ class MarzbanTrialService:
                 )
                 inbounds_response.raise_for_status()
                 inbound_payload = inbounds_response.json()
-                vless_tags = [
-                    item["tag"]
-                    for item in inbound_payload.get("vless", [])
-                    if isinstance(item, dict) and item.get("tag")
-                ]
+                vless_tags = MarzbanTrialService.inbound_tags(inbound_payload)
                 if not vless_tags:
                     raise MarzbanTrialError("No VLESS inbound is available")
 

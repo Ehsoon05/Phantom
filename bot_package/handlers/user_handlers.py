@@ -8,6 +8,7 @@ import qrcode
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update, constants
+from telegram.error import BadRequest
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 try:
     from telegram.helpers import escape_markdown
@@ -684,6 +685,7 @@ async def service_details_callback(update: Update, context: ContextTypes.DEFAULT
     except (AttributeError, IndexError, ValueError):
         await query.answer("سرویس نامعتبر است.", show_alert=True)
         return
+    await query.answer("در حال دریافت جزئیات...")
 
     async with async_session() as session:
         result = await session.execute(
@@ -693,11 +695,10 @@ async def service_details_callback(update: Update, context: ContextTypes.DEFAULT
         )
         purchase = result.scalar_one_or_none()
         if not purchase:
-            await query.answer("این سرویس پیدا نشد.", show_alert=True)
+            await query.message.reply_text("این سرویس پیدا نشد.")
             return
         if await SettingsService.branded_links_enabled(session):
             sub_link = await SubscriptionLinkService.public_link_for_config(session, purchase.config)
-            await SubscriptionLinkService.sync_to_panel(purchase.config, purchase.service_name)
             token = purchase.config.public_sub_token
         else:
             sub_link = purchase.config.sub_link
@@ -705,7 +706,6 @@ async def service_details_callback(update: Update, context: ContextTypes.DEFAULT
         await session.commit()
 
     if action == "service_qr":
-        await query.answer("QR Code ساخته شد.")
         image = qrcode.make(sub_link)
         buffer = io.BytesIO()
         image.save(buffer, format="PNG")
@@ -736,6 +736,7 @@ async def service_details_callback(update: Update, context: ContextTypes.DEFAULT
         text = await ShopCustomizationService.get_message(
             session,
             "service_details",
+            escape_markdown_values=True,
             service_name=purchase.service_name or f"{purchase.volume_gb} گیگ",
             original_title=original_title,
             category_key=purchase.category_key or "default",
@@ -756,7 +757,12 @@ async def service_details_callback(update: Update, context: ContextTypes.DEFAULT
             [InlineKeyboardButton("بازگشت به سرویس‌ها", callback_data="services:list")],
         ]
     )
-    await query.edit_message_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
+    try:
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
+    except BadRequest as exc:
+        if "parse entities" not in str(exc).lower():
+            raise
+        await query.edit_message_text(str(text), reply_markup=keyboard, parse_mode=None)
 
 
 async def cancel_coupon(update: Update, context: ContextTypes.DEFAULT_TYPE):
