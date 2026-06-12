@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import Date, cast, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot_package.models import Admin, Purchase
@@ -54,19 +54,19 @@ async def revenue_daily(
     _admin: Admin = Depends(require_permission("reports")),
 ):
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    day = cast(Purchase.purchased_at, Date)
     rows = (
         await session.execute(
-            select(day, func.coalesce(func.sum(Purchase.price), 0), func.count(Purchase.id))
-            .where(Purchase.purchased_at >= cutoff)
-            .group_by(day)
-            .order_by(day)
+            select(Purchase.purchased_at, Purchase.price).where(Purchase.purchased_at >= cutoff)
         )
     ).all()
-    return [
-        {"date": str(date), "revenue_toman": revenue, "purchases": count}
-        for date, revenue, count in rows
-    ]
+    # Bucket per calendar day in Python — portable across SQLite and Postgres.
+    buckets: dict[str, dict] = {}
+    for purchased_at, price in rows:
+        key = purchased_at.date().isoformat()
+        bucket = buckets.setdefault(key, {"date": key, "revenue_toman": 0, "purchases": 0})
+        bucket["revenue_toman"] += price
+        bucket["purchases"] += 1
+    return sorted(buckets.values(), key=lambda b: b["date"])
 
 
 @router.get("/stock")
