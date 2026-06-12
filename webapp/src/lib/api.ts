@@ -89,6 +89,62 @@ export interface Purchase {
   sub_link: string | null;
 }
 
+export interface PaymentMethods {
+  crypto_coins: { key: string; label: string; coin: string; network: string }[];
+  rial: { min_amount_toman: number; phone_required: boolean };
+}
+
+export interface CryptoInvoice {
+  id: number;
+  coin: string;
+  network: string;
+  deposit_address: string;
+  memo: string | null;
+  expected_crypto: string;
+  quoted_toman: number;
+  status: string;
+  created_at: string;
+  expires_at: string | null;
+}
+
+export interface RialRequest {
+  id: number;
+  tracking_code: string;
+  amount_toman: number;
+  status: string;
+  support_handle: string;
+  request_text: string;
+  created_at: string;
+}
+
+export interface Transaction {
+  id: number;
+  amount: number;
+  type: string;
+  description: string | null;
+  created_at: string;
+}
+
+export const getPaymentMethods = () => api<PaymentMethods>("/wallet/methods");
+export const getTransactions = () => api<Transaction[]>("/wallet/transactions");
+export const getCryptoInvoices = () => api<CryptoInvoice[]>("/wallet/crypto/invoices");
+export const getCryptoInvoice = (id: number) =>
+  api<CryptoInvoice>(`/wallet/crypto/invoices/${id}`);
+export const createCryptoInvoice = (coinKey: string, amountToman: number) =>
+  api<CryptoInvoice>("/wallet/crypto/invoices", {
+    method: "POST",
+    body: JSON.stringify({ coin_key: coinKey, amount_toman: amountToman }),
+  });
+export const createRialRequest = (input: {
+  amount_toman: number;
+  phone_number: string | null;
+  source_card: string;
+}) =>
+  api<RialRequest>("/wallet/rial/requests", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+
 export const getMe = () => api<Me>("/auth/me");
 export const getPlans = () => api<Category[]>("/shop/plans");
 export const getPurchases = () => api<Purchase[]>("/shop/purchases");

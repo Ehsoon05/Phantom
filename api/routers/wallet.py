@@ -4,8 +4,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot_package.models import Transaction, User
 from bot_package.services.crypto_payment_service import (
+    SUPPORTED_COINS,
     CryptoPaymentError,
     CryptoPaymentService,
+    available_coins,
     is_coin_available,
 )
 from bot_package.services.rial_payment_service import RialPaymentService
@@ -36,6 +38,28 @@ def _invoice_out(invoice) -> CryptoInvoiceOut:
         created_at=invoice.created_at,
         expires_at=invoice.expires_at,
     )
+
+
+@router.get("/methods")
+async def payment_methods(
+    session: AsyncSession = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
+    return {
+        "crypto_coins": [
+            {
+                "key": key,
+                "label": SUPPORTED_COINS[key]["label"],
+                "coin": SUPPORTED_COINS[key]["coin"],
+                "network": SUPPORTED_COINS[key]["network"],
+            }
+            for key in available_coins()
+        ],
+        "rial": {
+            "min_amount_toman": await SettingsService.get_rial_min_amount(session),
+            "phone_required": await SettingsService.rial_phone_required(session),
+        },
+    }
 
 
 @router.get("/transactions", response_model=list[TransactionOut])
