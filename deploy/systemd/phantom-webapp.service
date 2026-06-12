@@ -1,0 +1,16 @@
+[Unit]
+Description=Phantom Telegram Mini App (Next.js)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/phantom/webapp
+# Build once with `npm run build` before enabling this unit.
+ExecStart=/usr/bin/npm run start -- --port 3000
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

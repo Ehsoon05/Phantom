@@ -3,17 +3,13 @@
 import hashlib
 import hmac
 import json
-import os
 import time
 from urllib.parse import urlencode
 
 import pytest
 import pytest_asyncio
 
-os.environ.setdefault("API_JWT_SECRET", "test-secret-test-secret-test-secret-1234")
-os.environ.setdefault("MAIN_BOT_TOKEN", "123456:TEST-TOKEN")
-os.environ.setdefault("DB_URL", "sqlite+aiosqlite:///:memory:")
-os.environ["_PHANTOM_DOTENV_LOADED"] = "1"
+from tests import _api_test_env  # noqa: F401  (must precede api/bot imports)
 
 import httpx  # noqa: E402
 

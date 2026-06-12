@@ -19,3 +19,5 @@ vpn_shop.db
 *.log
 .DS_Store
 .pytest-tmp/
+.pytest-api.db
+dev_panel.db
