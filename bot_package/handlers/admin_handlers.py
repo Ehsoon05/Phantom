@@ -9,7 +9,7 @@ from telegram.ext import CommandHandler, ContextTypes, ConversationHandler, Mess
 from ..auth import AuthManager
 from ..config_loader import BotConfig
 from ..database import async_session
-from ..models import Purchase, ReferralRewardRule, User
+from ..models import Config, Purchase, ReferralRewardRule, User
 from ..services.admin_service import ALL_PERMISSIONS, AdminService, normalize_permissions
 from ..services.broadcast_service import BroadcastService
 from ..services.coupon_service import CouponError, CouponService
@@ -54,6 +54,8 @@ from ..utils.keyboards import (
     ADMIN_CREATE_COUPON,
     ADMIN_DEACTIVATE_COUPON,
     ADMIN_DELETE_BUTTON,
+    ADMIN_DELETE_PLAN,
+    ADMIN_DELETE_PLAN_CONFIRM,
     ADMIN_DELETE_CATEGORY,
     ADMIN_DELETE_CHANNEL,
     ADMIN_DELETE_COUPON,
@@ -142,6 +144,7 @@ from ..utils.keyboards import (
     admin_shop_category_edit_keyboard,
     admin_shop_menus_keyboard,
     admin_shop_plan_edit_keyboard,
+    admin_shop_plan_delete_confirm_keyboard,
     admin_shop_settings_keyboard,
     admin_emoji_position_keyboard,
     admin_response_button_keyboard,
@@ -2990,6 +2993,53 @@ async def shop_plan_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
     option = update.message.text
     plan_id = context.user_data.get("shop_plan_id")
 
+    if option == ADMIN_DELETE_PLAN:
+        async with async_session() as session:
+            plan = await ShopCustomizationService.get_plan(session, plan_id)
+            if not plan:
+                await update.message.reply_text("سرویس پیدا نشد.")
+                return await shop_plans_start(update, context)
+            stock = await session.execute(
+                select(Config).where(
+                    Config.volume_gb == plan.volume_gb,
+                    Config.category_key == plan.category_key,
+                    Config.is_sold.is_(False),
+                )
+            )
+            stock_count = len(stock.scalars().all())
+        context.user_data["shop_plan_delete_pending"] = True
+        await update.message.reply_text(
+            "⚠️ **تأیید حذف کامل سرویس**\n\n"
+            f"سرویس: **{plan.title}**\n"
+            f"دسته: `{plan.category_key}`\n"
+            f"موجودی فروخته‌نشده‌ای که پاک می‌شود: **{stock_count} لینک**\n\n"
+            "خریدها و سرویس‌های تحویل‌شده مشتریان حذف نمی‌شوند.\n"
+            "قوانین رفرال وابسته به این سرویس غیرفعال خواهند شد.",
+            reply_markup=admin_shop_plan_delete_confirm_keyboard(),
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
+        return SHOP_PLAN_OPTION
+
+    if option == ADMIN_DELETE_PLAN_CONFIRM:
+        if not context.user_data.pop("shop_plan_delete_pending", False):
+            await update.message.reply_text("ابتدا دکمه «حذف کامل سرویس» را بزنید.")
+            return await _show_shop_plan_options(update, context)
+        async with async_session() as session:
+            result = await ShopCustomizationService.delete_plan(session, plan_id)
+        context.user_data.pop("shop_plan_id", None)
+        if not result:
+            await update.message.reply_text("سرویس پیدا نشد یا قبلاً حذف شده است.")
+        else:
+            await update.message.reply_text(
+                "✅ **سرویس کامل حذف شد**\n\n"
+                f"عنوان: {result['title']}\n"
+                f"موجودی حذف‌شده: **{result['removed_inventory']} لینک**\n"
+                f"قوانین جایزه غیرفعال‌شده: **{result['disabled_reward_rules']}**",
+                parse_mode=constants.ParseMode.MARKDOWN,
+            )
+        return await shop_plans_start(update, context)
+
+    context.user_data.pop("shop_plan_delete_pending", None)
     if option == ADMIN_TOGGLE_ENABLED:
         async with async_session() as session:
             plan = await ShopCustomizationService.get_plan(session, plan_id)

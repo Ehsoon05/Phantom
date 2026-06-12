@@ -399,6 +399,99 @@ def test_admin_message_storage_uses_telegram_html_for_custom_emoji():
 
 
 @pytest.mark.asyncio
+async def test_delete_plan_removes_unsold_inventory_but_preserves_sold_services(db):
+    from bot_package.models import Config, ReferralRewardRule, ShopPlan
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    async with db.async_session() as session:
+        plan = ShopPlan(
+            volume_gb=10,
+            category_key="vip",
+            title="۱۰ گیگ VIP",
+            price=100_000,
+        )
+        unsold = Config(
+            volume_gb=10,
+            category_key="vip",
+            sub_link="https://example.com/unsold",
+            is_sold=False,
+        )
+        sold = Config(
+            volume_gb=10,
+            category_key="vip",
+            sub_link="https://example.com/sold",
+            is_sold=True,
+            sold_to_user_id=1001,
+        )
+        session.add_all([plan, unsold, sold])
+        await session.flush()
+        rule = ReferralRewardRule(
+            title="VIP Reward",
+            qualification_type="joined",
+            required_count=1,
+            is_repeatable=False,
+            reward_type="service",
+            shop_plan_id=plan.id,
+            is_active=True,
+            created_by=123456,
+        )
+        session.add(rule)
+        await session.commit()
+        plan_id = plan.id
+        sold_id = sold.id
+        unsold_id = unsold.id
+        rule_id = rule.id
+
+    async with db.async_session() as session:
+        result = await ShopCustomizationService.delete_plan(session, plan_id)
+
+    async with db.async_session() as session:
+        saved_plan = await session.get(ShopPlan, plan_id)
+        saved_sold = await session.get(Config, sold_id)
+        saved_unsold = await session.get(Config, unsold_id)
+        saved_rule = await session.get(ReferralRewardRule, rule_id)
+
+    assert result == {
+        "title": "۱۰ گیگ VIP",
+        "removed_inventory": 1,
+        "disabled_reward_rules": 1,
+    }
+    assert saved_plan is None
+    assert saved_unsold is None
+    assert saved_sold is not None
+    assert saved_sold.sold_to_user_id == 1001
+    assert saved_rule.is_active is False
+    assert saved_rule.shop_plan_id is None
+
+
+@pytest.mark.asyncio
+async def test_deleted_default_plan_is_not_recreated_on_startup(db):
+    from bot_package.services.shop_customization_service import (
+        DEFAULT_PLANS,
+        ShopCustomizationService,
+    )
+
+    definition = DEFAULT_PLANS[0]
+    async with db.async_session() as session:
+        await ShopCustomizationService.init_defaults(session)
+        plan = await ShopCustomizationService.get_plan_by_product(
+            session,
+            definition.volume_gb,
+            definition.category_key,
+        )
+        assert plan is not None
+        await ShopCustomizationService.delete_plan(session, plan.id)
+        await ShopCustomizationService.init_defaults(session)
+        recreated = await ShopCustomizationService.get_plan_by_product(
+            session,
+            definition.volume_gb,
+            definition.category_key,
+        )
+
+    assert recreated is None
+
+
+@pytest.mark.asyncio
 async def test_branded_subscription_link_setting_can_be_toggled(db):
     from bot_package.services.settings_service import SettingsService
 

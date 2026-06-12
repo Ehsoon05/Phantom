@@ -86,6 +86,8 @@ ADMIN_EDIT_POSITION = "↕️ تغییر چینش"
 ADMIN_TOGGLE_ENABLED = "⏯ فعال/غیرفعال"
 ADMIN_ADD_BUTTON = "➕ افزودن دکمه سفارشی"
 ADMIN_DELETE_BUTTON = "🗑 حذف دکمه"
+ADMIN_DELETE_PLAN = "🗑 حذف کامل سرویس"
+ADMIN_DELETE_PLAN_CONFIRM = "⚠️ بله، سرویس کامل حذف شود"
 ADMIN_ADD_PLAN = "➕ افزودن سرویس"
 ADMIN_ADD_CATEGORY = "➕ افزودن دسته"
 ADMIN_DELETE_CATEGORY = "🗑 حذف دسته"
@@ -423,6 +425,17 @@ def admin_shop_plan_edit_keyboard() -> ReplyKeyboardMarkup:
             [_button(ADMIN_EDIT_STYLE)],
             [_button(ADMIN_EDIT_CATEGORY), _button(ADMIN_EDIT_ORDER)],
             [_button(ADMIN_TOGGLE_ENABLED)],
+            [_button(ADMIN_DELETE_PLAN, style=STYLE_DANGER)],
+            [_button(CANCEL), _button(ADMIN_BACK)],
+        ],
+        one_time_keyboard=True,
+    )
+
+
+def admin_shop_plan_delete_confirm_keyboard() -> ReplyKeyboardMarkup:
+    return _keyboard(
+        [
+            [_button(ADMIN_DELETE_PLAN_CONFIRM, style=STYLE_DANGER)],
             [_button(CANCEL), _button(ADMIN_BACK)],
         ],
         one_time_keyboard=True,

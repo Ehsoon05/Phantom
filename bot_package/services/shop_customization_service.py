@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
-from ..models import Config, Price, ShopButton, ShopMessage, ShopPlan, ShopPlanCategory
+from ..models import BotSetting, Config, Price, ReferralRewardRule, ShopButton, ShopMessage, ShopPlan, ShopPlanCategory
 from ..utils import messages as default_messages
 from ..utils.keyboards import (
     ACCOUNT_INFO,
@@ -364,6 +364,10 @@ DEFAULT_PLANS: tuple[PlanDefinition, ...] = (
 
 class ShopCustomizationService:
     @staticmethod
+    def _deleted_plan_key(volume_gb: int, category_key: str) -> str:
+        return f"deleted_shop_plan:{_clean_key(category_key)}:{int(volume_gb)}"
+
+    @staticmethod
     async def init_defaults(session: AsyncSession) -> None:
         for key, text in DEFAULT_MESSAGES.items():
             result = await session.execute(select(ShopMessage).where(ShopMessage.key == key))
@@ -442,6 +446,17 @@ class ShopCustomizationService:
                 )
 
         for definition in DEFAULT_PLANS:
+            deleted_marker = await session.execute(
+                select(BotSetting.id).where(
+                    BotSetting.key
+                    == ShopCustomizationService._deleted_plan_key(
+                        definition.volume_gb,
+                        definition.category_key,
+                    )
+                )
+            )
+            if deleted_marker.scalar_one_or_none() is not None:
+                continue
             result = await session.execute(
                 select(ShopPlan).where(
                     ShopPlan.volume_gb == definition.volume_gb,
@@ -494,6 +509,12 @@ class ShopCustomizationService:
         categories = await session.execute(select(ShopPlanCategory))
         for category in categories.scalars().all():
             await session.delete(category)
+
+        deleted_markers = await session.execute(
+            select(BotSetting).where(BotSetting.key.like("deleted_shop_plan:%"))
+        )
+        for marker in deleted_markers.scalars().all():
+            await session.delete(marker)
 
         await session.flush()
         await ShopCustomizationService.init_defaults(session)
@@ -703,6 +724,15 @@ class ShopCustomizationService:
         style: str | None = STYLE_SUCCESS,
     ) -> ShopPlan:
         category_key = _clean_key(category_key)
+        deleted_marker = await session.execute(
+            select(BotSetting).where(
+                BotSetting.key
+                == ShopCustomizationService._deleted_plan_key(volume_gb, category_key)
+            )
+        )
+        marker = deleted_marker.scalar_one_or_none()
+        if marker:
+            await session.delete(marker)
         await ShopCustomizationService.ensure_category(session, category_key)
         plan = await ShopCustomizationService.get_plan_by_product(session, volume_gb, category_key)
         if not plan:
@@ -750,6 +780,51 @@ class ShopCustomizationService:
         plan.updated_at = datetime.now(timezone.utc)
         await session.commit()
         return plan
+
+    @staticmethod
+    async def delete_plan(session: AsyncSession, plan_id: int) -> dict | None:
+        plan = await ShopCustomizationService.get_plan(session, plan_id)
+        if not plan:
+            return None
+
+        inventory_result = await session.execute(
+            select(Config).where(
+                Config.volume_gb == plan.volume_gb,
+                Config.category_key == plan.category_key,
+                Config.is_sold.is_(False),
+            )
+        )
+        unsold_configs = list(inventory_result.scalars().all())
+
+        rules_result = await session.execute(
+            select(ReferralRewardRule).where(
+                ReferralRewardRule.shop_plan_id == plan.id,
+            )
+        )
+        reward_rules = list(rules_result.scalars().all())
+        for rule in reward_rules:
+            rule.is_active = False
+            rule.shop_plan_id = None
+            rule.updated_at = datetime.now(timezone.utc)
+
+        for config in unsold_configs:
+            await session.delete(config)
+        marker_key = ShopCustomizationService._deleted_plan_key(
+            plan.volume_gb,
+            plan.category_key,
+        )
+        marker_result = await session.execute(
+            select(BotSetting).where(BotSetting.key == marker_key)
+        )
+        if marker_result.scalar_one_or_none() is None:
+            session.add(BotSetting(key=marker_key, value="1"))
+        await session.delete(plan)
+        await session.commit()
+        return {
+            "title": plan.title,
+            "removed_inventory": len(unsold_configs),
+            "disabled_reward_rules": len(reward_rules),
+        }
 
     @staticmethod
     async def get_message(
