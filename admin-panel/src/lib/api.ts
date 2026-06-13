@@ -1,4 +1,5 @@
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+const API_BASE =
+  import.meta.env.VITE_API_URL ?? "https://webapi.phantomhubs.shop";
 
 const TOKEN_KEY = "phantom_admin_token";
 const PERMS_KEY = "phantom_admin_perms";
