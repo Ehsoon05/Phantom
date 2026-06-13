@@ -276,20 +276,20 @@ function CryptoTab() {
 }
 
 function RialTab() {
-  const { data: methods } = useQuery({ queryKey: ["methods"], queryFn: getPaymentMethods });
+  const { data: methods, refetch: refetchMethods, isFetching } = useQuery({
+    queryKey: ["methods"],
+    queryFn: getPaymentMethods,
+  });
   const [amount, setAmount] = useState("");
-  const [phone, setPhone] = useState("");
   const [card, setCard] = useState("");
   const [result, setResult] = useState<RialRequest | null>(null);
 
-  const phoneRequired = methods?.rial.phone_required ?? false;
   const minAmount = methods?.rial.min_amount_toman ?? 0;
 
   const submit = useMutation({
     mutationFn: () =>
       createRialRequest({
         amount_toman: parseAmount(amount),
-        phone_number: phone.trim() || null,
         source_card: card.replace(/[^0-9]/g, ""),
       }),
     onSuccess: setResult,
@@ -326,11 +326,49 @@ function RialTab() {
     );
   }
 
+  const needsPhoneVerification =
+    Boolean(methods?.rial.phone_required) && !methods?.rial.phone_verified;
+  if (needsPhoneVerification) {
+    const verifyUrl = methods?.rial.verify_phone_url;
+    return (
+      <Card>
+        <CardContent className="space-y-4 p-4 text-center">
+          <div className="space-y-2">
+            <p className="text-2xl">📱</p>
+            <p className="font-bold">تایید شماره اکانت تلگرام</p>
+            <p className="text-sm leading-6 text-muted-foreground">
+              برای پرداخت کارت‌به‌کارت باید شماره ایران متعلق به همین اکانت را داخل ربات ارسال و تایید کنید.
+            </p>
+          </div>
+          <Button
+            className="min-h-12 w-full"
+            disabled={!verifyUrl}
+            onClick={() => {
+              if (!verifyUrl) return;
+              const tg = getWebApp();
+              if (tg) tg.openTelegramLink(verifyUrl);
+              else window.location.href = verifyUrl;
+            }}
+          >
+            ارسال شماره و تایید در ربات
+          </Button>
+          <Button
+            variant="outline"
+            className="min-h-11 w-full"
+            disabled={isFetching}
+            onClick={() => refetchMethods()}
+          >
+            {isFetching ? "در حال بررسی…" : "شماره را تایید کردم؛ بررسی مجدد"}
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
   const cardDigits = card.replace(/[^0-9]/g, "");
   const valid =
     parseAmount(amount) >= minAmount &&
-    cardDigits.length === 16 &&
-    (!phoneRequired || phone.trim().length > 0);
+    cardDigits.length === 16;
   const errorMessage =
     submit.error instanceof ApiError ? submit.error.message : submit.error ? "خطا در ثبت درخواست" : null;
 
@@ -347,19 +385,6 @@ function RialTab() {
           onChange={(e) => setAmount(e.target.value)}
         />
       </div>
-      {phoneRequired && (
-        <div className="space-y-2">
-          <p className="text-sm font-semibold">شماره موبایل</p>
-          <Input
-            inputMode="tel"
-            dir="ltr"
-            className="text-center"
-            placeholder="0912xxxxxxx"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-          />
-        </div>
-      )}
       <div className="space-y-2">
         <p className="text-sm font-semibold">شماره کارت مبدا (۱۶ رقم)</p>
         <Input

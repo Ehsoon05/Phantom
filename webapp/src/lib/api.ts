@@ -53,6 +53,7 @@ export interface Me {
   referral_code: string | null;
   trial_claimed: boolean;
   accepted_rules: boolean;
+  phone_verified: boolean;
 }
 
 export interface Plan {
@@ -92,7 +93,12 @@ export interface Purchase {
 
 export interface PaymentMethods {
   crypto_coins: { key: string; label: string; coin: string; network: string }[];
-  rial: { min_amount_toman: number; phone_required: boolean };
+  rial: {
+    min_amount_toman: number;
+    phone_required: boolean;
+    phone_verified: boolean;
+    verify_phone_url: string;
+  };
 }
 
 export interface CryptoInvoice {
@@ -143,7 +149,6 @@ export const createCryptoInvoice = (coinKey: string, amountToman: number) =>
   });
 export const createRialRequest = (input: {
   amount_toman: number;
-  phone_number: string | null;
   source_card: string;
 }) =>
   api<RialRequest>("/wallet/rial/requests", {

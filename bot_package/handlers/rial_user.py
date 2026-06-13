@@ -3,10 +3,21 @@ from __future__ import annotations
 import re
 from urllib.parse import quote
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, Update
+from sqlalchemy import select
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+    Update,
+    WebAppInfo,
+)
 from telegram.ext import ContextTypes
 
+from ..config_loader import BotConfig
 from ..database import async_session
+from ..models import User
+from ..services.phone_verification_service import PhoneVerificationService
 from ..services.rial_payment_service import RialPaymentService
 from ..services.settings_service import SettingsService
 from ..services.shop_customization_service import ShopCustomizationService
@@ -16,6 +27,7 @@ from ..utils.keyboards import BACK_TO_MAIN
 STEP_KEY = "rial_step"
 AMOUNT_KEY = "rial_amount"
 PHONE_KEY = "rial_phone"
+VERIFY_PHONE_KEY = "verify_phone_for_webapp"
 
 
 def _back_keyboard() -> ReplyKeyboardMarkup:
@@ -43,14 +55,7 @@ def _parse_toman(value: str) -> int | None:
 
 
 def _normalize_iran_phone(value: str) -> str | None:
-    digits = re.sub(r"\D", "", _normalize_digits(value))
-    if digits.startswith("0098"):
-        digits = digits[2:]
-    if digits.startswith("98") and len(digits) == 12:
-        digits = "0" + digits[2:]
-    if len(digits) != 11 or not digits.startswith("09"):
-        return None
-    return f"+98{digits[1:]}"
+    return PhoneVerificationService.normalize_iran_phone(value)
 
 
 def _normalize_card(value: str) -> str | None:
@@ -68,6 +73,7 @@ def clear_state(context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop(STEP_KEY, None)
     context.user_data.pop(AMOUNT_KEY, None)
     context.user_data.pop(PHONE_KEY, None)
+    context.user_data.pop(VERIFY_PHONE_KEY, None)
 
 
 async def _cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -95,6 +101,33 @@ async def charge_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
+async def verify_phone_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    clear_state(context)
+    context.user_data[VERIFY_PHONE_KEY] = True
+    async with async_session() as session:
+        user = (
+            await session.execute(
+                select(User).where(User.telegram_id == update.effective_user.id)
+            )
+        ).scalar_one_or_none()
+        if user is None:
+            session.add(
+                User(
+                    telegram_id=update.effective_user.id,
+                    first_name=update.effective_user.first_name or "",
+                    username=update.effective_user.username,
+                )
+            )
+            await session.commit()
+    await update.effective_message.reply_text(
+        "**تایید شماره برای پرداخت کارت‌به‌کارت**\n\n"
+        "شماره متعلق به همین اکانت تلگرام را با دکمه زیر ارسال کنید.\n"
+        "فقط شماره موبایل ایران پذیرفته می‌شود.",
+        reply_markup=_contact_keyboard(),
+        parse_mode="Markdown",
+    )
+
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = (update.message.text or "").strip()
     if text == BACK_TO_MAIN:
@@ -118,6 +151,11 @@ async def _handle_amount(update: Update, context: ContextTypes.DEFAULT_TYPE, val
     async with async_session() as session:
         minimum = await SettingsService.get_rial_min_amount(session)
         require_phone = await SettingsService.rial_phone_required(session)
+        user = (
+            await session.execute(
+                select(User).where(User.telegram_id == update.effective_user.id)
+            )
+        ).scalar_one_or_none()
         if amount is None or amount < minimum:
             text = await ShopCustomizationService.get_message(
                 session,
@@ -131,11 +169,13 @@ async def _handle_amount(update: Update, context: ContextTypes.DEFAULT_TYPE, val
             )
             return
         context.user_data[AMOUNT_KEY] = amount
-        if require_phone:
+        if require_phone and not (user and user.verified_phone_number):
             context.user_data[STEP_KEY] = "phone"
             text = await ShopCustomizationService.get_message(session, "rial_phone_prompt")
             keyboard = _contact_keyboard()
         else:
+            if user and user.verified_phone_number:
+                context.user_data[PHONE_KEY] = user.verified_phone_number
             context.user_data[STEP_KEY] = "card"
             text = await ShopCustomizationService.get_message(session, "rial_card_prompt")
             keyboard = _back_keyboard()
@@ -143,7 +183,8 @@ async def _handle_amount(update: Update, context: ContextTypes.DEFAULT_TYPE, val
 
 
 async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if context.user_data.get(STEP_KEY) != "phone":
+    standalone_verification = bool(context.user_data.get(VERIFY_PHONE_KEY))
+    if context.user_data.get(STEP_KEY) != "phone" and not standalone_verification:
         return
     contact = update.message.contact
     valid_owner = contact and contact.user_id == update.effective_user.id
@@ -159,6 +200,23 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             keyboard = await ShopCustomizationService.wallet_keyboard(session)
         clear_state(context)
         await update.message.reply_text(text, reply_markup=keyboard, parse_mode=getattr(text, "parse_mode", None))
+        return
+
+    async with async_session() as session:
+        await PhoneVerificationService.verify(session, update.effective_user.id, phone)
+
+    if standalone_verification:
+        clear_state(context)
+        keyboard = ReplyKeyboardMarkup(
+            [[KeyboardButton("🛍 بازگشت به مینی‌اپ", web_app=WebAppInfo(url=BotConfig.WEBAPP_URL))]],
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        )
+        await update.message.reply_text(
+            "✅ شماره ایران شما با موفقیت تایید شد.\n"
+            "اکنون می‌توانید پرداخت کارت‌به‌کارت را در مینی‌اپ انجام دهید.",
+            reply_markup=keyboard,
+        )
         return
 
     context.user_data[PHONE_KEY] = phone
@@ -181,8 +239,15 @@ async def _handle_card(update: Update, context: ContextTypes.DEFAULT_TYPE, value
         await charge_start(update, context)
         return
 
-    phone = context.user_data.get(PHONE_KEY)
     async with async_session() as session:
+        user = (
+            await session.execute(
+                select(User).where(User.telegram_id == update.effective_user.id)
+            )
+        ).scalar_one_or_none()
+        phone = context.user_data.get(PHONE_KEY) or (
+            user.verified_phone_number if user else None
+        )
         support_handle = await SettingsService.get_rial_support_handle(session)
         request = await RialPaymentService.create_request(
             session,

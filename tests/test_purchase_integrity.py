@@ -360,20 +360,18 @@ def test_all_enabled_pasarguard_groups_are_selected_without_multilocation():
 
 
 @pytest.mark.asyncio
-async def test_trial_button_occupies_its_own_second_row(db):
+async def test_buy_and_services_buttons_each_occupy_their_own_row(db):
     from bot_package.services.shop_customization_service import ShopCustomizationService
 
     async with db.async_session() as session:
         await ShopCustomizationService.init_defaults(session)
         buttons = await ShopCustomizationService.list_buttons(session, "shop_main")
 
-    trial = next(button for button in buttons if button.action == "trial_config")
-    second_row = [button for button in buttons if button.row == 1]
-    wallet = next(button for button in buttons if button.action == "wallet")
+    buy = next(button for button in buttons if button.action == "buy_subscription")
+    services = next(button for button in buttons if button.action == "purchase_history")
 
-    assert second_row == [trial]
-    assert trial.col == 0
-    assert wallet.row == 2
+    assert [button for button in buttons if button.row == buy.row] == [buy]
+    assert [button for button in buttons if button.row == services.row] == [services]
 
 
 def test_admin_message_storage_uses_telegram_html_for_custom_emoji():

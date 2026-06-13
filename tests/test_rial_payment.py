@@ -83,5 +83,22 @@ def test_current_shop_snapshot_is_the_code_default():
     assert ("shop_main", "custom_message:shop_main:1780731124") in actions
     assert ("shop_main", "trial_config") in actions
     assert ("shop_wallet", "charge_rial") in actions
+    main_positions = {
+        button.action: (button.row, button.col)
+        for button in DEFAULT_BUTTONS
+        if button.menu == "shop_main"
+    }
+    assert main_positions["buy_subscription"] == (1, 0)
+    assert main_positions["purchase_history"] == (3, 0)
+    assert all(
+        position[0] != main_positions["buy_subscription"][0]
+        for action, position in main_positions.items()
+        if action != "buy_subscription"
+    )
+    assert all(
+        position[0] != main_positions["purchase_history"][0]
+        for action, position in main_positions.items()
+        if action != "purchase_history"
+    )
     assert "___phantom_express_-_فانتوم_اکسپرس" in categories
     assert ("___phantom_express_-_فانتوم_اکسپرس", 10, 89_000) in plans

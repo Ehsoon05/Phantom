@@ -37,6 +37,7 @@ class MeResponse(BaseModel):
     referral_code: str | None
     trial_claimed: bool
     accepted_rules: bool
+    phone_verified: bool
 
 
 class PlanOut(BaseModel):
@@ -116,7 +117,6 @@ class CryptoInvoiceOut(BaseModel):
 
 class RialRequestIn(BaseModel):
     amount_toman: int = Field(gt=0)
-    phone_number: str | None = None
     source_card: str = Field(min_length=16, max_length=19)
 
 

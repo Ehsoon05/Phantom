@@ -58,4 +58,5 @@ async def me(user: User = Depends(get_current_user)):
         referral_code=user.referral_code,
         trial_claimed=user.trial_claimed_at is not None,
         accepted_rules=user.accepted_rules_at is not None,
+        phone_verified=bool(user.verified_phone_number and user.phone_verified_at),
     )

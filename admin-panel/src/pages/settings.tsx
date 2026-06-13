@@ -78,7 +78,9 @@ function RialSection() {
       <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
         <div className="flex gap-1"><Input placeholder="حداقل مبلغ" value={min} onChange={(e) => setMin(e.target.value)} /><Button size="sm" onClick={() => save.mutate({ min_amount_toman: parseInt(min, 10) })}>ثبت</Button></div>
         <div className="flex gap-1"><Input placeholder="هندل پشتیبانی" dir="ltr" value={handle} onChange={(e) => setHandle(e.target.value)} /><Button size="sm" onClick={() => save.mutate({ support_handle: handle })}>ثبت</Button></div>
-        <Button size="sm" variant="outline" onClick={() => save.mutate({ phone_required: !data?.phone_required })}>شماره تماس: {data?.phone_required ? "الزامی" : "اختیاری"}</Button>
+        <Button size="sm" variant="outline" onClick={() => save.mutate({ phone_required: !data?.phone_required })}>
+          تایید شماره در ربات: {data?.phone_required ? "فعال" : "غیرفعال"}
+        </Button>
       </div>
     </Section>
   );

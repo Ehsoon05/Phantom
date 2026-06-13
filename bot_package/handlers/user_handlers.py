@@ -164,6 +164,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await ensure_required_membership(update, context):
         return
     db_user = await get_or_create_user(user.id, user.first_name, user.username, payload)
+    if payload == "verify_phone":
+        await rial_user.verify_phone_start(update, context)
+        return
     if db_user.accepted_rules_at is None:
         await rules_menu(update, context)
         return
@@ -1038,6 +1041,7 @@ async def response_button_callback(update: Update, context: ContextTypes.DEFAULT
 user_handlers = [
     CommandHandler("start", start),
     CommandHandler("app", open_webapp),
+    CommandHandler("verifyphone", rial_user.verify_phone_start),
     CommandHandler("buy", buy_menu),
     CommandHandler("wallet", wallet_menu),
     CommandHandler("charge", crypto_user.charge_start),

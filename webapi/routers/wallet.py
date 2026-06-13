@@ -13,6 +13,7 @@ from bot_package.services.crypto_payment_service import (
     available_coins,
     is_coin_available,
 )
+from bot_package.config_loader import BotConfig
 from bot_package.services.rial_payment_service import RialPaymentService
 from bot_package.services.settings_service import SettingsService
 from bot_package.services.shop_customization_service import ShopCustomizationService
@@ -27,19 +28,6 @@ from ..schemas import (
 )
 
 router = APIRouter(prefix="/wallet", tags=["wallet"])
-
-
-def _normalize_iran_phone(value: str | None) -> str | None:
-    if not value:
-        return None
-    digits = re.sub(r"\D", "", value.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")))
-    if digits.startswith("0098"):
-        digits = digits[2:]
-    if digits.startswith("98") and len(digits) == 12:
-        digits = "0" + digits[2:]
-    if len(digits) != 11 or not digits.startswith("09"):
-        return None
-    return f"+98{digits[1:]}"
 
 
 def _normalize_card(value: str) -> str | None:
@@ -71,8 +59,9 @@ def _invoice_out(invoice) -> CryptoInvoiceOut:
 @router.get("/methods")
 async def payment_methods(
     session: AsyncSession = Depends(get_session),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
+    phone_required = await SettingsService.rial_phone_required(session)
     return {
         "crypto_coins": [
             {
@@ -85,7 +74,11 @@ async def payment_methods(
         ],
         "rial": {
             "min_amount_toman": await SettingsService.get_rial_min_amount(session),
-            "phone_required": await SettingsService.rial_phone_required(session),
+            "phone_required": phone_required,
+            "phone_verified": bool(user.verified_phone_number and user.phone_verified_at),
+            "verify_phone_url": (
+                f"https://t.me/{BotConfig.MAIN_BOT_USERNAME}?start=verify_phone"
+            ),
         },
     }
 
@@ -180,9 +173,12 @@ async def create_rial_request(
     if body.amount_toman < min_amount:
         raise HTTPException(status_code=400, detail=f"Minimum amount is {min_amount} toman")
     require_phone = await SettingsService.rial_phone_required(session)
-    phone_number = _normalize_iran_phone(body.phone_number)
+    phone_number = user.verified_phone_number
     if require_phone and not phone_number:
-        raise HTTPException(status_code=400, detail="شماره موبایل باید یک شماره معتبر ایران باشد.")
+        raise HTTPException(
+            status_code=403,
+            detail="ابتدا شماره ایران متعلق به اکانت تلگرام خود را داخل ربات تایید کنید.",
+        )
     source_card = _normalize_card(body.source_card)
     if not source_card:
         raise HTTPException(status_code=400, detail="شماره کارت مبدا معتبر نیست.")

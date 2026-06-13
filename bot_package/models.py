@@ -19,6 +19,8 @@ class User(Base):
     accepted_rules_at = Column(DateTime, nullable=True)
     trial_claimed_at = Column(DateTime, nullable=True)
     trial_panel_username = Column(String, nullable=True)
+    verified_phone_number = Column(String, nullable=True)
+    phone_verified_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     purchases = relationship("Purchase", back_populates="user")
     referrals = relationship(

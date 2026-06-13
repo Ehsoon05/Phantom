@@ -3532,7 +3532,7 @@ async def rial_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text(
         "**تنظیمات کارت‌به‌کارت**\n\n"
         f"حداقل مبلغ: **{minimum:,} تومان**\n"
-        f"دریافت شماره تماس: **{'روشن' if require_phone else 'خاموش'}**\n"
+        f"الزام تایید شماره در ربات: **{'روشن' if require_phone else 'خاموش'}**\n"
         f"آیدی پشتیبانی: **{support_handle}**",
         reply_markup=admin_rial_settings_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
@@ -3545,7 +3545,7 @@ async def rial_toggle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         enabled = not await SettingsService.rial_phone_required(session)
         await SettingsService.set_rial_phone_required(session, enabled)
     await update.message.reply_text(
-        f"دریافت شماره تماس برای پرداخت ریالی **{'روشن' if enabled else 'خاموش'}** شد.",
+        f"الزام تایید شماره در ربات برای پرداخت ریالی **{'روشن' if enabled else 'خاموش'}** شد.",
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     await rial_settings_menu(update, context)

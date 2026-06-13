@@ -23,6 +23,7 @@ async def setup_main_bot():
         [
             BotCommand("start", "شروع و نمایش منوی اصلی"),
             BotCommand("app", "باز کردن فروشگاه"),
+            BotCommand("verifyphone", "تایید شماره برای پرداخت ریالی"),
             BotCommand("buy", "خرید سرویس"),
             BotCommand("wallet", "کیف پول"),
             BotCommand("rial", "پرداخت ریالی کارت‌به‌کارت"),

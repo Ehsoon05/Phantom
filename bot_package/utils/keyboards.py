@@ -164,7 +164,8 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
     return _keyboard(
         [
             [_shop_button(BUY_SUBSCRIPTION, style=STYLE_SUCCESS)],
-            [_shop_button(WALLET), _shop_button(PURCHASE_HISTORY)],
+            [_shop_button(WALLET), _shop_button("🧪 دریافت کانفیگ تست", style=STYLE_SUCCESS)],
+            [_shop_button(PURCHASE_HISTORY)],
             [_shop_button(REFERRALS, style=STYLE_PRIMARY), _shop_button(ACCOUNT_INFO)],
             [_shop_button(SUPPORT), _shop_button(HELP)],
         ]

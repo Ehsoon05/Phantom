@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import time
+from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 import pytest
@@ -12,10 +13,12 @@ import pytest_asyncio
 from tests import _api_test_env  # noqa: F401  (must precede api/bot imports)
 
 import httpx  # noqa: E402
+from sqlalchemy import select  # noqa: E402
 
 from bot_package.config_loader import BotConfig  # noqa: E402
 from bot_package.database import async_session  # noqa: E402
 from bot_package.models import CryptoInvoice, User  # noqa: E402
+from bot_package.services.settings_service import SettingsService  # noqa: E402
 from bot_package.services import crypto_payment_service as cps  # noqa: E402
 from bot_package.services.crypto_payment_service import (  # noqa: E402
     CryptoPaymentError,
@@ -78,7 +81,15 @@ async def test_rial_single_pending(client):
     res = await client.post("/api/v1/auth/telegram", json={"init_data": make_init_data(7200)})
     token = res.json()["access_token"]
     h = {"Authorization": f"Bearer {token}"}
-    body = {"amount_toman": 200000, "phone_number": "+989121234567", "source_card": "6037991234567893"}
+    async with async_session() as session:
+        user = (
+            await session.execute(select(User).where(User.telegram_id == 7200))
+        ).scalar_one()
+        user.verified_phone_number = "+989121234567"
+        user.phone_verified_at = datetime.now(timezone.utc)
+        await SettingsService.set_rial_phone_required(session, True)
+        await session.commit()
+    body = {"amount_toman": 200000, "source_card": "6037991234567893"}
 
     first = await client.post("/api/v1/wallet/rial/requests", json=body, headers=h)
     assert first.status_code == 200, first.text
@@ -86,3 +97,26 @@ async def test_rial_single_pending(client):
 
     second = await client.post("/api/v1/wallet/rial/requests", json=body, headers=h)
     assert second.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_rial_requires_bot_verified_phone(client):
+    res = await client.post("/api/v1/auth/telegram", json={"init_data": make_init_data(7201)})
+    token = res.json()["access_token"]
+    h = {"Authorization": f"Bearer {token}"}
+    async with async_session() as session:
+        await SettingsService.set_rial_phone_required(session, True)
+        await session.commit()
+
+    methods = await client.get("/api/v1/wallet/methods", headers=h)
+    assert methods.status_code == 200
+    assert methods.json()["rial"]["phone_required"] is True
+    assert methods.json()["rial"]["phone_verified"] is False
+    assert methods.json()["rial"]["verify_phone_url"].endswith("?start=verify_phone")
+
+    response = await client.post(
+        "/api/v1/wallet/rial/requests",
+        json={"amount_toman": 200000, "source_card": "6037991234567893"},
+        headers=h,
+    )
+    assert response.status_code == 403

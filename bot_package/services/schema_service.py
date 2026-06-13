@@ -21,6 +21,8 @@ class SchemaService:
                         "accepted_rules_at": "DATETIME",
                         "trial_claimed_at": "DATETIME",
                         "trial_panel_username": "VARCHAR",
+                        "verified_phone_number": "VARCHAR",
+                        "phone_verified_at": "DATETIME",
                     },
                 )
             if "configs" in tables:

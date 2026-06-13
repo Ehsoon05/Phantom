@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from bot_package.database import engine
-from bot_package.models import Base
+from bot_package.services.schema_service import SchemaService
 
 from .config import ApiConfig
 from .routers import (
@@ -31,8 +31,7 @@ from .routers import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     ApiConfig.validate()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    await SchemaService.ensure_schema(engine)
     yield
 
 
