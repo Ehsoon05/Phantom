@@ -7,7 +7,15 @@ from urllib.parse import quote
 import qrcode
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update, constants
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+    Update,
+    WebAppInfo,
+    constants,
+)
 from telegram.error import BadRequest
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 try:
@@ -18,6 +26,7 @@ except ImportError:
         return text.replace("\\", "\\\\").replace("_", "\\_").replace("*", "\\*").replace("`", "\\`").replace("[", "\\[")
 
 from . import crypto_user, rial_user
+from ..config_loader import BotConfig
 from ..database import async_session
 from ..models import Config, Purchase, Transaction, User
 from ..services.coupon_service import CouponError, CouponService
@@ -39,6 +48,19 @@ from ..utils.messages import (
 
 
 ACCEPT_RULES = "✅ تایید قوانین"
+
+
+async def open_webapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    del context
+    keyboard = ReplyKeyboardMarkup(
+        [[KeyboardButton("🛍 ورود به فروشگاه", web_app=WebAppInfo(url=BotConfig.WEBAPP_URL))]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+    await update.effective_message.reply_text(
+        "برای ورود به فروشگاه و مدیریت سرویس‌ها، دکمه زیر را بزنید.",
+        reply_markup=keyboard,
+    )
 
 
 async def get_or_create_user(telegram_id: int, name: str, username: str | None, payload: str | None = None):
@@ -1015,6 +1037,7 @@ async def response_button_callback(update: Update, context: ContextTypes.DEFAULT
 
 user_handlers = [
     CommandHandler("start", start),
+    CommandHandler("app", open_webapp),
     CommandHandler("buy", buy_menu),
     CommandHandler("wallet", wallet_menu),
     CommandHandler("charge", crypto_user.charge_start),

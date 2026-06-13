@@ -18,6 +18,7 @@ async def setup_admin_bot():
     await app.bot.set_my_commands(
         [
             BotCommand("start", "ورود به پنل مدیریت"),
+            BotCommand("chargeuser", "شارژ کیف پول کاربر"),
             BotCommand("admins", "لیست ادمین‌ها"),
             BotCommand("addadmin", "افزودن ادمین"),
             BotCommand("removeadmin", "حذف ادمین"),

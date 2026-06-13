@@ -304,15 +304,18 @@ function RialTab() {
       <Card>
         <CardContent className="space-y-4 p-4">
           <p className="font-bold">✅ درخواست ثبت شد</p>
+          <p className="text-sm leading-6 text-muted-foreground">
+            متن زیر را بدون تغییر برای ادمین ارسال کنید تا پس از بررسی، کیف پولتان شارژ شود.
+          </p>
           {messageText && (
             <div className="whitespace-pre-wrap rounded-lg bg-muted p-3 text-xs leading-6">
               {messageText}
             </div>
           )}
-          <CopyRow label="متن آماده برای پشتیبانی" value={copyText} />
+          <CopyRow label="متن آماده برای ارسال به ادمین" value={copyText} />
           {result.send_url && (
             <Button asChild className="w-full">
-              <a href={result.send_url}>📩 ارسال به پشتیبانی</a>
+              <a href={result.send_url}>📩 ارسال به ادمین</a>
             </Button>
           )}
           <Button variant="outline" className="w-full" onClick={() => setResult(null)}>

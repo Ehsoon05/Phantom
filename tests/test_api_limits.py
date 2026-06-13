@@ -78,7 +78,7 @@ async def test_rial_single_pending(client):
     res = await client.post("/api/v1/auth/telegram", json={"init_data": make_init_data(7200)})
     token = res.json()["access_token"]
     h = {"Authorization": f"Bearer {token}"}
-    body = {"amount_toman": 200000, "phone_number": "+989121234567", "source_card": "6037991234567890"}
+    body = {"amount_toman": 200000, "phone_number": "+989121234567", "source_card": "6037991234567893"}
 
     first = await client.post("/api/v1/wallet/rial/requests", json=body, headers=h)
     assert first.status_code == 200, first.text

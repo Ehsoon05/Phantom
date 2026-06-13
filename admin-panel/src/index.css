@@ -1,11 +1,7 @@
+@import "@fontsource-variable/vazirmatn";
 @import "tailwindcss";
 
 @custom-variant dark (&:is(.dark *));
-
-@font-face {
-  font-family: "Vazirmatn";
-  src: local("Vazirmatn"), local("Tahoma");
-}
 
 :root {
   --radius: 0.625rem;
@@ -84,6 +80,14 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground font-sans;
+    @apply bg-background text-foreground font-sans antialiased;
+    font-size: 15px;
+    line-height: 1.65;
+  }
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
   }
 }

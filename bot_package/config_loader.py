@@ -83,6 +83,7 @@ class BotConfig:
     SUPPORT_URL = os.getenv("SUPPORT_URL", "https://t.me/YourSupport").strip()
     SUPPORT_HANDLE = os.getenv("SUPPORT_HANDLE", "@YourSupport").strip()
     CHANNEL_HANDLE = os.getenv("CHANNEL_HANDLE", "@YourChannel").strip()
+    WEBAPP_URL = os.getenv("WEBAPP_URL", "https://app.phantomhubs.shop").strip().rstrip("/")
     SUBSCRIPTION_PUBLIC_BASE_URL = os.getenv("SUBSCRIPTION_PUBLIC_BASE_URL", "https://api.phantomhubs.shop").strip().rstrip("/")
     SUBSCRIPTION_PANEL_SYNC_URL = os.getenv("SUBSCRIPTION_PANEL_SYNC_URL", "").strip().rstrip("/")
     SUBSCRIPTION_PANEL_SYNC_TOKEN = os.getenv("SUBSCRIPTION_PANEL_SYNC_TOKEN", "").strip()
@@ -142,6 +143,8 @@ class BotConfig:
             errors.append("DB_URL is required")
         if not cls.SUPPORT_URL.startswith(("https://t.me/", "http://", "https://")):
             errors.append("SUPPORT_URL must be a valid URL")
+        if not cls.WEBAPP_URL.startswith("https://"):
+            errors.append("WEBAPP_URL must be a valid HTTPS URL")
         if cls.SESSION_TIMEOUT_MINUTES <= 0:
             errors.append("SESSION_TIMEOUT_MINUTES must be positive")
         if cls.LOG_LEVEL not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:

@@ -189,3 +189,8 @@ export function tonTransferLink(invoice: CryptoInvoice): string | null {
 
 export const happLink = (sub: string) => `happ://add/${sub}`;
 export const v2rayNgLink = (sub: string) => `v2rayng://install-sub?url=${encodeURIComponent(sub)}`;
+export const hiddifyLink = (sub: string) =>
+  `hiddify://import/${encodeURIComponent(sub)}#PhantomHubs`;
+export const v2boxLink = (sub: string) =>
+  `v2box://install-sub?url=${encodeURIComponent(sub)}&name=${encodeURIComponent("PhantomHubs")}`;
+export const streisandLink = () => "streisand://";

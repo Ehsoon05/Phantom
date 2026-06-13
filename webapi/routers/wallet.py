@@ -1,3 +1,4 @@
+import re
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -26,6 +27,30 @@ from ..schemas import (
 )
 
 router = APIRouter(prefix="/wallet", tags=["wallet"])
+
+
+def _normalize_iran_phone(value: str | None) -> str | None:
+    if not value:
+        return None
+    digits = re.sub(r"\D", "", value.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")))
+    if digits.startswith("0098"):
+        digits = digits[2:]
+    if digits.startswith("98") and len(digits) == 12:
+        digits = "0" + digits[2:]
+    if len(digits) != 11 or not digits.startswith("09"):
+        return None
+    return f"+98{digits[1:]}"
+
+
+def _normalize_card(value: str) -> str | None:
+    digits = re.sub(r"\D", "", value.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")))
+    if len(digits) != 16 or len(set(digits)) == 1:
+        return None
+    checksum = 0
+    for index, digit in enumerate(digits):
+        weighted = int(digit) * (2 if index % 2 == 0 else 1)
+        checksum += weighted - 9 if weighted > 9 else weighted
+    return digits if checksum % 10 == 0 else None
 
 
 def _invoice_out(invoice) -> CryptoInvoiceOut:
@@ -154,8 +179,13 @@ async def create_rial_request(
     min_amount = await SettingsService.get_rial_min_amount(session)
     if body.amount_toman < min_amount:
         raise HTTPException(status_code=400, detail=f"Minimum amount is {min_amount} toman")
-    if await SettingsService.rial_phone_required(session) and not body.phone_number:
-        raise HTTPException(status_code=400, detail="Phone number is required")
+    require_phone = await SettingsService.rial_phone_required(session)
+    phone_number = _normalize_iran_phone(body.phone_number)
+    if require_phone and not phone_number:
+        raise HTTPException(status_code=400, detail="شماره موبایل باید یک شماره معتبر ایران باشد.")
+    source_card = _normalize_card(body.source_card)
+    if not source_card:
+        raise HTTPException(status_code=400, detail="شماره کارت مبدا معتبر نیست.")
 
     # Only one pending rial request per user.
     existing_pending = (
@@ -179,15 +209,15 @@ async def create_rial_request(
         session,
         user_id=user.telegram_id,
         amount_toman=body.amount_toman,
-        phone_number=body.phone_number,
-        source_card=body.source_card,
+        phone_number=phone_number,
+        source_card=source_card,
         support_handle=support_handle,
         request_text="",
     )
     copy_text = (
         "سلام،\n\n"
         f"درخواست شارژ حساب به مبلغ {body.amount_toman:,} تومان را دارم\n"
-        f"شماره کارت مبدا: {body.source_card}\n"
+        f"شماره کارت مبدا: {source_card}\n"
         "تشکر 🙏"
     )
     direct_text = (
@@ -195,16 +225,16 @@ async def create_rial_request(
         f"کد پیگیری: {request.tracking_code}\n"
         f"آیدی عددی تلگرام: {user.telegram_id}"
     )
-    if body.phone_number:
-        direct_text += f"\nشماره تماس: {body.phone_number}"
+    if phone_number:
+        direct_text += f"\nشماره تماس: {phone_number}"
     message = await ShopCustomizationService.get_message(
         session,
         "rial_payment_request",
         support_handle=support_handle,
         amount=f"{body.amount_toman:,}",
-        source_card=body.source_card,
+        source_card=source_card,
         tracking_code=request.tracking_code,
-        phone_number=body.phone_number or "دریافت نشد",
+        phone_number=phone_number or "دریافت نشد",
         copy_text=copy_text,
     )
     await RialPaymentService.update_request_text(session, request, direct_text)

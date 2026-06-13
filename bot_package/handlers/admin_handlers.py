@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from telegram import Bot, ReplyKeyboardMarkup, ReplyKeyboardRemove, Update, constants
 from telegram.ext import CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
+from telegram.helpers import escape_markdown
 
 from ..auth import AuthManager
 from ..config_loader import BotConfig
@@ -463,12 +464,13 @@ def _broadcast_text(message) -> tuple[str, str | None]:
 
 
 def _admin_user_preview(user) -> str:
-    username = f"@{user.username}" if user.username else "ندارد"
+    first_name = escape_markdown(user.first_name or "بدون نام", version=1)
+    username = f"@{escape_markdown(user.username, version=1)}" if user.username else "ندارد"
     status = "مسدود" if user.is_blocked else "فعال"
     return (
         "**تایید کاربر**\n\n"
         f"آیدی عددی: `{user.telegram_id}`\n"
-        f"نام: {user.first_name}\n"
+        f"نام: {first_name}\n"
         f"یوزرنیم: {username}\n"
         f"موجودی کیف پول: **{user.wallet_balance:,} تومان**\n"
         f"وضعیت: {status}\n\n"
@@ -3744,7 +3746,10 @@ search_user_conv = ConversationHandler(
 )
 
 charge_wallet_conv = ConversationHandler(
-    entry_points=[MessageHandler(_exact_filter(ADMIN_CHARGE_WALLET), charge_wallet_start)],
+    entry_points=[
+        CommandHandler("chargeuser", charge_wallet_start),
+        MessageHandler(_exact_filter(ADMIN_CHARGE_WALLET), charge_wallet_start),
+    ],
     states={
         CHARGE_USER_ID: [
             MessageHandler(_exact_filter(CANCEL), cancel),

@@ -10,7 +10,8 @@ from sqlalchemy import select  # noqa: E402
 
 from bot_package.config_loader import BotConfig  # noqa: E402
 from bot_package.database import async_session  # noqa: E402
-from bot_package.models import Admin, ShopPlan  # noqa: E402
+from bot_package.models import Admin, Config, ShopPlan  # noqa: E402
+from bot_package.services.subscription_link_service import SubscriptionLinkService  # noqa: E402
 from webapi.main import app  # noqa: E402
 
 
@@ -135,3 +136,56 @@ async def test_owner_only_admin_management(client, monkeypatch):
     )
     assert added.status_code == 200
     assert added.json()["permissions"] == "users,reports"
+
+
+@pytest.mark.asyncio
+async def test_inventory_link_replacement_preserves_stock_identity(client, monkeypatch):
+    monkeypatch.setattr(BotConfig, "ADMIN_PASSWORD", "testpass", raising=False)
+    synced = []
+
+    async def fake_sync(config, service_name=None):
+        synced.append((config.id, config.sub_link, config.public_sub_token, service_name))
+
+    monkeypatch.setattr(SubscriptionLinkService, "sync_to_panel", fake_sync)
+    res = await _login(client, 9001)
+    h = {"Authorization": f"Bearer {res.json()['access_token']}"}
+
+    created = await client.post(
+        "/api/v1/admin/inventory/configs",
+        json={
+            "volume_gb": 19,
+            "category_key": "default",
+            "links": ["https://old.example.test/sub/original-token"],
+        },
+        headers=h,
+    )
+    assert created.status_code == 200, created.text
+
+    listed = await client.get(
+        "/api/v1/admin/inventory/configs?category_key=default&volume_gb=19",
+        headers=h,
+    )
+    assert listed.status_code == 200, listed.text
+    config = next(row for row in listed.json() if row["sub_link"].startswith("https://old."))
+
+    replaced = await client.patch(
+        f"/api/v1/admin/inventory/configs/{config['id']}",
+        json={"sub_link": "https://new.example.test/sub/replacement-token"},
+        headers=h,
+    )
+    assert replaced.status_code == 200, replaced.text
+    assert replaced.json()["id"] == config["id"]
+    assert replaced.json()["volume_gb"] == 19
+    assert replaced.json()["category_key"] == "default"
+    assert replaced.json()["public_sub_token"] == config["public_sub_token"]
+    assert synced[-1][0] == config["id"]
+    assert synced[-1][1] == "https://new.example.test/sub/replacement-token"
+
+    async with async_session() as session:
+        stored = (
+            await session.execute(select(Config).where(Config.id == config["id"]))
+        ).scalar_one()
+        assert stored.is_sold is False
+        assert stored.sub_link == "https://new.example.test/sub/replacement-token"
+        await session.delete(stored)
+        await session.commit()

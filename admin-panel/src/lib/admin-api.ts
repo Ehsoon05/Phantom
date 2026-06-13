@@ -64,6 +64,27 @@ export const addConfigs = (volume_gb: number, category_key: string, links: strin
     body: JSON.stringify({ volume_gb, category_key, links }),
   });
 
+export interface InventoryConfig {
+  id: number;
+  volume_gb: number;
+  category_key: string;
+  sub_link: string;
+  public_sub_token: string | null;
+  created_at: string;
+}
+export const listInventoryConfigs = (categoryKey?: string, volumeGb?: number) => {
+  const params = new URLSearchParams();
+  if (categoryKey) params.set("category_key", categoryKey);
+  if (volumeGb) params.set("volume_gb", String(volumeGb));
+  const query = params.toString();
+  return api<InventoryConfig[]>(`/admin/inventory/configs${query ? `?${query}` : ""}`);
+};
+export const replaceInventoryConfig = (id: number, subLink: string) =>
+  api<InventoryConfig>(`/admin/inventory/configs/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ sub_link: subLink }),
+  });
+
 // --- Coupons ----------------------------------------------------------------
 
 export interface Coupon {

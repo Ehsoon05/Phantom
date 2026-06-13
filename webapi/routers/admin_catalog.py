@@ -1,5 +1,7 @@
 """Admin: inventory, shop plans/categories/prices, messages, buttons."""
 
+from urllib.parse import urlparse
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -9,6 +11,7 @@ from bot_package.models import Admin, Config, ShopButton, ShopMessage, ShopPlan,
 from bot_package.services.inventory_service import InventoryService
 from bot_package.services.price_service import PriceService
 from bot_package.services.shop_customization_service import ShopCustomizationService
+from bot_package.services.subscription_link_service import SubscriptionLinkService
 
 from ..deps import get_session, require_permission
 
@@ -21,6 +24,21 @@ class ConfigsAddRequest(BaseModel):
     volume_gb: int = Field(gt=0)
     category_key: str = "default"
     links: list[str] = Field(min_length=1)
+
+
+class ConfigUpdateRequest(BaseModel):
+    sub_link: str = Field(min_length=8)
+
+
+def _config_out(config: Config) -> dict:
+    return {
+        "id": config.id,
+        "volume_gb": config.volume_gb,
+        "category_key": config.category_key,
+        "sub_link": config.sub_link,
+        "public_sub_token": config.public_sub_token,
+        "created_at": config.created_at,
+    }
 
 
 @router.post("/inventory/configs")
@@ -43,6 +61,59 @@ async def stock(
     return [
         {"category_key": c, "volume_gb": v, "title": t, "available": n} for c, v, t, n in rows
     ]
+
+
+@router.get("/inventory/configs")
+async def list_inventory_configs(
+    category_key: str | None = None,
+    volume_gb: int | None = None,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("inventory")),
+):
+    query = select(Config).where(Config.is_sold.is_(False))
+    if category_key:
+        query = query.where(Config.category_key == category_key)
+    if volume_gb is not None:
+        query = query.where(Config.volume_gb == volume_gb)
+    configs = (
+        await session.execute(query.order_by(Config.created_at.desc(), Config.id.desc()).limit(250))
+    ).scalars().all()
+    return [_config_out(config) for config in configs]
+
+
+@router.patch("/inventory/configs/{config_id}")
+async def replace_inventory_config(
+    config_id: int,
+    body: ConfigUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("inventory")),
+):
+    config = (
+        await session.execute(select(Config).where(Config.id == config_id))
+    ).scalar_one_or_none()
+    if config is None:
+        raise HTTPException(status_code=404, detail="Config not found")
+    if config.is_sold:
+        raise HTTPException(status_code=409, detail="Sold configs cannot be replaced")
+
+    sub_link = body.sub_link.strip()
+    parsed = urlparse(sub_link)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Subscription link must be a valid HTTP(S) URL")
+
+    duplicate = (
+        await session.execute(
+            select(Config.id).where(Config.sub_link == sub_link, Config.id != config.id)
+        )
+    ).scalar_one_or_none()
+    if duplicate is not None:
+        raise HTTPException(status_code=409, detail="This subscription link already exists")
+
+    config.sub_link = sub_link
+    await SubscriptionLinkService.ensure_public_token(session, config)
+    await session.commit()
+    await SubscriptionLinkService.sync_to_panel(config)
+    return _config_out(config)
 
 
 # --- Plans -------------------------------------------------------------------

@@ -14,7 +14,9 @@ import {
   deletePlan,
   getInventoryStock,
   listCategories,
+  listInventoryConfigs,
   listPlans,
+  replaceInventoryConfig,
   setPlanPrice,
   updatePlan,
   upsertCategory,
@@ -24,6 +26,7 @@ import {
 function PlansTab() {
   const qc = useQueryClient();
   const { data: plans, isLoading } = useQuery({ queryKey: ["admin-plans"], queryFn: listPlans });
+  const { data: categories } = useQuery({ queryKey: ["admin-categories"], queryFn: listCategories });
   const invalidate = () => qc.invalidateQueries({ queryKey: ["admin-plans"] });
 
   const [form, setForm] = useState({ volume_gb: "", title: "", price: "", category_key: "default" });
@@ -58,7 +61,16 @@ function PlansTab() {
           <Input placeholder="حجم (GB)" inputMode="numeric" value={form.volume_gb} onChange={(e) => setForm({ ...form, volume_gb: e.target.value })} />
           <Input placeholder="عنوان" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
           <Input placeholder="قیمت (تومان)" inputMode="numeric" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
-          <Input placeholder="دسته" value={form.category_key} onChange={(e) => setForm({ ...form, category_key: e.target.value })} />
+          <select
+            className="min-h-9 rounded-md border bg-transparent px-3 text-sm"
+            value={form.category_key}
+            onChange={(e) => setForm({ ...form, category_key: e.target.value })}
+          >
+            <option value="default">پیش‌فرض</option>
+            {categories?.filter((category) => category.key !== "default").map((category) => (
+              <option key={category.id} value={category.key}>{category.emoji} {category.title}</option>
+            ))}
+          </select>
           <Button disabled={!form.volume_gb || !form.title || create.isPending} onClick={() => create.mutate()}>
             افزودن پلن
           </Button>
@@ -129,12 +141,42 @@ function CategoriesTab() {
 function InventoryTab() {
   const qc = useQueryClient();
   const { data: stock, isLoading } = useQuery({ queryKey: ["admin-stock"], queryFn: getInventoryStock });
+  const { data: categories } = useQuery({ queryKey: ["admin-categories"], queryFn: listCategories });
   const [volume, setVolume] = useState("");
   const [category, setCategory] = useState("default");
   const [links, setLinks] = useState("");
+  const [filterCategory, setFilterCategory] = useState("");
+  const [filterVolume, setFilterVolume] = useState("");
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [replacementLink, setReplacementLink] = useState("");
+  const parsedFilterVolume = parseInt(filterVolume, 10);
+  const { data: configs, isLoading: configsLoading } = useQuery({
+    queryKey: ["admin-inventory-configs", filterCategory, filterVolume],
+    queryFn: () =>
+      listInventoryConfigs(
+        filterCategory || undefined,
+        Number.isNaN(parsedFilterVolume) ? undefined : parsedFilterVolume,
+      ),
+  });
   const add = useMutation({
     mutationFn: () => addConfigs(parseInt(volume, 10), category || "default", links.split("\n").map((l) => l.trim()).filter(Boolean)),
-    onSuccess: (r) => { alert(`${r.added} کانفیگ اضافه شد`); setLinks(""); qc.invalidateQueries({ queryKey: ["admin-stock"] }); },
+    onSuccess: (r) => {
+      alert(`${r.added} کانفیگ اضافه شد`);
+      setLinks("");
+      qc.invalidateQueries({ queryKey: ["admin-stock"] });
+      qc.invalidateQueries({ queryKey: ["admin-inventory-configs"] });
+    },
+  });
+  const replace = useMutation({
+    mutationFn: ({ id, subLink }: { id: number; subLink: string }) =>
+      replaceInventoryConfig(id, subLink),
+    onSuccess: () => {
+      setEditingId(null);
+      setReplacementLink("");
+      qc.invalidateQueries({ queryKey: ["admin-inventory-configs"] });
+      alert("لینک جایگزین و پنل اشتراک دوباره همگام شد.");
+    },
+    onError: (error) => alert(error instanceof Error ? error.message : "جایگزینی لینک انجام نشد."),
   });
 
   return (
@@ -143,7 +185,16 @@ function InventoryTab() {
         <p className="text-sm font-semibold">افزودن کانفیگ</p>
         <div className="grid grid-cols-2 gap-2">
           <Input placeholder="حجم (GB)" inputMode="numeric" value={volume} onChange={(e) => setVolume(e.target.value)} />
-          <Input placeholder="دسته" value={category} onChange={(e) => setCategory(e.target.value)} />
+          <select
+            className="min-h-9 rounded-md border bg-transparent px-3 text-sm"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+          >
+            <option value="default">پیش‌فرض</option>
+            {categories?.filter((item) => item.key !== "default").map((item) => (
+              <option key={item.id} value={item.key}>{item.emoji} {item.title}</option>
+            ))}
+          </select>
         </div>
         <textarea className="min-h-28 w-full rounded-md border bg-transparent p-2 text-sm" dir="ltr" placeholder="هر خط یک لینک ساب" value={links} onChange={(e) => setLinks(e.target.value)} />
         <Button disabled={!volume || !links.trim() || add.isPending} onClick={() => add.mutate()}>{add.isPending ? "در حال افزودن…" : "افزودن"}</Button>
@@ -159,6 +210,102 @@ function InventoryTab() {
               </tr>))}</tbody></table>
         </CardContent></Card>
       )}
+      <Card>
+        <CardContent className="space-y-4 p-4">
+          <div>
+            <p className="text-sm font-semibold">اصلاح لینک‌های موجودی</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              جایگزینی، دسته و حجم و تعداد موجودی را تغییر نمی‌دهد و همان لینک عمومی را دوباره همگام می‌کند.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <select
+              className="min-h-10 rounded-md border bg-transparent px-3 text-sm"
+              value={filterCategory}
+              onChange={(e) => setFilterCategory(e.target.value)}
+            >
+              <option value="">همه دسته‌ها</option>
+              <option value="default">پیش‌فرض</option>
+              {categories?.filter((item) => item.key !== "default").map((item) => (
+                <option key={item.id} value={item.key}>{item.emoji} {item.title}</option>
+              ))}
+            </select>
+            <Input
+              placeholder="فیلتر حجم (GB)"
+              inputMode="numeric"
+              value={filterVolume}
+              onChange={(e) => setFilterVolume(e.target.value)}
+            />
+          </div>
+          {configsLoading ? <Skeleton className="h-28 w-full rounded-lg" /> : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-sm">
+                <thead>
+                  <tr className="border-b text-right text-xs text-muted-foreground">
+                    <th className="pb-2">شناسه</th>
+                    <th className="pb-2">دسته</th>
+                    <th className="pb-2">حجم</th>
+                    <th className="pb-2">لینک فعلی</th>
+                    <th className="pb-2">عملیات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {configs?.map((config) => (
+                    <tr key={config.id} className="border-b align-top last:border-0">
+                      <td className="py-3">{config.id}</td>
+                      <td className="py-3">{config.category_key}</td>
+                      <td className="py-3">{config.volume_gb} GB</td>
+                      <td className="max-w-80 py-3">
+                        {editingId === config.id ? (
+                          <Input
+                            type="url"
+                            dir="ltr"
+                            className="min-w-80 text-left"
+                            value={replacementLink}
+                            onChange={(e) => setReplacementLink(e.target.value)}
+                            placeholder="https://..."
+                          />
+                        ) : (
+                          <span className="block truncate text-xs text-muted-foreground" dir="ltr" title={config.sub_link}>
+                            {config.sub_link}
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2">
+                        {editingId === config.id ? (
+                          <div className="flex gap-1">
+                            <Button
+                              size="sm"
+                              disabled={!replacementLink.trim() || replace.isPending}
+                              onClick={() => replace.mutate({ id: config.id, subLink: replacementLink.trim() })}
+                            >
+                              ذخیره
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => { setEditingId(null); setReplacementLink(""); }}>
+                              لغو
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => { setEditingId(config.id); setReplacementLink(config.sub_link); }}
+                          >
+                            جایگزینی لینک
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!configs?.length && (
+                <p className="py-8 text-center text-sm text-muted-foreground">لینک موجودی پیدا نشد.</p>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -166,9 +313,9 @@ function InventoryTab() {
 export function CatalogPage() {
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-bold">محصولات و انبار</h1>
+      <h1 className="text-lg font-bold sm:text-xl">محصولات و انبار</h1>
       <Tabs defaultValue="plans">
-        <TabsList>
+        <TabsList className="w-full overflow-x-auto">
           <TabsTrigger value="plans">پلن‌ها</TabsTrigger>
           <TabsTrigger value="categories">دسته‌ها</TabsTrigger>
           <TabsTrigger value="inventory">انبار</TabsTrigger>
