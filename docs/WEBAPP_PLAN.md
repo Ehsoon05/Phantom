@@ -35,7 +35,7 @@ Repo layout (monorepo, same Git repo):
 ```
 Phantom/
   bot_package/          # existing — untouched except small extractions
-  api/                  # NEW — FastAPI app
+  webapi/               # NEW — FastAPI app
     main.py
     deps.py             # DB session, auth dependencies
     auth/               # initData validation, admin JWT
@@ -172,7 +172,7 @@ Permission-aware UI: nav items and actions hide/disable based on the JWT's permi
 ## 6. Step-by-Step Implementation Roadmap
 
 ### Phase 0 — Foundations (½ week)
-1. Add `api/` package; wire FastAPI + uvicorn to `bot_package.database` sessionmaker and `config_loader`.
+1. Add `webapi/` package; wire FastAPI + uvicorn to `bot_package.database` sessionmaker and `config_loader`.
 2. Decide hosting domains: `app.yourdomain.com` (mini app), `admin.yourdomain.com` (panel), `api.yourdomain.com` (or `/api` path on one domain). HTTPS is **mandatory** for Mini Apps.
 3. **Recommended now:** migrate prod DB to PostgreSQL (the code is already written for it) — two processes (bot + API) writing to one SQLite file works but Postgres removes the lock-contention risk. Add Alembic for migrations going forward (needed for `admin_audit_log` and future schema changes).
 

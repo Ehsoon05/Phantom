@@ -1,6 +1,6 @@
 """Phantom web API — serves the Telegram Mini App and the admin panel.
 
-Run with:  uvicorn api.main:app --host 0.0.0.0 --port 8000
+Run with:  uvicorn webapi.main:app --host 0.0.0.0 --port 8000
 """
 
 from contextlib import asynccontextmanager

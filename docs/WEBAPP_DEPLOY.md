@@ -4,7 +4,7 @@ Three new pieces sit alongside the bots, all sharing the bot's database:
 
 | Piece | Tech | Serves | Port (local) |
 |---|---|---|---|
-| `api/` | FastAPI | both frontends | 8000 |
+| `webapi/` | FastAPI | both frontends | 8000 |
 | `webapp/` | Next.js 16 | Telegram Mini App (users) | 3000 |
 | `admin-panel/` | React + Vite | admin SPA (static files) | — |
 
@@ -30,7 +30,7 @@ validate Mini App `initData`; `ADMIN_PASSWORD` backs admin panel logins).
 
 ```bash
 cd /opt/phantom
-./venv/bin/python -m pip install -r api/requirements.txt
+./venv/bin/python -m pip install -r webapi/requirements.txt
 
 # Mini App
 cd webapp

@@ -1,6 +1,6 @@
 """Shared test environment for API tests.
 
-Must be imported BEFORE ``api.main`` / ``bot_package.database``: the engine is
+Must be imported BEFORE ``webapi.main`` / ``bot_package.database``: the engine is
 created at import time from DB_URL. A file-backed SQLite DB is used instead of
 ``:memory:`` because each pooled aiosqlite connection to ``:memory:`` gets its
 own private database, which breaks any test exercising concurrent requests.

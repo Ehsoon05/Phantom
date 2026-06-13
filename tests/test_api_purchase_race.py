@@ -15,7 +15,7 @@ from tests import _api_test_env  # noqa: F401  (must precede api/bot imports)
 import httpx  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 
-from api.main import app  # noqa: E402
+from webapi.main import app  # noqa: E402
 from bot_package.config_loader import BotConfig  # noqa: E402
 from bot_package.database import async_session  # noqa: E402
 from bot_package.models import Config, Purchase, ShopPlan, User  # noqa: E402

@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/opt/phantom
 EnvironmentFile=/opt/phantom/.env
-ExecStart=/opt/phantom/venv/bin/python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --workers 1
+ExecStart=/opt/phantom/venv/bin/python -m uvicorn webapi.main:app --host 127.0.0.1 --port 8000 --workers 1
 Restart=always
 RestartSec=5
 
