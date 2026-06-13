@@ -1,8 +1,10 @@
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot_package.models import Transaction, User
+from bot_package.models import RialPaymentRequest, Transaction, User
 from bot_package.services.crypto_payment_service import (
     SUPPORTED_COINS,
     CryptoPaymentError,
@@ -12,6 +14,7 @@ from bot_package.services.crypto_payment_service import (
 )
 from bot_package.services.rial_payment_service import RialPaymentService
 from bot_package.services.settings_service import SettingsService
+from bot_package.services.shop_customization_service import ShopCustomizationService
 
 from ..deps import get_current_user, get_session
 from ..schemas import (
@@ -154,13 +157,24 @@ async def create_rial_request(
     if await SettingsService.rial_phone_required(session) and not body.phone_number:
         raise HTTPException(status_code=400, detail="Phone number is required")
 
+    # Only one pending rial request per user.
+    existing_pending = (
+        await session.execute(
+            select(RialPaymentRequest.id).where(
+                RialPaymentRequest.user_id == user.telegram_id,
+                RialPaymentRequest.status == "pending",
+            )
+        )
+    ).first()
+    if existing_pending is not None:
+        raise HTTPException(
+            status_code=409, detail="You already have a pending rial request awaiting confirmation."
+        )
+
     support_handle = await SettingsService.get_rial_support_handle(session)
-    request_text = (
-        f"درخواست شارژ ریالی\n"
-        f"مبلغ: {body.amount_toman:,} تومان\n"
-        f"کارت مبدا: {body.source_card}\n"
-        f"پشتیبانی: {support_handle}"
-    )
+    # Build the request exactly like the bot: a copyable support message, a
+    # fuller "direct" text stored for the admin, and the customizable
+    # rial_payment_request template shown to the user.
     request = await RialPaymentService.create_request(
         session,
         user_id=user.telegram_id,
@@ -168,14 +182,44 @@ async def create_rial_request(
         phone_number=body.phone_number,
         source_card=body.source_card,
         support_handle=support_handle,
-        request_text=request_text,
+        request_text="",
     )
+    copy_text = (
+        "سلام،\n\n"
+        f"درخواست شارژ حساب به مبلغ {body.amount_toman:,} تومان را دارم\n"
+        f"شماره کارت مبدا: {body.source_card}\n"
+        "تشکر 🙏"
+    )
+    direct_text = (
+        f"{copy_text}\n"
+        f"کد پیگیری: {request.tracking_code}\n"
+        f"آیدی عددی تلگرام: {user.telegram_id}"
+    )
+    if body.phone_number:
+        direct_text += f"\nشماره تماس: {body.phone_number}"
+    message = await ShopCustomizationService.get_message(
+        session,
+        "rial_payment_request",
+        support_handle=support_handle,
+        amount=f"{body.amount_toman:,}",
+        source_card=body.source_card,
+        tracking_code=request.tracking_code,
+        phone_number=body.phone_number or "دریافت نشد",
+        copy_text=copy_text,
+    )
+    await RialPaymentService.update_request_text(session, request, direct_text)
+
+    username = support_handle.lstrip("@")
+    send_url = f"https://t.me/{username}?text={quote(direct_text, safe='')}"
     return RialRequestOut(
         id=request.id,
         tracking_code=request.tracking_code,
         amount_toman=request.amount_toman,
         status=request.status,
         support_handle=request.support_handle,
-        request_text=request.request_text,
+        request_text=direct_text,
+        message_text=str(message),
+        copy_text=copy_text,
+        send_url=send_url,
         created_at=request.created_at,
     )

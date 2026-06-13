@@ -296,16 +296,25 @@ function RialTab() {
   });
 
   if (result) {
+    // The customizable rial_payment_request template is Markdown; strip the
+    // bold/code markers for clean display in the webview.
+    const messageText = (result.message_text ?? "").replace(/```/g, "").replace(/\*\*/g, "").trim();
+    const copyText = result.copy_text ?? result.request_text;
     return (
       <Card>
         <CardContent className="space-y-4 p-4">
           <p className="font-bold">✅ درخواست ثبت شد</p>
-          <CopyRow label="کد پیگیری" value={result.tracking_code} />
-          <p className="text-xs text-muted-foreground">
-            پس از واریز، کد پیگیری را همراه رسید برای پشتیبانی ({result.support_handle}) ارسال
-            کنید تا کیف پول شما شارژ شود.
-          </p>
-          <CopyRow label="متن آماده برای پشتیبانی" value={result.request_text} />
+          {messageText && (
+            <div className="whitespace-pre-wrap rounded-lg bg-muted p-3 text-xs leading-6">
+              {messageText}
+            </div>
+          )}
+          <CopyRow label="متن آماده برای پشتیبانی" value={copyText} />
+          {result.send_url && (
+            <Button asChild className="w-full">
+              <a href={result.send_url}>📩 ارسال به پشتیبانی</a>
+            </Button>
+          )}
           <Button variant="outline" className="w-full" onClick={() => setResult(null)}>
             درخواست جدید
           </Button>

@@ -97,11 +97,20 @@ class CryptoPaymentService:
             )
         ).scalars().all()
         active = 0
+        same_coin_pending = False
         for old in existing:
             if old.expires_at and _as_aware(old.expires_at) < now:
                 old.status = "expired"
             else:
                 active += 1
+                if old.coin == spec["coin"]:
+                    same_coin_pending = True
+        if same_coin_pending:
+            await session.commit()  # persist the expirations we just made
+            raise CryptoPaymentError(
+                f"You already have a pending {spec['coin']} payment. "
+                "Cancel it before starting a new one."
+            )
         if active >= MAX_PENDING_PER_USER:
             await session.commit()  # persist the expirations we just made
             raise CryptoPaymentError("Too many open invoices.")

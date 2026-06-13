@@ -127,6 +127,9 @@ class RialRequestOut(BaseModel):
     status: str
     support_handle: str
     request_text: str
+    message_text: str | None = None
+    copy_text: str | None = None
+    send_url: str | None = None
     created_at: datetime
 
 

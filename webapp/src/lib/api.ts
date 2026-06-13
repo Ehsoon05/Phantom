@@ -114,6 +114,9 @@ export interface RialRequest {
   status: string;
   support_handle: string;
   request_text: string;
+  message_text: string | null;
+  copy_text: string | null;
+  send_url: string | null;
   created_at: string;
 }
 
@@ -145,6 +148,18 @@ export const createRialRequest = (input: {
   api<RialRequest>("/wallet/rial/requests", {
     method: "POST",
     body: JSON.stringify(input),
+  });
+
+export interface AppliedCoupon {
+  code: string;
+  discount_type: string;
+  amount: number;
+}
+
+export const applyCoupon = (code: string) =>
+  api<AppliedCoupon>("/shop/coupons/apply", {
+    method: "POST",
+    body: JSON.stringify({ code }),
   });
 
 export const getMe = () => api<Me>("/auth/me");
