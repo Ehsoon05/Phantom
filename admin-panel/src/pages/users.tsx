@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Search } from "lucide-react";
+import { ChevronDown, ChevronUp, Search } from "lucide-react";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -15,130 +15,121 @@ import {
   toggleBlockUser,
   type AdminUser,
 } from "@/lib/api";
+import { countUsers, getUserPurchases } from "@/lib/admin-api";
 
-function UserActions({ user }: { user: AdminUser }) {
-  const queryClient = useQueryClient();
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["users"] });
+const PAGE_SIZE = 25;
 
-  const charge = useMutation({
-    mutationFn: (amount: number) => chargeUser(user.telegram_id, amount),
-    onSuccess: invalidate,
+function UserDetail({ telegramId }: { telegramId: number }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["user-purchases", telegramId],
+    queryFn: () => getUserPurchases(telegramId),
   });
-  const setBalance = useMutation({
-    mutationFn: (balance: number) => setUserBalance(user.telegram_id, balance),
-    onSuccess: invalidate,
-  });
-  const block = useMutation({
-    mutationFn: () => toggleBlockUser(user.telegram_id),
-    onSuccess: invalidate,
-  });
+  if (isLoading) return <Skeleton className="h-24 w-full" />;
+  if (!data) return null;
+  return (
+    <div className="space-y-3 border-t pt-3">
+      <div className="flex gap-4 text-sm">
+        <span>خریدها: <b>{data.total_count}</b></span>
+        <span>مجموع حجم: <b>{data.total_gb} GB</b></span>
+        <span>مجموع خرج: <b>{formatToman(data.total_spent)}</b></span>
+      </div>
+      {data.purchases.length > 0 ? (
+        <table className="w-full text-xs">
+          <thead><tr className="border-b text-right text-muted-foreground">
+            <th className="pb-1">سرویس</th><th className="pb-1">حجم</th><th className="pb-1">قیمت</th><th className="pb-1">کوپن</th><th className="pb-1">تاریخ</th>
+          </tr></thead>
+          <tbody>
+            {data.purchases.map((p) => (
+              <tr key={p.id} className="border-b last:border-0">
+                <td className="py-1">{p.service_name ?? `${p.volume_gb} گیگ`}</td>
+                <td className="py-1">{p.volume_gb} GB</td>
+                <td className="py-1">{formatToman(p.price)}</td>
+                <td className="py-1" dir="ltr">{p.coupon_code ?? "—"}</td>
+                <td className="py-1 text-muted-foreground">{new Date(p.purchased_at + "Z").toLocaleDateString("fa-IR")}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p className="text-xs text-muted-foreground">خریدی ثبت نشده.</p>
+      )}
+    </div>
+  );
+}
+
+function UserRow({ user }: { user: AdminUser }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["users"] });
+  const charge = useMutation({ mutationFn: (a: number) => chargeUser(user.telegram_id, a), onSuccess: invalidate });
+  const setBal = useMutation({ mutationFn: (b: number) => setUserBalance(user.telegram_id, b), onSuccess: invalidate });
+  const block = useMutation({ mutationFn: () => toggleBlockUser(user.telegram_id), onSuccess: invalidate });
 
   return (
-    <div className="flex flex-wrap gap-2">
-      <Button
-        size="sm"
-        variant="outline"
-        disabled={charge.isPending}
-        onClick={() => {
-          const input = prompt("مبلغ شارژ (تومان) — عدد منفی برای کسر:");
-          const amount = parseInt(input ?? "", 10);
-          if (!Number.isNaN(amount) && amount !== 0) charge.mutate(amount);
-        }}
-      >
-        شارژ کیف پول
-      </Button>
-      <Button
-        size="sm"
-        variant="outline"
-        disabled={setBalance.isPending}
-        onClick={() => {
-          const input = prompt("موجودی جدید (تومان):", String(user.wallet_balance));
-          const balance = parseInt(input ?? "", 10);
-          if (!Number.isNaN(balance) && balance >= 0) setBalance.mutate(balance);
-        }}
-      >
-        تنظیم موجودی
-      </Button>
-      <Button
-        size="sm"
-        variant={user.is_blocked ? "secondary" : "destructive"}
-        disabled={block.isPending}
-        onClick={() => {
-          if (confirm(user.is_blocked ? "رفع مسدودیت کاربر؟" : "مسدود کردن کاربر؟"))
-            block.mutate();
-        }}
-      >
-        {user.is_blocked ? "رفع مسدودی" : "مسدود"}
-      </Button>
-    </div>
+    <Card>
+      <CardContent className="space-y-3 p-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <p className="font-bold">{user.first_name}</p>
+              {user.username && <span className="text-sm text-muted-foreground" dir="ltr">@{user.username}</span>}
+              {user.is_blocked && <Badge variant="destructive">مسدود</Badge>}
+            </div>
+            <p className="text-xs text-muted-foreground" dir="ltr">ID: {user.telegram_id}</p>
+            <p className="text-sm">موجودی: <span className="font-bold">{formatToman(user.wallet_balance)}</span></p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={() => { const v = prompt("مبلغ شارژ (منفی=کسر):"); const a = parseInt(v ?? "", 10); if (!Number.isNaN(a) && a !== 0) charge.mutate(a); }}>شارژ</Button>
+            <Button size="sm" variant="outline" onClick={() => { const v = prompt("موجودی جدید:", String(user.wallet_balance)); const b = parseInt(v ?? "", 10); if (!Number.isNaN(b) && b >= 0) setBal.mutate(b); }}>تنظیم</Button>
+            <Button size="sm" variant={user.is_blocked ? "secondary" : "destructive"} onClick={() => { if (confirm(user.is_blocked ? "رفع مسدودیت؟" : "مسدود کردن؟")) block.mutate(); }}>{user.is_blocked ? "رفع مسدودی" : "مسدود"}</Button>
+            <Button size="sm" variant="ghost" onClick={() => setOpen((o) => !o)}>{open ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />} خریدها</Button>
+          </div>
+        </div>
+        {open && <UserDetail telegramId={user.telegram_id} />}
+      </CardContent>
+    </Card>
   );
 }
 
 export function UsersPage() {
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
+
   const { data: users, isLoading } = useQuery({
-    queryKey: ["users", search],
-    queryFn: () => getUsers(search || undefined),
+    queryKey: ["users", search, page],
+    queryFn: () => getUsers(search || undefined, PAGE_SIZE, page * PAGE_SIZE),
   });
+  const { data: count } = useQuery({ queryKey: ["users-count", search], queryFn: () => countUsers(search || undefined) });
+
+  const total = count?.total ?? 0;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-bold">کاربران</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold">کاربران</h1>
+        <span className="text-sm text-muted-foreground">{total.toLocaleString("fa-IR")} کاربر</span>
+      </div>
 
-      <form
-        className="flex max-w-md gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setSearch(query.trim());
-        }}
-      >
-        <Input
-          placeholder="جستجو: شناسه تلگرام، نام کاربری یا نام…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <Button type="submit" size="icon" variant="secondary">
-          <Search className="size-4" />
-        </Button>
+      <form className="flex max-w-md gap-2" onSubmit={(e) => { e.preventDefault(); setPage(0); setSearch(query.trim()); }}>
+        <Input placeholder="جستجو: شناسه، نام کاربری یا نام…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <Button type="submit" size="icon" variant="secondary"><Search className="size-4" /></Button>
       </form>
 
       {isLoading ? (
-        <div className="space-y-3">
-          {[...Array(5)].map((_, i) => (
-            <Skeleton key={i} className="h-24 w-full rounded-xl" />
-          ))}
-        </div>
+        <div className="space-y-3">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-24 w-full rounded-xl" />)}</div>
       ) : !users?.length ? (
         <p className="py-16 text-center text-sm text-muted-foreground">کاربری یافت نشد.</p>
       ) : (
-        <div className="space-y-3">
-          {users.map((user) => (
-            <Card key={user.telegram_id}>
-              <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <p className="font-bold">{user.first_name}</p>
-                    {user.username && (
-                      <span className="text-sm text-muted-foreground" dir="ltr">
-                        @{user.username}
-                      </span>
-                    )}
-                    {user.is_blocked && <Badge variant="destructive">مسدود</Badge>}
-                  </div>
-                  <p className="text-xs text-muted-foreground" dir="ltr">
-                    ID: {user.telegram_id}
-                  </p>
-                  <p className="text-sm">
-                    موجودی: <span className="font-bold">{formatToman(user.wallet_balance)}</span>
-                  </p>
-                </div>
-                <UserActions user={user} />
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <div className="space-y-3">{users.map((u) => <UserRow key={u.telegram_id} user={u} />)}</div>
       )}
+
+      <div className="flex items-center justify-center gap-3">
+        <Button size="sm" variant="outline" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>قبلی</Button>
+        <span className="text-sm text-muted-foreground">صفحه {(page + 1).toLocaleString("fa-IR")} از {pages.toLocaleString("fa-IR")}</span>
+        <Button size="sm" variant="outline" disabled={page + 1 >= pages} onClick={() => setPage((p) => p + 1)}>بعدی</Button>
+      </div>
     </div>
   );
 }

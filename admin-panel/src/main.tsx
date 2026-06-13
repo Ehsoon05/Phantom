@@ -5,9 +5,15 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { Layout } from "@/components/layout";
 import { getToken } from "@/lib/api";
+import { AdminsPage } from "@/pages/admins";
+import { BroadcastPage } from "@/pages/broadcast";
+import { CatalogPage } from "@/pages/catalog";
 import { DashboardPage } from "@/pages/dashboard";
 import { LoginPage } from "@/pages/login";
 import { PaymentsPage } from "@/pages/payments";
+import { PromotionsPage } from "@/pages/promotions";
+import { SettingsPage } from "@/pages/settings";
+import { ShopPage } from "@/pages/shop";
 import { UsersPage } from "@/pages/users";
 
 import "./index.css";
@@ -38,6 +44,12 @@ createRoot(document.getElementById("root")!).render(
             <Route index element={<DashboardPage />} />
             <Route path="users" element={<UsersPage />} />
             <Route path="payments" element={<PaymentsPage />} />
+            <Route path="catalog" element={<CatalogPage />} />
+            <Route path="promotions" element={<PromotionsPage />} />
+            <Route path="shop" element={<ShopPage />} />
+            <Route path="settings" element={<SettingsPage />} />
+            <Route path="broadcast" element={<BroadcastPage />} />
+            <Route path="admins" element={<AdminsPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

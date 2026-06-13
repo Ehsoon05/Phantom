@@ -79,7 +79,24 @@ async def user_purchases(
     session: AsyncSession = Depends(get_session),
     _admin: Admin = Depends(require_permission("users")),
 ):
-    return await UserService.get_user_purchase_summary(session, telegram_id)
+    summary = await UserService.get_user_purchase_summary(session, telegram_id, limit=50)
+    return {
+        "total_count": summary["total_count"],
+        "total_gb": summary["total_gb"],
+        "total_spent": summary["total_spent"],
+        "purchases": [
+            {
+                "id": p.id,
+                "volume_gb": p.volume_gb,
+                "category_key": p.category_key,
+                "price": p.price,
+                "service_name": p.service_name,
+                "coupon_code": p.coupon_code,
+                "purchased_at": p.purchased_at,
+            }
+            for p in summary["purchases"]
+        ],
+    }
 
 
 @router.post("/{telegram_id}/charge", response_model=AdminUserOut)

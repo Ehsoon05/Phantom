@@ -138,8 +138,11 @@ export const getStats = () => api<Stats>("/admin/stats");
 export const getRevenueDaily = (days = 30) =>
   api<RevenuePoint[]>(`/admin/stats/revenue-daily?days=${days}`);
 export const getStock = () => api<StockRow[]>("/admin/stats/stock");
-export const getUsers = (q?: string) =>
-  api<AdminUser[]>(`/admin/users${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+export const getUsers = (q?: string, limit = 25, offset = 0) => {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (q) params.set("q", q);
+  return api<AdminUser[]>(`/admin/users?${params.toString()}`);
+};
 export const chargeUser = (telegramId: number, amount: number) =>
   api<AdminUser>(`/admin/users/${telegramId}/charge`, {
     method: "POST",
