@@ -117,6 +117,22 @@ async def get_crypto_invoice(
     return _invoice_out(invoice)
 
 
+@router.post("/crypto/invoices/{invoice_id}/cancel", response_model=CryptoInvoiceOut)
+async def cancel_crypto_invoice(
+    invoice_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    invoice = await CryptoPaymentService.get_invoice(session, invoice_id)
+    if invoice is None or invoice.user_id != user.telegram_id:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if invoice.status != "pending":
+        raise HTTPException(status_code=409, detail="Only pending payments can be cancelled")
+    invoice.status = "cancelled"
+    await session.commit()
+    return _invoice_out(invoice)
+
+
 @router.get("/crypto/invoices", response_model=list[CryptoInvoiceOut])
 async def list_crypto_invoices(
     session: AsyncSession = Depends(get_session),

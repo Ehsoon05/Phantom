@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ApiError,
+  cancelCryptoInvoice,
   createCryptoInvoice,
   createRialRequest,
   formatToman,
@@ -23,6 +24,7 @@ import {
   getMe,
   getPaymentMethods,
   getTransactions,
+  tonTransferLink,
   type CryptoInvoice,
   type RialRequest,
 } from "@/lib/api";
@@ -96,6 +98,15 @@ function InvoiceView({ invoice, onClose }: { invoice: CryptoInvoice; onClose: ()
   });
   const status = STATUS_LABELS[live.status] ?? STATUS_LABELS.pending;
   const settled = live.status === "credited";
+  const tonUrl = tonTransferLink(live);
+
+  const cancel = useMutation({
+    mutationFn: () => cancelCryptoInvoice(live.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["crypto-invoices"] });
+      onClose();
+    },
+  });
 
   useEffect(() => {
     if (settled) {
@@ -142,11 +153,30 @@ function InvoiceView({ invoice, onClose }: { invoice: CryptoInvoice; onClose: ()
                 ⚠️ حتماً ممو را در تراکنش وارد کنید، در غیر این صورت پرداخت شناسایی نمی‌شود.
               </p>
             )}
+            {tonUrl && (
+              <Button asChild className="w-full">
+                <a href={tonUrl}>🌐 باز کردن کیف TON (پرکردن خودکار)</a>
+              </Button>
+            )}
           </>
         )}
-        <Button variant="outline" className="w-full" onClick={onClose}>
-          بازگشت
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" className="flex-1" onClick={onClose}>
+            بازگشت
+          </Button>
+          {live.status === "pending" && (
+            <Button
+              variant="destructive"
+              className="flex-1"
+              disabled={cancel.isPending}
+              onClick={() => {
+                if (confirm("لغو این پرداخت؟")) cancel.mutate();
+              }}
+            >
+              {cancel.isPending ? "در حال لغو…" : "لغو پرداخت"}
+            </Button>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

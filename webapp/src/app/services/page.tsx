@@ -6,7 +6,7 @@ import { AuthGate } from "@/components/auth-gate";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatToman, getPurchases } from "@/lib/api";
+import { formatToman, getPurchases, happLink, v2rayNgLink } from "@/lib/api";
 
 function ServicesContent() {
   const { data: purchases, isLoading } = useQuery({
@@ -47,14 +47,24 @@ function ServicesContent() {
               {purchase.volume_gb} گیگابایت · {formatToman(purchase.price)}
             </p>
             {purchase.sub_link && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full"
-                onClick={() => navigator.clipboard.writeText(purchase.sub_link!)}
-              >
-                کپی لینک اشتراک
-              </Button>
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <Button asChild size="sm">
+                    <a href={happLink(purchase.sub_link)}>افزودن به Happ</a>
+                  </Button>
+                  <Button asChild size="sm" variant="secondary">
+                    <a href={v2rayNgLink(purchase.sub_link)}>افزودن به V2rayNG</a>
+                  </Button>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => navigator.clipboard.writeText(purchase.sub_link!)}
+                >
+                  کپی لینک اشتراک
+                </Button>
+              </div>
             )}
           </CardContent>
         </Card>

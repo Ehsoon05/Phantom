@@ -130,6 +130,8 @@ export const getTransactions = () => api<Transaction[]>("/wallet/transactions");
 export const getCryptoInvoices = () => api<CryptoInvoice[]>("/wallet/crypto/invoices");
 export const getCryptoInvoice = (id: number) =>
   api<CryptoInvoice>(`/wallet/crypto/invoices/${id}`);
+export const cancelCryptoInvoice = (id: number) =>
+  api<CryptoInvoice>(`/wallet/crypto/invoices/${id}/cancel`, { method: "POST" });
 export const createCryptoInvoice = (coinKey: string, amountToman: number) =>
   api<CryptoInvoice>("/wallet/crypto/invoices", {
     method: "POST",
@@ -157,3 +159,18 @@ export const buyPlan = (planId: number, idempotencyKey: string) =>
 
 export const formatToman = (value: number) =>
   `${value.toLocaleString("fa-IR")} تومان`;
+
+// --- Deep links --------------------------------------------------------------
+
+/** ton://transfer link that pre-fills address, exact nanoton amount, and memo —
+ *  mirrors the bot's "Open TON wallet" button. Null for non-native-TON invoices. */
+export function tonTransferLink(invoice: CryptoInvoice): string | null {
+  if (invoice.coin !== "TON" || invoice.network !== "TON") return null;
+  const nano = Math.round(parseFloat(invoice.expected_crypto) * 1e9);
+  let url = `ton://transfer/${invoice.deposit_address}?amount=${nano}`;
+  if (invoice.memo) url += `&text=${encodeURIComponent(invoice.memo)}`;
+  return url;
+}
+
+export const happLink = (sub: string) => `happ://add/${sub}`;
+export const v2rayNgLink = (sub: string) => `v2rayng://install-sub?url=${encodeURIComponent(sub)}`;
