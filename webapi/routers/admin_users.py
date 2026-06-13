@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot_package.models import Admin, User
@@ -40,6 +40,23 @@ async def list_users(
         stmt = stmt.where(or_(*filters))
     users = (await session.execute(stmt)).scalars().all()
     return [_user_out(u) for u in users]
+
+
+@router.get("/count")
+async def count_users(
+    q: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("users")),
+):
+    stmt = select(func.count(User.id))
+    if q:
+        clean = q.lstrip("@")
+        filters = [User.username.ilike(f"%{clean}%"), User.first_name.ilike(f"%{clean}%")]
+        if clean.isdigit():
+            filters.append(User.telegram_id == int(clean))
+        stmt = stmt.where(or_(*filters))
+    total = (await session.execute(stmt)).scalar_one()
+    return {"total": total}
 
 
 @router.get("/{telegram_id}", response_model=AdminUserOut)

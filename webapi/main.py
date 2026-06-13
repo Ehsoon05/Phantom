@@ -14,7 +14,11 @@ from bot_package.models import Base
 from .config import ApiConfig
 from .routers import (
     admin_auth,
+    admin_catalog,
+    admin_ops,
     admin_payments,
+    admin_promotions,
+    admin_settings,
     admin_stats,
     admin_users,
     referrals,
@@ -51,6 +55,10 @@ app.include_router(admin_auth.router, prefix=API_PREFIX)
 app.include_router(admin_stats.router, prefix=API_PREFIX)
 app.include_router(admin_users.router, prefix=API_PREFIX)
 app.include_router(admin_payments.router, prefix=API_PREFIX)
+app.include_router(admin_catalog.router, prefix=API_PREFIX)
+app.include_router(admin_promotions.router, prefix=API_PREFIX)
+app.include_router(admin_settings.router, prefix=API_PREFIX)
+app.include_router(admin_ops.router, prefix=API_PREFIX)
 
 
 @app.get("/healthz")

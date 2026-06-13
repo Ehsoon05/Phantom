@@ -82,3 +82,9 @@ def require_permission(permission: str):
         )
 
     return checker
+
+
+async def require_owner(admin: Admin = Depends(get_current_admin)) -> Admin:
+    if not admin.is_owner:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Owner only")
+    return admin

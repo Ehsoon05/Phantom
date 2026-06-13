@@ -1,0 +1,337 @@
+"""Admin: inventory, shop plans/categories/prices, messages, buttons."""
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from bot_package.models import Admin, Config, ShopButton, ShopMessage, ShopPlan, ShopPlanCategory
+from bot_package.services.inventory_service import InventoryService
+from bot_package.services.price_service import PriceService
+from bot_package.services.shop_customization_service import ShopCustomizationService
+
+from ..deps import get_session, require_permission
+
+router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+# --- Inventory ---------------------------------------------------------------
+
+class ConfigsAddRequest(BaseModel):
+    volume_gb: int = Field(gt=0)
+    category_key: str = "default"
+    links: list[str] = Field(min_length=1)
+
+
+@router.post("/inventory/configs")
+async def add_configs(
+    body: ConfigsAddRequest,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("inventory")),
+):
+    added = await InventoryService.add_configs(session, body.volume_gb, body.links, body.category_key)
+    await session.commit()
+    return {"added": added}
+
+
+@router.get("/inventory/stock")
+async def stock(
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("inventory")),
+):
+    rows = await InventoryService.get_stock_status(session)
+    return [
+        {"category_key": c, "volume_gb": v, "title": t, "available": n} for c, v, t, n in rows
+    ]
+
+
+# --- Plans -------------------------------------------------------------------
+
+def _plan_out(plan: ShopPlan, stock_count: int | None = None) -> dict:
+    return {
+        "id": plan.id,
+        "volume_gb": plan.volume_gb,
+        "category_key": plan.category_key,
+        "title": plan.title,
+        "price": plan.price,
+        "emoji": plan.emoji,
+        "style": plan.style,
+        "display_order": plan.display_order,
+        "is_active": plan.is_active,
+        "stock": stock_count,
+    }
+
+
+class PlanUpsertRequest(BaseModel):
+    volume_gb: int = Field(gt=0)
+    title: str
+    price: int | None = None
+    category_key: str = "default"
+    emoji: str | None = "📦"
+    style: str | None = None
+
+
+class PlanUpdateRequest(BaseModel):
+    title: str | None = None
+    price: int | None = None
+    emoji: str | None = None
+    style: str | None = None
+    category_key: str | None = None
+    display_order: int | None = None
+    is_active: bool | None = None
+
+
+@router.get("/plans")
+async def list_plans(
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("prices")),
+):
+    plans = await ShopCustomizationService.list_plans(session, active_only=False)
+    stock_rows = (
+        await session.execute(
+            select(Config.category_key, Config.volume_gb, func.count(Config.id))
+            .where(Config.is_sold.is_(False))
+            .group_by(Config.category_key, Config.volume_gb)
+        )
+    ).all()
+    stock = {(c, v): n for c, v, n in stock_rows}
+    return [_plan_out(p, stock.get((p.category_key, p.volume_gb), 0)) for p in plans]
+
+
+@router.post("/plans")
+async def upsert_plan(
+    body: PlanUpsertRequest,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("prices")),
+):
+    plan = await ShopCustomizationService.upsert_plan(
+        session,
+        volume_gb=body.volume_gb,
+        title=body.title,
+        price=body.price,
+        category_key=body.category_key,
+        emoji=body.emoji,
+        style=body.style or "success",
+    )
+    return _plan_out(plan)
+
+
+@router.patch("/plans/{plan_id}")
+async def update_plan(
+    plan_id: int,
+    body: PlanUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("prices")),
+):
+    values = {k: v for k, v in body.model_dump(exclude_none=True).items()}
+    plan = await ShopCustomizationService.update_plan(session, plan_id, **values)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return _plan_out(plan)
+
+
+@router.delete("/plans/{plan_id}")
+async def delete_plan(
+    plan_id: int,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("prices")),
+):
+    result = await ShopCustomizationService.delete_plan(session, plan_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return {"deleted": True}
+
+
+# --- Categories --------------------------------------------------------------
+
+def _category_out(c: ShopPlanCategory) -> dict:
+    return {
+        "id": c.id,
+        "key": c.key,
+        "title": c.title,
+        "emoji": c.emoji,
+        "style": c.style,
+        "display_order": c.display_order,
+        "is_active": c.is_active,
+    }
+
+
+class CategoryUpsertRequest(BaseModel):
+    key: str
+    title: str | None = None
+
+
+class CategoryUpdateRequest(BaseModel):
+    title: str | None = None
+    emoji: str | None = None
+    style: str | None = None
+    display_order: int | None = None
+    is_active: bool | None = None
+
+
+@router.get("/categories")
+async def list_categories(
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("prices")),
+):
+    return [_category_out(c) for c in await ShopCustomizationService.list_categories(session)]
+
+
+@router.post("/categories")
+async def upsert_category(
+    body: CategoryUpsertRequest,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("prices")),
+):
+    category = await ShopCustomizationService.ensure_category(session, body.key, body.title)
+    await session.commit()
+    return _category_out(category)
+
+
+@router.patch("/categories/{key}")
+async def update_category(
+    key: str,
+    body: CategoryUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("prices")),
+):
+    category = await ShopCustomizationService.update_category(
+        session, key, **body.model_dump(exclude_none=True)
+    )
+    if category is None:
+        raise HTTPException(status_code=404, detail="Category not found")
+    return _category_out(category)
+
+
+@router.delete("/categories/{key}")
+async def delete_category(
+    key: str,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("prices")),
+):
+    ok = await ShopCustomizationService.delete_category(session, key)
+    if not ok:
+        raise HTTPException(status_code=409, detail="Category not found or still in use")
+    return {"deleted": True}
+
+
+# --- Prices (legacy + plan price) -------------------------------------------
+
+class PriceUpdateRequest(BaseModel):
+    price: int = Field(ge=0)
+
+
+@router.post("/plans/{plan_id}/price")
+async def set_plan_price(
+    plan_id: int,
+    body: PriceUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("prices")),
+):
+    plan = await ShopCustomizationService.update_plan(session, plan_id, price=body.price)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return _plan_out(plan)
+
+
+# --- Shop messages -----------------------------------------------------------
+
+def _message_out(m: ShopMessage) -> dict:
+    return {"key": m.key, "text": m.text, "parse_mode": m.parse_mode, "is_active": m.is_active}
+
+
+class MessageUpdateRequest(BaseModel):
+    text: str
+    parse_mode: str = "Markdown"
+
+
+@router.get("/shop/messages")
+async def list_messages(
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("shop")),
+):
+    return [_message_out(m) for m in await ShopCustomizationService.list_messages(session)]
+
+
+@router.put("/shop/messages/{key}")
+async def update_message(
+    key: str,
+    body: MessageUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("shop")),
+):
+    message = await ShopCustomizationService.update_message(session, key, body.text, body.parse_mode)
+    if message is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return _message_out(message)
+
+
+# --- Shop buttons ------------------------------------------------------------
+
+def _button_out(b: ShopButton) -> dict:
+    return {
+        "id": b.id,
+        "menu": b.menu,
+        "action": b.action,
+        "text": b.text,
+        "emoji": b.emoji,
+        "style": b.style,
+        "row": b.row,
+        "col": b.col,
+        "is_enabled": b.is_enabled,
+    }
+
+
+class ButtonUpdateRequest(BaseModel):
+    text: str | None = None
+    emoji: str | None = None
+    style: str | None = None
+    row: int | None = None
+    col: int | None = None
+    is_enabled: bool | None = None
+
+
+@router.get("/shop/buttons")
+async def list_buttons(
+    menu: str | None = None,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("shop")),
+):
+    return [_button_out(b) for b in await ShopCustomizationService.list_buttons(session, menu)]
+
+
+@router.patch("/shop/buttons/{button_id}")
+async def update_button(
+    button_id: int,
+    body: ButtonUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("shop")),
+):
+    button = await ShopCustomizationService.update_button(
+        session, button_id, **body.model_dump(exclude_none=True)
+    )
+    if button is None:
+        raise HTTPException(status_code=404, detail="Button not found")
+    return _button_out(button)
+
+
+@router.delete("/shop/buttons/{button_id}")
+async def delete_button(
+    button_id: int,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("shop")),
+):
+    ok = await ShopCustomizationService.delete_button(session, button_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Button not found")
+    await session.commit()
+    return {"deleted": True}
+
+
+@router.post("/shop/reset")
+async def reset_shop_defaults(
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("shop")),
+):
+    await ShopCustomizationService.reset_defaults(session)
+    return {"reset": True}
