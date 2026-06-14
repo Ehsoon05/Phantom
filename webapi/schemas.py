@@ -135,6 +135,9 @@ class RialRequestOut(BaseModel):
 
 class ReferralsOut(BaseModel):
     referral_code: str
+    referral_link: str
+    share_text: str
+    message_text: str
     total_referrals: int
     rules: list[dict]
 

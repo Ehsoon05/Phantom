@@ -175,6 +175,29 @@ export interface AppliedCoupon {
   amount: number;
 }
 
+export interface ReferralRule {
+  id: number;
+  title: string;
+  qualification_type: string;
+  qualification_label: string;
+  required_count: number;
+  target_count: number;
+  is_repeatable: boolean;
+  reward_type: "wallet" | "service";
+  wallet_amount: number | null;
+  reward_text: string;
+  qualified_count: number;
+}
+
+export interface Referrals {
+  referral_code: string;
+  referral_link: string;
+  share_text: string;
+  message_text: string;
+  total_referrals: number;
+  rules: ReferralRule[];
+}
+
 export const applyCoupon = (code: string) =>
   api<AppliedCoupon>("/shop/coupons/apply", {
     method: "POST",
@@ -182,6 +205,7 @@ export const applyCoupon = (code: string) =>
   });
 
 export const getMe = () => api<Me>("/auth/me");
+export const getReferrals = () => api<Referrals>("/referrals");
 export const getPlans = () => api<Category[]>("/shop/plans");
 export const getPurchases = () => api<Purchase[]>("/shop/purchases");
 export const buyPlan = (planId: number, idempotencyKey: string) =>

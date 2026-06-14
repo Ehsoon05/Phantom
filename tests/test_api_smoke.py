@@ -66,6 +66,19 @@ async def test_auth_me_and_shop_flow(client):
     assert body["wallet_balance"] == 0
     assert body["referral_code"]
 
+    referrals = await client.get("/api/v1/referrals", headers=headers)
+    assert referrals.status_code == 200
+    referral_body = referrals.json()
+    assert referral_body["referral_code"] == body["referral_code"]
+    assert referral_body["referral_link"] == (
+        f"https://t.me/{BotConfig.MAIN_BOT_USERNAME}"
+        f"?start=ref_{body['referral_code']}"
+    )
+    assert referral_body["referral_link"] in referral_body["message_text"]
+    assert referral_body["share_text"]
+    assert referral_body["total_referrals"] == 0
+    assert isinstance(referral_body["rules"], list)
+
     plans = await client.get("/api/v1/shop/plans", headers=headers)
     assert plans.status_code == 200
     assert isinstance(plans.json(), list)

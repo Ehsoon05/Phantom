@@ -304,14 +304,15 @@ async def referral_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"**{qualified}/{target}** نفر معتبر ← {reward}"
                 )
             text = f"{text}{''.join(line + chr(10) for line in progress_lines).rstrip()}"
+        share_text = await ShopCustomizationService.get_message(
+            session,
+            "referral_share_text",
+            link=link,
+        )
         followup = await ShopCustomizationService.get_message(session, "referral_followup")
         keyboard = await ShopCustomizationService.main_menu_keyboard(session)
 
-    share_text = (
-        "سلام، من از فانتوم VPN استفاده می‌کنم. "
-        "از این لینک وارد شو و سرویس‌هات رو راحت‌تر تهیه کن:"
-    )
-    share_url = f"https://t.me/share/url?url={quote(link)}&text={quote(share_text)}"
+    share_url = f"https://t.me/share/url?url={quote(link)}&text={quote(str(share_text))}"
     await update.message.reply_text(
         text,
         reply_markup=referral_share_keyboard(share_url),

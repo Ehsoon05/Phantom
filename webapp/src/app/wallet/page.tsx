@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ApiError,
+  applyCoupon,
   cancelCryptoInvoice,
   cancelRialRequest,
   createCryptoInvoice,
@@ -27,6 +28,7 @@ import {
   getRialRequests,
   getTransactions,
   tonTransferLink,
+  type AppliedCoupon,
   type CryptoInvoice,
   type RialRequest,
 } from "@/lib/api";
@@ -471,6 +473,66 @@ function TransactionsList() {
   );
 }
 
+function CouponCard() {
+  const queryClient = useQueryClient();
+  const [code, setCode] = useState("");
+  const [applied, setApplied] = useState<AppliedCoupon | null>(null);
+  const coupon = useMutation({
+    mutationFn: () => applyCoupon(code.trim()),
+    onSuccess: (result) => {
+      setApplied(result);
+      setCode("");
+      getWebApp()?.HapticFeedback?.notificationOccurred("success");
+      queryClient.invalidateQueries({ queryKey: ["plans"] });
+    },
+    onError: () => getWebApp()?.HapticFeedback?.notificationOccurred("error"),
+  });
+
+  return (
+    <Card>
+      <CardContent className="space-y-3 p-4">
+        <div>
+          <p className="text-sm font-bold">🎁 کد تخفیف</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            کد را اینجا فعال کنید؛ تخفیف در بخش خرید سرویس اعمال می‌شود.
+          </p>
+        </div>
+        {applied ? (
+          <div className="rounded-lg bg-primary/10 p-3 text-sm text-primary">
+            کد <span className="font-bold" dir="ltr">{applied.code}</span> فعال شد:{" "}
+            {applied.discount_type === "percent"
+              ? `${applied.amount.toLocaleString("fa-IR")}٪`
+              : formatToman(applied.amount)}{" "}
+            تخفیف
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <Input
+              dir="ltr"
+              className="text-center"
+              placeholder="کد تخفیف"
+              value={code}
+              onChange={(event) => setCode(event.target.value)}
+            />
+            <Button
+              variant="secondary"
+              disabled={!code.trim() || coupon.isPending}
+              onClick={() => coupon.mutate()}
+            >
+              {coupon.isPending ? "…" : "اعمال"}
+            </Button>
+          </div>
+        )}
+        {coupon.error && (
+          <p className="text-xs text-destructive">
+            {coupon.error instanceof ApiError ? coupon.error.message : "کد تخفیف معتبر نیست"}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function WalletContent() {
   const { data: me, isLoading } = useQuery({ queryKey: ["me"], queryFn: getMe });
   return (
@@ -489,6 +551,8 @@ function WalletContent() {
           )}
         </CardContent>
       </Card>
+
+      <CouponCard />
 
       <Tabs defaultValue="crypto">
         <TabsList className="w-full">

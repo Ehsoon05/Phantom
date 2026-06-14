@@ -7,7 +7,6 @@ import { AuthGate } from "@/components/auth-gate";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import {
   Sheet,
   SheetContent,
@@ -18,12 +17,10 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   ApiError,
-  applyCoupon,
   buyPlan,
   formatToman,
   getMe,
   getPlans,
-  type AppliedCoupon,
   type Plan,
   type Purchase,
 } from "@/lib/api";
@@ -71,19 +68,6 @@ function ShopContent() {
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: getMe });
   const [selected, setSelected] = useState<Plan | null>(null);
   const [result, setResult] = useState<Purchase | null>(null);
-  const [couponCode, setCouponCode] = useState("");
-  const [applied, setApplied] = useState<AppliedCoupon | null>(null);
-
-  const coupon = useMutation({
-    mutationFn: () => applyCoupon(couponCode.trim()),
-    onSuccess: (c) => {
-      setApplied(c);
-      setCouponCode("");
-      getWebApp()?.HapticFeedback?.notificationOccurred("success");
-      queryClient.invalidateQueries({ queryKey: ["plans"] });
-    },
-    onError: () => getWebApp()?.HapticFeedback?.notificationOccurred("error"),
-  });
 
   const purchase = useMutation({
     mutationFn: (plan: Plan) => buyPlan(plan.id, crypto.randomUUID()),
@@ -117,44 +101,6 @@ function ShopContent() {
   return (
     <div className="space-y-6">
       <h1 className="text-lg font-bold">🛍 خرید سرویس</h1>
-
-      <Card>
-        <CardContent className="space-y-2 p-4">
-          {applied ? (
-            <p className="text-sm text-green-600">
-              ✅ کوپن <span dir="ltr" className="font-bold">{applied.code}</span> اعمال شد —{" "}
-              {applied.discount_type === "percent"
-                ? `${applied.amount}%`
-                : formatToman(applied.amount)}{" "}
-              تخفیف
-            </p>
-          ) : (
-            <>
-              <div className="flex gap-2">
-                <Input
-                  dir="ltr"
-                  className="text-center"
-                  placeholder="کد تخفیف"
-                  value={couponCode}
-                  onChange={(e) => setCouponCode(e.target.value)}
-                />
-                <Button
-                  variant="secondary"
-                  disabled={!couponCode.trim() || coupon.isPending}
-                  onClick={() => coupon.mutate()}
-                >
-                  {coupon.isPending ? "…" : "اعمال"}
-                </Button>
-              </div>
-              {coupon.error && (
-                <p className="text-xs text-destructive">
-                  {coupon.error instanceof ApiError ? coupon.error.message : "کد نامعتبر است"}
-                </p>
-              )}
-            </>
-          )}
-        </CardContent>
-      </Card>
 
       {categories?.map((category) => (
         <section key={category.key} className="space-y-3">
@@ -198,9 +144,21 @@ function ShopContent() {
             </div>
             {errorMessage && <p className="text-sm text-destructive">{errorMessage}</p>}
             {insufficient ? (
-              <Button asChild className="w-full" variant="secondary">
-                <a href="/wallet">موجودی کافی نیست — افزایش موجودی</a>
-              </Button>
+              <div className="space-y-3">
+                <div
+                  role="alert"
+                  className="rounded-lg border border-destructive/30 bg-destructive/10 p-3"
+                >
+                  <p className="text-sm font-bold text-destructive">موجودی کیف پول کافی نیست</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    برای تکمیل خرید، حداقل{" "}
+                    {formatToman(Math.max(0, price - balance))} دیگر به کیف پول اضافه کنید.
+                  </p>
+                </div>
+                <Button asChild className="min-h-12 w-full text-base">
+                  <a href="/wallet">افزایش موجودی کیف پول</a>
+                </Button>
+              </div>
             ) : (
               <Button
                 className="w-full"
