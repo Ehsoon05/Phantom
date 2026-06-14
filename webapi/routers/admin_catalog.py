@@ -21,8 +21,9 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 # --- Inventory ---------------------------------------------------------------
 
 class ConfigsAddRequest(BaseModel):
-    volume_gb: int = Field(gt=0)
+    volume_gb: int = Field(ge=0)
     category_key: str = "default"
+    plan_id: int | None = None
     links: list[str] = Field(min_length=1)
 
 
@@ -43,6 +44,7 @@ def _config_name(sub_link: str) -> str:
 def _config_out(config: Config) -> dict:
     return {
         "id": config.id,
+        "plan_id": config.shop_plan_id,
         "volume_gb": config.volume_gb,
         "category_key": config.category_key,
         "name": _config_name(config.sub_link),
@@ -58,7 +60,20 @@ async def add_configs(
     session: AsyncSession = Depends(get_session),
     _admin: Admin = Depends(require_permission("inventory")),
 ):
-    added = await InventoryService.add_configs(session, body.volume_gb, body.links, body.category_key)
+    plan = await ShopCustomizationService.get_plan(session, body.plan_id) if body.plan_id else None
+    if plan is None and body.plan_id is None:
+        plan = await ShopCustomizationService.get_plan_by_product(
+            session, body.volume_gb, body.category_key
+        )
+    if body.plan_id and plan is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    added = await InventoryService.add_configs(
+        session,
+        plan.volume_gb if plan else body.volume_gb,
+        body.links,
+        plan.category_key if plan else body.category_key,
+        plan.id if plan else None,
+    )
     await session.commit()
     return {"added": added}
 
@@ -70,7 +85,8 @@ async def stock(
 ):
     rows = await InventoryService.get_stock_status(session)
     return [
-        {"category_key": c, "volume_gb": v, "title": t, "available": n} for c, v, t, n in rows
+        {"plan_id": plan_id, "category_key": c, "volume_gb": v, "title": t, "available": n}
+        for plan_id, c, v, t, n in rows
     ]
 
 
@@ -150,7 +166,7 @@ def _plan_out(plan: ShopPlan, stock_count: int | None = None) -> dict:
 
 
 class PlanUpsertRequest(BaseModel):
-    volume_gb: int = Field(gt=0)
+    volume_gb: int = Field(ge=0)
     title: str
     price: int | None = None
     category_key: str = "default"
@@ -174,15 +190,9 @@ async def list_plans(
     _admin: Admin = Depends(require_permission("prices")),
 ):
     plans = await ShopCustomizationService.list_plans(session, active_only=False)
-    stock_rows = (
-        await session.execute(
-            select(Config.category_key, Config.volume_gb, func.count(Config.id))
-            .where(Config.is_sold.is_(False))
-            .group_by(Config.category_key, Config.volume_gb)
-        )
-    ).all()
-    stock = {(c, v): n for c, v, n in stock_rows}
-    return [_plan_out(p, stock.get((p.category_key, p.volume_gb), 0)) for p in plans]
+    stock_rows = await InventoryService.get_stock_status(session)
+    stock = {plan_id: count for plan_id, _c, _v, _t, count in stock_rows}
+    return [_plan_out(p, stock.get(p.id, 0)) for p in plans]
 
 
 @router.post("/plans")
@@ -191,7 +201,7 @@ async def upsert_plan(
     session: AsyncSession = Depends(get_session),
     _admin: Admin = Depends(require_permission("prices")),
 ):
-    plan = await ShopCustomizationService.upsert_plan(
+    plan = await ShopCustomizationService.create_plan(
         session,
         volume_gb=body.volume_gb,
         title=body.title,

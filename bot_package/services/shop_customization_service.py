@@ -6,7 +6,7 @@ import html
 import re
 from string import Formatter
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
@@ -739,7 +739,13 @@ class ShopCustomizationService:
     @staticmethod
     async def get_plan_by_product(session: AsyncSession, volume_gb: int, category_key: str) -> ShopPlan | None:
         result = await session.execute(
-            select(ShopPlan).where(ShopPlan.volume_gb == volume_gb, ShopPlan.category_key == _clean_key(category_key))
+            select(ShopPlan)
+            .where(
+                ShopPlan.volume_gb == volume_gb,
+                ShopPlan.category_key == _clean_key(category_key),
+            )
+            .order_by(ShopPlan.id)
+            .limit(1)
         )
         return result.scalar_one_or_none()
 
@@ -793,6 +799,35 @@ class ShopCustomizationService:
         return plan
 
     @staticmethod
+    async def create_plan(
+        session: AsyncSession,
+        *,
+        volume_gb: int,
+        title: str,
+        price: int | None = None,
+        category_key: str = "default",
+        emoji: str | None = "📦",
+        style: str | None = STYLE_SUCCESS,
+    ) -> ShopPlan:
+        category_key = _clean_key(category_key)
+        await ShopCustomizationService.ensure_category(session, category_key)
+        current = await ShopCustomizationService.list_plans(session)
+        plan = ShopPlan(
+            volume_gb=volume_gb,
+            title=title,
+            price=price,
+            emoji=emoji,
+            premium_emoji_id=SHOP_BUTTON_CUSTOM_EMOJI_ID,
+            category_key=category_key,
+            style=style,
+            display_order=len(current),
+            is_active=True,
+        )
+        session.add(plan)
+        await session.commit()
+        return plan
+
+    @staticmethod
     async def update_plan(session: AsyncSession, plan_id: int, **values) -> ShopPlan | None:
         plan = await ShopCustomizationService.get_plan(session, plan_id)
         if not plan:
@@ -820,8 +855,14 @@ class ShopCustomizationService:
 
         inventory_result = await session.execute(
             select(Config).where(
-                Config.volume_gb == plan.volume_gb,
-                Config.category_key == plan.category_key,
+                or_(
+                    Config.shop_plan_id == plan.id,
+                    and_(
+                        Config.shop_plan_id.is_(None),
+                        Config.volume_gb == plan.volume_gb,
+                        Config.category_key == plan.category_key,
+                    ),
+                ),
                 Config.is_sold.is_(False),
             )
         )

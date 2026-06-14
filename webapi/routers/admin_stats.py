@@ -76,6 +76,12 @@ async def stock(
 ):
     rows = await InventoryService.get_stock_status(session)
     return [
-        {"category_key": category, "volume_gb": volume, "title": title, "available": count}
-        for category, volume, title, count in rows
+        {
+            "plan_id": plan_id,
+            "category_key": category,
+            "volume_gb": volume,
+            "title": title,
+            "available": count,
+        }
+        for plan_id, category, volume, title, count in rows
     ]

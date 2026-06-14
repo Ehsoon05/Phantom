@@ -404,6 +404,72 @@ async def test_buy_plan_buttons_are_single_row(db):
     assert all(len(row) == 1 for row in keyboard.keyboard)
 
 
+@pytest.mark.asyncio
+async def test_same_volume_plans_keep_separate_inventory(db):
+    from bot_package.services.inventory_service import InventoryService
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    async with db.async_session() as session:
+        first = await ShopCustomizationService.create_plan(
+            session,
+            volume_gb=10,
+            title="ده گیگ اقتصادی",
+            price=100_000,
+            category_key="default",
+        )
+        second = await ShopCustomizationService.create_plan(
+            session,
+            volume_gb=10,
+            title="ده گیگ ویژه",
+            price=150_000,
+            category_key="default",
+        )
+        await InventoryService.add_configs(
+            session,
+            first.volume_gb,
+            ["https://example.com/first"],
+            first.category_key,
+            first.id,
+        )
+        await InventoryService.add_configs(
+            session,
+            second.volume_gb,
+            ["https://example.com/second"],
+            second.category_key,
+            second.id,
+        )
+
+    async with db.async_session() as session:
+        first_config = await InventoryService.get_available_config(
+            session, 10, "default", first.id
+        )
+        second_config = await InventoryService.get_available_config(
+            session, 10, "default", second.id
+        )
+        plans = await ShopCustomizationService.list_plans(session)
+
+    assert first.id != second.id
+    assert first_config.sub_link == "https://example.com/first"
+    assert second_config.sub_link == "https://example.com/second"
+    assert {plan.title for plan in plans} >= {"ده گیگ اقتصادی", "ده گیگ ویژه"}
+
+
+@pytest.mark.asyncio
+async def test_unlimited_plan_uses_zero_volume(db):
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    async with db.async_session() as session:
+        plan = await ShopCustomizationService.create_plan(
+            session,
+            volume_gb=0,
+            title="نامحدود",
+            price=200_000,
+            category_key="default",
+        )
+
+    assert plan.volume_gb == 0
+
+
 def test_admin_message_storage_uses_telegram_html_for_custom_emoji():
     from types import SimpleNamespace
 

@@ -58,7 +58,7 @@ function PlansTab() {
     <div className="space-y-4">
       <Card>
         <CardContent className="grid grid-cols-2 gap-2 p-4 md:grid-cols-5">
-          <Input placeholder="حجم (GB)" inputMode="numeric" value={form.volume_gb} onChange={(e) => setForm({ ...form, volume_gb: e.target.value })} />
+          <Input placeholder="حجم (GB) یا 0 برای نامحدود" inputMode="numeric" value={form.volume_gb} onChange={(e) => setForm({ ...form, volume_gb: e.target.value })} />
           <Input placeholder="عنوان" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
           <Input placeholder="قیمت (تومان)" inputMode="numeric" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
           <select
@@ -90,7 +90,7 @@ function PlansTab() {
                 <tr key={p.id} className="border-b last:border-0">
                   <td className="py-2">{p.emoji} {p.title}</td>
                   <td className="py-2 text-muted-foreground">{p.category_key}</td>
-                  <td className="py-2">{p.volume_gb} GB</td>
+                  <td className="py-2">{p.volume_gb > 0 ? `${p.volume_gb} GB` : "نامحدود"}</td>
                   <td className="py-2">{p.price != null ? formatToman(p.price) : "—"}</td>
                   <td className="py-2"><Badge variant={(p.stock ?? 0) <= 3 ? "destructive" : "secondary"}>{p.stock ?? 0}</Badge></td>
                   <td className="py-2">{p.is_active ? "✅" : "⛔"}</td>
@@ -141,9 +141,9 @@ function CategoriesTab() {
 function InventoryTab() {
   const qc = useQueryClient();
   const { data: stock, isLoading } = useQuery({ queryKey: ["admin-stock"], queryFn: getInventoryStock });
+  const { data: plans } = useQuery({ queryKey: ["admin-plans"], queryFn: listPlans });
   const { data: categories } = useQuery({ queryKey: ["admin-categories"], queryFn: listCategories });
-  const [volume, setVolume] = useState("");
-  const [category, setCategory] = useState("default");
+  const [planId, setPlanId] = useState("");
   const [links, setLinks] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterVolume, setFilterVolume] = useState("");
@@ -162,7 +162,16 @@ function InventoryTab() {
       ),
   });
   const add = useMutation({
-    mutationFn: () => addConfigs(parseInt(volume, 10), category || "default", links.split("\n").map((l) => l.trim()).filter(Boolean)),
+    mutationFn: () => {
+      const selectedPlan = plans?.find((plan) => plan.id === parseInt(planId, 10));
+      if (!selectedPlan) throw new Error("سرویس انتخاب‌شده معتبر نیست.");
+      return addConfigs(
+        selectedPlan.id,
+        selectedPlan.volume_gb,
+        selectedPlan.category_key,
+        links.split("\n").map((l) => l.trim()).filter(Boolean),
+      );
+    },
     onSuccess: (r) => {
       alert(`${r.added} کانفیگ اضافه شد`);
       setLinks("");
@@ -186,30 +195,31 @@ function InventoryTab() {
     <div className="space-y-4">
       <Card><CardContent className="space-y-2 p-4">
         <p className="text-sm font-semibold">افزودن کانفیگ</p>
-        <div className="grid grid-cols-2 gap-2">
-          <Input placeholder="حجم (GB)" inputMode="numeric" value={volume} onChange={(e) => setVolume(e.target.value)} />
+        <div>
           <select
-            className="min-h-9 rounded-md border bg-transparent px-3 text-sm"
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
+            className="min-h-10 w-full rounded-md border bg-transparent px-3 text-sm"
+            value={planId}
+            onChange={(e) => setPlanId(e.target.value)}
           >
-            <option value="default">پیش‌فرض</option>
-            {categories?.filter((item) => item.key !== "default").map((item) => (
-              <option key={item.id} value={item.key}>{item.emoji} {item.title}</option>
+            <option value="">انتخاب سرویس</option>
+            {plans?.filter((plan) => plan.is_active).map((plan) => (
+              <option key={plan.id} value={plan.id}>
+                {plan.emoji} {plan.title} - {plan.volume_gb > 0 ? `${plan.volume_gb} GB` : "نامحدود"} ({plan.category_key})
+              </option>
             ))}
           </select>
         </div>
         <textarea className="min-h-28 w-full rounded-md border bg-transparent p-2 text-sm" dir="ltr" placeholder="هر خط یک لینک ساب" value={links} onChange={(e) => setLinks(e.target.value)} />
-        <Button disabled={!volume || !links.trim() || add.isPending} onClick={() => add.mutate()}>{add.isPending ? "در حال افزودن…" : "افزودن"}</Button>
+        <Button disabled={!planId || !links.trim() || add.isPending} onClick={() => add.mutate()}>{add.isPending ? "در حال افزودن…" : "افزودن"}</Button>
       </CardContent></Card>
       {isLoading ? <Skeleton className="h-32 w-full rounded-xl" /> : (
         <Card><CardContent className="overflow-x-auto p-4">
           <table className="w-full text-sm"><thead><tr className="border-b text-right text-xs text-muted-foreground">
             <th className="pb-2">پلن</th><th className="pb-2">دسته</th><th className="pb-2">حجم</th><th className="pb-2">موجودی</th></tr></thead>
             <tbody>{stock?.map((s) => (
-              <tr key={`${s.category_key}-${s.volume_gb}`} className="border-b last:border-0">
+              <tr key={s.plan_id} className="border-b last:border-0">
                 <td className="py-2">{s.title}</td><td className="py-2 text-muted-foreground">{s.category_key}</td>
-                <td className="py-2">{s.volume_gb} GB</td><td className="py-2"><Badge variant={s.available <= 3 ? "destructive" : "secondary"}>{s.available}</Badge></td>
+                <td className="py-2">{s.volume_gb > 0 ? `${s.volume_gb} GB` : "نامحدود"}</td><td className="py-2"><Badge variant={s.available <= 3 ? "destructive" : "secondary"}>{s.available}</Badge></td>
               </tr>))}</tbody></table>
         </CardContent></Card>
       )}
@@ -276,7 +286,7 @@ function InventoryTab() {
                       <td className="py-3">{config.id}</td>
                       <td className="py-3 font-medium">{config.name || "—"}</td>
                       <td className="py-3">{config.category_key}</td>
-                      <td className="py-3">{config.volume_gb} GB</td>
+                      <td className="py-3">{config.volume_gb > 0 ? `${config.volume_gb} GB` : "نامحدود"}</td>
                       <td className="max-w-80 py-3">
                         {editingId === config.id ? (
                           <Input

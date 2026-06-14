@@ -28,15 +28,34 @@ router = APIRouter(prefix="/shop", tags=["shop"])
 _idempotency_cache: dict[str, int] = {}
 
 
-async def _stock_counts(session: AsyncSession) -> dict[tuple[str, int], int]:
+async def _stock_counts(session: AsyncSession, plans) -> dict[int, int]:
     rows = (
         await session.execute(
+            select(Config.shop_plan_id, func.count(Config.id))
+            .where(Config.is_sold.is_(False), Config.shop_plan_id.is_not(None))
+            .group_by(Config.shop_plan_id)
+        )
+    ).all()
+    stock = {plan_id: count for plan_id, count in rows}
+    legacy_rows = (
+        await session.execute(
             select(Config.category_key, Config.volume_gb, func.count(Config.id))
-            .where(Config.is_sold.is_(False))
+            .where(Config.is_sold.is_(False), Config.shop_plan_id.is_(None))
             .group_by(Config.category_key, Config.volume_gb)
         )
     ).all()
-    return {(category, volume): count for category, volume, count in rows}
+    for category_key, volume_gb, count in legacy_rows:
+        matching = next(
+            (
+                plan
+                for plan in plans
+                if plan.category_key == category_key and plan.volume_gb == volume_gb
+            ),
+            None,
+        )
+        if matching:
+            stock[matching.id] = stock.get(matching.id, 0) + count
+    return stock
 
 
 @router.get("/plans", response_model=list[CategoryOut])
@@ -47,7 +66,7 @@ async def list_plans(
     categories = await ShopCustomizationService.list_categories(session, active_only=True)
     plans = await ShopCustomizationService.list_plans(session, active_only=True)
     coupon = await CouponService.get_active_coupon(session, user.telegram_id)
-    stock = await _stock_counts(session)
+    stock = await _stock_counts(session, plans)
 
     by_category: dict[str, list[PlanOut]] = {}
     for plan in plans:
@@ -67,7 +86,7 @@ async def list_plans(
                 emoji=plan.emoji,
                 style=plan.style,
                 display_order=plan.display_order,
-                in_stock=stock.get((plan.category_key, plan.volume_gb), 0) > 0,
+                in_stock=stock.get(plan.id, 0) > 0,
             )
         )
 
@@ -146,7 +165,9 @@ async def purchase(
     if (db_user.wallet_balance or 0) < final_price:
         raise HTTPException(status_code=402, detail="Insufficient wallet balance")
 
-    config = await InventoryService.get_available_config(session, plan.volume_gb, plan.category_key)
+    config = await InventoryService.get_available_config(
+        session, plan.volume_gb, plan.category_key, plan.id
+    )
     if config is None:
         raise HTTPException(status_code=409, detail="Plan is out of stock")
 

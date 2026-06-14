@@ -366,15 +366,19 @@ def _button_label(button) -> str:
     return f"#{button.id} {emoji}{button.text} ({status})"
 
 
+def _volume_label(volume_gb: int) -> str:
+    return "نامحدود" if volume_gb <= 0 else f"{volume_gb} گیگ"
+
+
 def _plan_label(plan) -> str:
     status = "فعال" if plan.is_active else "غیرفعال"
     emoji = f"{plan.emoji} " if plan.emoji else ""
-    return f"#{plan.id} [{plan.category_key}] {emoji}{plan.title} - {plan.volume_gb} گیگ ({status})"
+    return f"#{plan.id} [{plan.category_key}] {emoji}{plan.title} - {_volume_label(plan.volume_gb)} ({status})"
 
 
 def _inline_plan_label(plan, *, include_status: bool = False) -> str:
     status = "✅ " if include_status and plan.is_active else "⏸ " if include_status else ""
-    label = f"{status}📦 {plan.title} | {plan.volume_gb} گیگ | {plan.category_key}"
+    label = f"{status}📦 {plan.title} | {_volume_label(plan.volume_gb)} | {plan.category_key}"
     return label if len(label) <= 60 else f"{label[:57]}..."
 
 
@@ -432,9 +436,9 @@ async def _admin_volume_keyboard(session, action: str) -> ReplyKeyboardMarkup:
     plans = await ShopCustomizationService.list_plans(session)
     active_plans = [plan for plan in plans if plan.is_active]
     if action == "edit_price":
-        labels = [f"#{plan.id} ✏️ [{plan.category_key}] {plan.title} - {plan.volume_gb} گیگ" for plan in active_plans]
+        labels = [f"#{plan.id} ✏️ [{plan.category_key}] {plan.title} - {_volume_label(plan.volume_gb)}" for plan in active_plans]
     else:
-        labels = [f"#{plan.id} 📦 [{plan.category_key}] {plan.title} - {plan.volume_gb} گیگ" for plan in active_plans]
+        labels = [f"#{plan.id} 📦 [{plan.category_key}] {plan.title} - {_volume_label(plan.volume_gb)}" for plan in active_plans]
     if not labels:
         labels = [f"📦 {volume} گیگ" for volume in (1, 2, 3, 5, 10, 20)]
     return _rows(labels, width=2)
@@ -795,7 +799,7 @@ async def add_config_plan_callback(update: Update, context: ContextTypes.DEFAULT
         f"سرویس انتخاب شد:\n"
         f"**{escape_markdown(plan.title, version=1)}**\n"
         f"دسته: `{escape_markdown(plan.category_key, version=1)}`\n"
-        f"حجم: **{plan.volume_gb} گیگ**",
+        f"حجم: **{_volume_label(plan.volume_gb)}**",
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     await query.message.reply_text(
@@ -850,15 +854,21 @@ async def done_collecting(update: Update, context: ContextTypes.DEFAULT_TYPE):
     volume = context.user_data.get("adding_volume")
     category_key = context.user_data.get("adding_category_key", "default")
     links = context.user_data.get("collected_links", [])
-    if not volume or not links:
+    if volume is None or not links:
         await update.message.reply_text("لینکی برای ثبت وجود ندارد.", reply_markup=admin_inventory_keyboard())
         return ConversationHandler.END
 
     async with async_session() as session:
-        count = await InventoryService.add_configs(session, volume, links, category_key)
+        count = await InventoryService.add_configs(
+            session,
+            volume,
+            links,
+            category_key,
+            context.user_data.get("adding_plan_id"),
+        )
 
     await update.message.reply_text(
-        f"{count} لینک برای پلن {volume} گیگ در دسته `{category_key}` ثبت شد.",
+        f"{count} لینک برای پلن {_volume_label(volume)} در دسته `{category_key}` ثبت شد.",
         reply_markup=admin_inventory_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
@@ -871,14 +881,14 @@ async def stock_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         stock = await InventoryService.get_stock_status(session)
 
     message = STOCK_STATUS_HEADER
-    for category_key, volume, title, count in stock:
+    for _plan_id, category_key, volume, title, count in stock:
         if count < 5:
             status = "بحرانی"
         elif count <= 10:
             status = "متوسط"
         else:
             status = "مناسب"
-        message += f"[{category_key}] {title} - {volume} گیگ: {count} عدد ({status})\n"
+        message += f"[{category_key}] {title} - {_volume_label(volume)}: {count} عدد ({status})\n"
 
     await update.message.reply_text(
         message,
@@ -896,7 +906,7 @@ async def view_prices(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with async_session() as session:
         for plan in plans:
             price = await PriceService.get_plan_price(session, plan)
-            message += f"#{plan.id} [{plan.category_key}] {plan.title} - {plan.volume_gb} گیگ: {(price or 0):,} تومان\n"
+            message += f"#{plan.id} [{plan.category_key}] {plan.title} - {_volume_label(plan.volume_gb)}: {(price or 0):,} تومان\n"
 
     await update.message.reply_text(
         message,
@@ -2946,7 +2956,7 @@ async def shop_plan_management_callback(update: Update, context: ContextTypes.DE
     if action == "add":
         await query.edit_message_text("در حال ساخت سرویس جدید")
         await query.message.reply_text(
-            "حجم سرویس جدید را به گیگ ارسال کنید. مثال: `30`",
+            "حجم سرویس جدید را به گیگ ارسال کنید؛ برای حجم نامحدود، `نامحدود` بفرستید. مثال: `30`",
             reply_markup=_cancel_back_keyboard(),
             parse_mode=constants.ParseMode.MARKDOWN,
         )
@@ -3176,7 +3186,7 @@ async def shop_plan_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     if update.message.text == ADMIN_ADD_PLAN:
         await update.message.reply_text(
-            "حجم سرویس جدید را به گیگ ارسال کنید. مثال: `30`",
+            "حجم سرویس جدید را به گیگ ارسال کنید؛ برای حجم نامحدود، `نامحدود` بفرستید. مثال: `30`",
             reply_markup=_cancel_back_keyboard(),
             parse_mode=constants.ParseMode.MARKDOWN,
         )
@@ -3207,7 +3217,7 @@ async def _show_shop_plan_options(update: Update, context: ContextTypes.DEFAULT_
     await update.effective_message.reply_text(
         "**ویرایش سرویس**\n\n"
         f"شناسه: `#{plan.id}`\n"
-        f"حجم: **{plan.volume_gb} گیگ**\n"
+        f"حجم: **{_volume_label(plan.volume_gb)}**\n"
         f"عنوان: {plan.title}\n"
         f"دسته‌بندی: `{plan.category_key}`\n"
         f"قیمت: **{price or 0:,} تومان**\n"
@@ -3393,13 +3403,17 @@ async def shop_plan_add_volume(update: Update, context: ContextTypes.DEFAULT_TYP
     if await _leave_shop_flow_if_navigation(update, context):
         context.user_data.pop("shop_new_plan", None)
         return ConversationHandler.END
-    try:
-        volume = int(update.message.text.strip())
-    except ValueError:
-        await update.message.reply_text("حجم باید عددی باشد.")
-        return SHOP_PLAN_ADD_VOLUME
-    if volume <= 0:
-        await update.message.reply_text("حجم باید بیشتر از صفر باشد.")
+    raw_volume = update.message.text.strip().lower()
+    if raw_volume in {"نامحدود", "unlimited", "0"}:
+        volume = 0
+    else:
+        try:
+            volume = int(raw_volume)
+        except ValueError:
+            await update.message.reply_text("حجم باید عددی باشد یا کلمه «نامحدود» را ارسال کنید.")
+            return SHOP_PLAN_ADD_VOLUME
+    if volume < 0:
+        await update.message.reply_text("حجم نمی‌تواند منفی باشد.")
         return SHOP_PLAN_ADD_VOLUME
 
     context.user_data["shop_new_plan"] = {"volume": volume}
@@ -3470,7 +3484,7 @@ async def shop_plan_add_price(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     draft = context.user_data.get("shop_new_plan", {})
     async with async_session() as session:
-        plan = await ShopCustomizationService.upsert_plan(
+        plan = await ShopCustomizationService.create_plan(
             session,
             volume_gb=draft["volume"],
             title=draft["title"],
@@ -3480,7 +3494,7 @@ async def shop_plan_add_price(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     context.user_data.pop("shop_new_plan", None)
     await update.message.reply_text(
-        f"سرویس **{plan.title}** با حجم **{plan.volume_gb} گیگ** ساخته شد.",
+        f"سرویس **{plan.title}** با حجم **{_volume_label(plan.volume_gb)}** ساخته شد.",
         reply_markup=admin_shop_settings_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
@@ -3908,7 +3922,7 @@ async def shop_plan_value_back(update: Update, context: ContextTypes.DEFAULT_TYP
 async def shop_plan_add_title_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("shop_new_plan", None)
     await update.message.reply_text(
-        "حجم سرویس جدید را به گیگ ارسال کنید. مثال: `30`",
+        "حجم سرویس جدید را به گیگ ارسال کنید؛ برای حجم نامحدود، `نامحدود` بفرستید. مثال: `30`",
         reply_markup=_cancel_back_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )

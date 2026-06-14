@@ -52,20 +52,27 @@ export const deleteCategory = (key: string) =>
   api<{ deleted: boolean }>(`/admin/categories/${encodeURIComponent(key)}`, { method: "DELETE" });
 
 export interface StockRow {
+  plan_id: number;
   category_key: string;
   volume_gb: number;
   title: string;
   available: number;
 }
 export const getInventoryStock = () => api<StockRow[]>("/admin/inventory/stock");
-export const addConfigs = (volume_gb: number, category_key: string, links: string[]) =>
+export const addConfigs = (
+  plan_id: number,
+  volume_gb: number,
+  category_key: string,
+  links: string[],
+) =>
   api<{ added: number }>("/admin/inventory/configs", {
     method: "POST",
-    body: JSON.stringify({ volume_gb, category_key, links }),
+    body: JSON.stringify({ plan_id, volume_gb, category_key, links }),
   });
 
 export interface InventoryConfig {
   id: number;
+  plan_id: number | null;
   volume_gb: number;
   category_key: string;
   name: string;

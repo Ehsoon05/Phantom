@@ -30,6 +30,7 @@ class SchemaService:
                     conn,
                     "configs",
                     {
+                        "shop_plan_id": "INTEGER",
                         "category_key": "VARCHAR DEFAULT 'default' NOT NULL",
                         "public_sub_token": "VARCHAR",
                     },
@@ -83,6 +84,17 @@ class SchemaService:
                     },
                 )
                 await SchemaService._drop_sqlite_shop_plan_volume_unique(conn)
+            if "configs" in tables and "shop_plans" in tables:
+                await conn.execute(text("""
+                    UPDATE configs
+                    SET shop_plan_id = (
+                        SELECT MIN(shop_plans.id)
+                        FROM shop_plans
+                        WHERE shop_plans.volume_gb = configs.volume_gb
+                          AND shop_plans.category_key = configs.category_key
+                    )
+                    WHERE shop_plan_id IS NULL
+                """))
             if "rial_payment_requests" in tables:
                 await SchemaService._add_missing_columns(
                     conn,

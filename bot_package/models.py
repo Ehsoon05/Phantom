@@ -32,6 +32,7 @@ class User(Base):
 class Config(Base):
     __tablename__ = "configs"
     id = Column(Integer, primary_key=True)
+    shop_plan_id = Column(Integer, ForeignKey("shop_plans.id"), nullable=True, index=True)
     volume_gb = Column(Integer, nullable=False)
     category_key = Column(String, nullable=False, default="default")
     sub_link = Column(String, nullable=False, unique=True)

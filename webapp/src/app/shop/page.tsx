@@ -39,6 +39,9 @@ function PlanCard({ plan, onSelect }: { plan: Plan; onSelect: (plan: Plan) => vo
             {plan.emoji ? `${plan.emoji} ` : ""}
             {plan.title}
           </p>
+          <p className="text-xs text-muted-foreground">
+            {plan.volume_gb > 0 ? `${plan.volume_gb} گیگابایت` : "حجم نامحدود"}
+          </p>
         </div>
         <div className="text-left">
           {!plan.in_stock ? (
@@ -128,7 +131,9 @@ function ShopContent() {
               {selected?.emoji ? `${selected.emoji} ` : ""}
               {selected?.title}
             </SheetTitle>
-            <SheetDescription>{selected?.volume_gb} گیگابایت</SheetDescription>
+            <SheetDescription>
+              {selected && (selected.volume_gb > 0 ? `${selected.volume_gb} گیگابایت` : "حجم نامحدود")}
+            </SheetDescription>
           </SheetHeader>
           <div className="space-y-4 p-4 pt-0">
             <div className="flex justify-between text-sm">

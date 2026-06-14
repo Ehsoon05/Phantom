@@ -490,7 +490,9 @@ async def process_purchase(
             )
             return
 
-        config = await InventoryService.get_available_config(session, volume, category_key)
+        config = await InventoryService.get_available_config(
+            session, volume, category_key, plan.id
+        )
         if not config:
             text = await ShopCustomizationService.get_message(session, "plan_unavailable", volume=volume)
             fallback_keyboard = await ShopCustomizationService.main_menu_keyboard(session)
@@ -810,7 +812,11 @@ async def service_details_callback(update: Update, context: ContextTypes.DEFAULT
     original_title = metadata.get("title") if metadata else "نامشخص"
     remaining_volume = _format_service_bytes(metadata.get("remaining")) if metadata else "نامشخص"
     used_volume = _format_service_bytes(metadata.get("used")) if metadata else "نامشخص"
-    total_volume = _format_service_bytes(metadata.get("total")) if metadata else f"{purchase.volume_gb} گیگابایت"
+    total_volume = (
+        _format_service_bytes(metadata.get("total"))
+        if metadata
+        else ("نامحدود" if purchase.volume_gb <= 0 else f"{purchase.volume_gb} گیگابایت")
+    )
     config_count = metadata.get("config_count", "نامشخص") if metadata else "نامشخص"
     async with async_session() as session:
         text = await ShopCustomizationService.get_message(

@@ -244,7 +244,10 @@ class ReferralService:
                     if not plan:
                         continue
                     config = await InventoryService.get_available_config(
-                        session, plan.volume_gb, plan.category_key or "default"
+                        session,
+                        plan.volume_gb,
+                        plan.category_key or "default",
+                        plan.id,
                     )
                     if not config or not await InventoryService.sell_config(session, config, referrer_user_id):
                         continue
