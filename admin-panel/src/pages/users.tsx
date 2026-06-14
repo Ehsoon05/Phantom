@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronUp, Search } from "lucide-react";
+import { CalendarClock, ChevronDown, ChevronUp, Search, Send } from "lucide-react";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,22 @@ import {
 import { countUsers, getUserPurchases } from "@/lib/admin-api";
 
 const PAGE_SIZE = 25;
+
+function formatStartDate(value: string | null) {
+  if (!value) return "نامشخص";
+  const normalized = /(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? value : `${value}Z`;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return "نامشخص";
+  return new Intl.DateTimeFormat("fa-IR", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Asia/Tehran",
+  }).format(date);
+}
+
+function telegramProfileUrl(username: string) {
+  return `https://t.me/${username.replace(/^@+/, "")}`;
+}
 
 function UserDetail({ telegramId }: { telegramId: number }) {
   const { data, isLoading } = useQuery({
@@ -72,10 +88,31 @@ function UserRow({ user }: { user: AdminUser }) {
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <p className="font-bold">{user.first_name}</p>
-              {user.username && <span className="text-sm text-muted-foreground" dir="ltr">@{user.username}</span>}
+              {user.username && (
+                <span className="inline-flex items-center gap-1" dir="ltr">
+                  <span className="text-sm text-muted-foreground">
+                    @{user.username.replace(/^@+/, "")}
+                  </span>
+                  <Button asChild size="icon-xs" variant="ghost">
+                    <a
+                      href={telegramProfileUrl(user.username)}
+                      target="_blank"
+                      rel="noreferrer"
+                      title="باز کردن گفت‌وگو در تلگرام"
+                      aria-label={`باز کردن گفت‌وگوی ${user.username} در تلگرام`}
+                    >
+                      <Send className="size-3.5" />
+                    </a>
+                  </Button>
+                </span>
+              )}
               {user.is_blocked && <Badge variant="destructive">مسدود</Badge>}
             </div>
             <p className="text-xs text-muted-foreground" dir="ltr">ID: {user.telegram_id}</p>
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <CalendarClock className="size-3.5" />
+              شروع ربات: <span dir="ltr">{formatStartDate(user.created_at)}</span>
+            </p>
             <p className="text-sm">موجودی: <span className="font-bold">{formatToman(user.wallet_balance)}</span></p>
           </div>
           <div className="flex flex-wrap gap-2">
