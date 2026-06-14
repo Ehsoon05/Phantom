@@ -147,15 +147,18 @@ function InventoryTab() {
   const [links, setLinks] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterVolume, setFilterVolume] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [replacementLink, setReplacementLink] = useState("");
   const parsedFilterVolume = parseInt(filterVolume, 10);
   const { data: configs, isLoading: configsLoading } = useQuery({
-    queryKey: ["admin-inventory-configs", filterCategory, filterVolume],
+    queryKey: ["admin-inventory-configs", filterCategory, filterVolume, search],
     queryFn: () =>
       listInventoryConfigs(
         filterCategory || undefined,
         Number.isNaN(parsedFilterVolume) ? undefined : parsedFilterVolume,
+        search || undefined,
       ),
   });
   const add = useMutation({
@@ -237,12 +240,30 @@ function InventoryTab() {
               onChange={(e) => setFilterVolume(e.target.value)}
             />
           </div>
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => { e.preventDefault(); setSearch(searchInput.trim()); }}
+          >
+            <Input
+              placeholder="جستجوی لینک یا نام ساب…"
+              dir="ltr"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+            />
+            <Button type="submit" variant="secondary">جستجو</Button>
+            {search && (
+              <Button type="button" variant="ghost" onClick={() => { setSearchInput(""); setSearch(""); }}>
+                پاک‌سازی
+              </Button>
+            )}
+          </form>
           {configsLoading ? <Skeleton className="h-28 w-full rounded-lg" /> : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[760px] text-sm">
                 <thead>
                   <tr className="border-b text-right text-xs text-muted-foreground">
                     <th className="pb-2">شناسه</th>
+                    <th className="pb-2">نام ساب</th>
                     <th className="pb-2">دسته</th>
                     <th className="pb-2">حجم</th>
                     <th className="pb-2">لینک فعلی</th>
@@ -253,6 +274,7 @@ function InventoryTab() {
                   {configs?.map((config) => (
                     <tr key={config.id} className="border-b align-top last:border-0">
                       <td className="py-3">{config.id}</td>
+                      <td className="py-3 font-medium">{config.name || "—"}</td>
                       <td className="py-3">{config.category_key}</td>
                       <td className="py-3">{config.volume_gb} GB</td>
                       <td className="max-w-80 py-3">

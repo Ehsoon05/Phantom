@@ -68,14 +68,16 @@ export interface InventoryConfig {
   id: number;
   volume_gb: number;
   category_key: string;
+  name: string;
   sub_link: string;
   public_sub_token: string | null;
   created_at: string;
 }
-export const listInventoryConfigs = (categoryKey?: string, volumeGb?: number) => {
+export const listInventoryConfigs = (categoryKey?: string, volumeGb?: number, q?: string) => {
   const params = new URLSearchParams();
   if (categoryKey) params.set("category_key", categoryKey);
   if (volumeGb) params.set("volume_gb", String(volumeGb));
+  if (q) params.set("q", q);
   const query = params.toString();
   return api<InventoryConfig[]>(`/admin/inventory/configs${query ? `?${query}` : ""}`);
 };

@@ -249,3 +249,52 @@ async def create_rial_request(
         send_url=send_url,
         created_at=request.created_at,
     )
+
+
+@router.get("/rial/requests")
+async def list_rial_requests(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    rows = (
+        (
+            await session.execute(
+                select(RialPaymentRequest)
+                .where(RialPaymentRequest.user_id == user.telegram_id)
+                .order_by(RialPaymentRequest.created_at.desc())
+                .limit(20)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        {
+            "id": r.id,
+            "tracking_code": r.tracking_code,
+            "amount_toman": r.amount_toman,
+            "status": r.status,
+            "created_at": r.created_at,
+        }
+        for r in rows
+    ]
+
+
+@router.post("/rial/requests/{request_id}/cancel")
+async def cancel_rial_request(
+    request_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    request = (
+        await session.execute(
+            select(RialPaymentRequest).where(RialPaymentRequest.id == request_id)
+        )
+    ).scalar_one_or_none()
+    if request is None or request.user_id != user.telegram_id:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if request.status != "pending":
+        raise HTTPException(status_code=409, detail="Only pending requests can be cancelled")
+    request.status = "cancelled"
+    await session.commit()
+    return {"id": request.id, "status": request.status}

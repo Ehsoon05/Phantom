@@ -1,6 +1,6 @@
 """Admin: inventory, shop plans/categories/prices, messages, buttons."""
 
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -30,11 +30,22 @@ class ConfigUpdateRequest(BaseModel):
     sub_link: str = Field(min_length=8)
 
 
+def _config_name(sub_link: str) -> str:
+    """A sub link's display name is the remark in its URL fragment
+    (e.g. https://panel/sub/<token>#MyService -> "MyService")."""
+    try:
+        fragment = urlparse(sub_link).fragment
+    except ValueError:
+        return ""
+    return unquote(fragment).strip()
+
+
 def _config_out(config: Config) -> dict:
     return {
         "id": config.id,
         "volume_gb": config.volume_gb,
         "category_key": config.category_key,
+        "name": _config_name(config.sub_link),
         "sub_link": config.sub_link,
         "public_sub_token": config.public_sub_token,
         "created_at": config.created_at,
@@ -67,6 +78,7 @@ async def stock(
 async def list_inventory_configs(
     category_key: str | None = None,
     volume_gb: int | None = None,
+    q: str | None = None,
     session: AsyncSession = Depends(get_session),
     _admin: Admin = Depends(require_permission("inventory")),
 ):
@@ -75,6 +87,10 @@ async def list_inventory_configs(
         query = query.where(Config.category_key == category_key)
     if volume_gb is not None:
         query = query.where(Config.volume_gb == volume_gb)
+    if q:
+        # The sub link contains both the URL and the #remark name, so a
+        # substring match covers searching by link and by name.
+        query = query.where(Config.sub_link.ilike(f"%{q.strip()}%"))
     configs = (
         await session.execute(query.order_by(Config.created_at.desc(), Config.id.desc()).limit(250))
     ).scalars().all()

@@ -156,6 +156,19 @@ export const createRialRequest = (input: {
     body: JSON.stringify(input),
   });
 
+export interface RialSummary {
+  id: number;
+  tracking_code: string;
+  amount_toman: number;
+  status: string;
+  created_at: string;
+}
+export const getRialRequests = () => api<RialSummary[]>("/wallet/rial/requests");
+export const cancelRialRequest = (id: number) =>
+  api<{ id: number; status: string }>(`/wallet/rial/requests/${id}/cancel`, {
+    method: "POST",
+  });
+
 export interface AppliedCoupon {
   code: string;
   discount_type: string;

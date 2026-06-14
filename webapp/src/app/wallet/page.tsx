@@ -16,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ApiError,
   cancelCryptoInvoice,
+  cancelRialRequest,
   createCryptoInvoice,
   createRialRequest,
   formatToman,
@@ -23,6 +24,7 @@ import {
   getCryptoInvoices,
   getMe,
   getPaymentMethods,
+  getRialRequests,
   getTransactions,
   tonTransferLink,
   type CryptoInvoice,
@@ -286,13 +288,25 @@ function RialTab() {
 
   const minAmount = methods?.rial.min_amount_toman ?? 0;
 
+  const queryClient = useQueryClient();
+  const { data: rialRequests } = useQuery({ queryKey: ["rial-requests"], queryFn: getRialRequests });
+  const pendingRequests = rialRequests?.filter((r) => r.status === "pending") ?? [];
+
   const submit = useMutation({
     mutationFn: () =>
       createRialRequest({
         amount_toman: parseAmount(amount),
         source_card: card.replace(/[^0-9]/g, ""),
       }),
-    onSuccess: setResult,
+    onSuccess: (data) => {
+      setResult(data);
+      queryClient.invalidateQueries({ queryKey: ["rial-requests"] });
+    },
+  });
+
+  const cancelRequest = useMutation({
+    mutationFn: (id: number) => cancelRialRequest(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["rial-requests"] }),
   });
 
   if (result) {
@@ -374,6 +388,33 @@ function RialTab() {
 
   return (
     <div className="space-y-4">
+      {pendingRequests.length > 0 && (
+        <Card className="border-primary/50">
+          <CardContent className="space-y-2 p-4">
+            <p className="text-sm font-bold">⏳ درخواست‌های در انتظار</p>
+            {pendingRequests.map((req) => (
+              <div key={req.id} className="flex items-center justify-between gap-2 text-sm">
+                <span>
+                  {formatToman(req.amount_toman)}
+                  <span className="block text-xs text-muted-foreground" dir="ltr">
+                    {req.tracking_code}
+                  </span>
+                </span>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={cancelRequest.isPending}
+                  onClick={() => {
+                    if (confirm("لغو این درخواست؟")) cancelRequest.mutate(req.id);
+                  }}
+                >
+                  لغو
+                </Button>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
       <div className="space-y-2">
         <p className="text-sm font-semibold">مبلغ (تومان)</p>
         <Input
