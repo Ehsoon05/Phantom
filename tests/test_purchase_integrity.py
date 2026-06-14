@@ -360,18 +360,48 @@ def test_all_enabled_pasarguard_groups_are_selected_without_multilocation():
 
 
 @pytest.mark.asyncio
-async def test_buy_and_services_buttons_each_occupy_their_own_row(db):
+async def test_main_menu_keeps_original_layout(db):
     from bot_package.services.shop_customization_service import ShopCustomizationService
 
     async with db.async_session() as session:
         await ShopCustomizationService.init_defaults(session)
         buttons = await ShopCustomizationService.list_buttons(session, "shop_main")
 
-    buy = next(button for button in buttons if button.action == "buy_subscription")
-    services = next(button for button in buttons if button.action == "purchase_history")
+    positions = {button.action: (button.row, button.col) for button in buttons}
 
-    assert [button for button in buttons if button.row == buy.row] == [buy]
-    assert [button for button in buttons if button.row == services.row] == [services]
+    assert positions["custom_message:shop_main:1780731124"] == (0, 0)
+    assert positions["buy_subscription"] == (0, 1)
+    assert positions["trial_config"] == (1, 0)
+    assert positions["wallet"] == (2, 0)
+    assert positions["purchase_history"] == (2, 1)
+
+
+@pytest.mark.asyncio
+async def test_buy_plan_buttons_are_single_row(db):
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    async with db.async_session() as session:
+        await ShopCustomizationService.init_defaults(session)
+        await ShopCustomizationService.upsert_plan(
+            session,
+            volume_gb=20,
+            title="۲۰ گیگ",
+            price=180_000,
+            category_key="___phantom_express_-_فانتوم_اکسپرس",
+        )
+        plans = await ShopCustomizationService.get_active_plans(
+            session,
+            "___phantom_express_-_فانتوم_اکسپرس",
+        )
+        prices = {plan.id: plan.price or 0 for plan in plans}
+        keyboard = await ShopCustomizationService.buy_category_keyboard(
+            session,
+            "___phantom_express_-_فانتوم_اکسپرس",
+            prices,
+        )
+
+    assert len(plans) > 1
+    assert all(len(row) == 1 for row in keyboard.keyboard)
 
 
 def test_admin_message_storage_uses_telegram_html_for_custom_emoji():

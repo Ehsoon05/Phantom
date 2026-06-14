@@ -132,14 +132,14 @@ def _button_default(action: str, menu: str, label: str, style: str, row: int, co
 
 DEFAULT_BUTTONS: tuple[ButtonDefinition, ...] = (
     ButtonDefinition("custom_message:shop_main:1780731124", "shop_main", "تعرفه ها", None, None, 0, 0, "5884491244360438851"),
-    ButtonDefinition("buy_subscription", "shop_main", "خرید سرویس", None, STYLE_PRIMARY, 1, 0, "5922272602784534896"),
-    ButtonDefinition("trial_config", "shop_main", "دریافت کانفیگ تست", "🧪", STYLE_SUCCESS, 2, 0, "5373141891321699086"),
-    ButtonDefinition("wallet", "shop_main", "کیف پول", None, None, 2, 1, "5769126056262898415"),
-    ButtonDefinition("purchase_history", "shop_main", "سرویس های من", None, None, 3, 0, "5805550320985578625"),
-    ButtonDefinition("referrals", "shop_main", "دعوت دوستان", None, None, 4, 0, "6033125983572201397"),
-    ButtonDefinition("account_info", "shop_main", "اطلاعات حساب", None, None, 4, 1, "5904630315946611415"),
-    ButtonDefinition("support", "shop_main", "پشتیبانی", None, None, 5, 0, "6037421444789440735"),
-    ButtonDefinition("help", "shop_main", "آموزش اتصال", None, None, 5, 1, "5776233299424843260"),
+    ButtonDefinition("buy_subscription", "shop_main", "خرید سرویس", None, STYLE_PRIMARY, 0, 1, "5922272602784534896"),
+    ButtonDefinition("trial_config", "shop_main", "دریافت کانفیگ تست", "🧪", STYLE_SUCCESS, 1, 0, "5373141891321699086"),
+    ButtonDefinition("wallet", "shop_main", "کیف پول", None, None, 2, 0, "5769126056262898415"),
+    ButtonDefinition("purchase_history", "shop_main", "سرویس های من", None, None, 2, 1, "5805550320985578625"),
+    ButtonDefinition("referrals", "shop_main", "دعوت دوستان", None, None, 3, 0, "6033125983572201397"),
+    ButtonDefinition("account_info", "shop_main", "اطلاعات حساب", None, None, 3, 1, "5904630315946611415"),
+    ButtonDefinition("support", "shop_main", "پشتیبانی", None, None, 4, 0, "6037421444789440735"),
+    ButtonDefinition("help", "shop_main", "آموزش اتصال", None, None, 4, 1, "5776233299424843260"),
     _button_default("charge_rial", "shop_wallet", CHARGE_RIAL, STYLE_SUCCESS, 0, 0),
     _button_default("charge_crypto", "shop_wallet", CHARGE_CRYPTO, STYLE_SUCCESS, 0, 1),
     _button_default("apply_coupon", "shop_wallet", APPLY_COUPON, STYLE_SUCCESS, 1, 0),
@@ -430,7 +430,7 @@ class ShopCustomizationService:
                 if position:
                     button.row, button.col = position
 
-        layout_migration_key = "shop_main_layout:single_buy_and_services:v1"
+        layout_migration_key = "shop_main_layout:restore_original:v2"
         layout_migrated = (
             await session.execute(
                 select(BotSetting).where(BotSetting.key == layout_migration_key)
@@ -439,14 +439,14 @@ class ShopCustomizationService:
         if layout_migrated is None:
             main_positions = {
                 "custom_message:shop_main:1780731124": (0, 0),
-                "buy_subscription": (1, 0),
-                "trial_config": (2, 0),
-                "wallet": (2, 1),
-                "purchase_history": (3, 0),
-                "referrals": (4, 0),
-                "account_info": (4, 1),
-                "support": (5, 0),
-                "help": (5, 1),
+                "buy_subscription": (0, 1),
+                "trial_config": (1, 0),
+                "wallet": (2, 0),
+                "purchase_history": (2, 1),
+                "referrals": (3, 0),
+                "account_info": (3, 1),
+                "support": (4, 0),
+                "help": (4, 1),
             }
             result = await session.execute(
                 select(ShopButton).where(ShopButton.menu == "shop_main")
@@ -931,7 +931,7 @@ class ShopCustomizationService:
         for index, plan in enumerate(plans):
             if plan.id not in prices:
                 continue
-            row = index // 2
+            row = index
             rows.setdefault(row, []).append(ShopCustomizationService._keyboard_button(
                 ShopCustomizationService.plan_label(plan, prices[plan.id]),
                 style=plan.style,

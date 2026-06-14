@@ -88,17 +88,7 @@ def test_current_shop_snapshot_is_the_code_default():
         for button in DEFAULT_BUTTONS
         if button.menu == "shop_main"
     }
-    assert main_positions["buy_subscription"] == (1, 0)
-    assert main_positions["purchase_history"] == (3, 0)
-    assert all(
-        position[0] != main_positions["buy_subscription"][0]
-        for action, position in main_positions.items()
-        if action != "buy_subscription"
-    )
-    assert all(
-        position[0] != main_positions["purchase_history"][0]
-        for action, position in main_positions.items()
-        if action != "purchase_history"
-    )
+    assert main_positions["buy_subscription"] == (0, 1)
+    assert main_positions["purchase_history"] == (2, 1)
     assert "___phantom_express_-_فانتوم_اکسپرس" in categories
     assert ("___phantom_express_-_فانتوم_اکسپرس", 10, 89_000) in plans
