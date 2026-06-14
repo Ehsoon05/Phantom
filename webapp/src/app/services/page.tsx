@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  formatToman,
   getPurchases,
   happLink,
   hiddifyLink,
@@ -116,9 +115,6 @@ function ServicesContent() {
                 {new Date(purchase.purchased_at).toLocaleDateString("fa-IR")}
               </p>
             </div>
-            <p className="text-xs text-muted-foreground">
-              {purchase.volume_gb} گیگابایت · {formatToman(purchase.price)}
-            </p>
             {purchase.sub_link && (
               <div className="space-y-3">
                 <Button
