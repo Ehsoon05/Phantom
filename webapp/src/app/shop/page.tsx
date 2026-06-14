@@ -39,7 +39,6 @@ function PlanCard({ plan, onSelect }: { plan: Plan; onSelect: (plan: Plan) => vo
             {plan.emoji ? `${plan.emoji} ` : ""}
             {plan.title}
           </p>
-          <p className="text-xs text-muted-foreground">{plan.volume_gb} گیگابایت</p>
         </div>
         <div className="text-left">
           {!plan.in_stock ? (
