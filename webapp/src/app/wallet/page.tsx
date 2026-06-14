@@ -494,16 +494,15 @@ function CouponCard() {
         <div>
           <p className="text-sm font-bold">🎁 کد تخفیف</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            کد را اینجا فعال کنید؛ تخفیف در بخش خرید سرویس اعمال می‌شود.
+            کد تخفیف درصدی یا اعتبار مبلغی را اینجا فعال کنید؛ مقدار آن در بخش خرید سرویس از قیمت کم می‌شود.
           </p>
         </div>
         {applied ? (
           <div className="rounded-lg bg-primary/10 p-3 text-sm text-primary">
             کد <span className="font-bold" dir="ltr">{applied.code}</span> فعال شد:{" "}
             {applied.discount_type === "percent"
-              ? `${applied.amount.toLocaleString("fa-IR")}٪`
-              : formatToman(applied.amount)}{" "}
-            تخفیف
+              ? `${applied.amount.toLocaleString("fa-IR")}٪ تخفیف`
+              : `${formatToman(applied.amount)} اعتبار تخفیف`}
           </div>
         ) : (
           <div className="flex gap-2">
