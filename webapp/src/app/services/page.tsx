@@ -34,6 +34,25 @@ async function copyText(value: string) {
   }
 }
 
+// Open an app deep link (happ://, v2rayng://, …) WITHOUT navigating the
+// Mini App's own webview. Setting window.location.href to a custom scheme
+// unloads/white-screens the webview when the OS has no handler; a transient
+// anchor click lets the OS hand off to the app while the SPA stays alive.
+function openExternal(url: string) {
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.target = "_blank";
+    anchor.rel = "noopener noreferrer";
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } catch {
+    /* no installed handler — the link is already copied as a fallback */
+  }
+}
+
 function ServicesContent() {
   const [notice, setNotice] = useState<string | null>(null);
   const { data: purchases, isLoading } = useQuery({
@@ -54,8 +73,9 @@ function ServicesContent() {
 
   const openClient = async (subLink: string, url: string, appName: string) => {
     await copyText(subLink);
+    getWebApp()?.HapticFeedback?.notificationOccurred("success");
     showNotice(`لینک کپی شد؛ در حال باز کردن ${appName}…`);
-    window.location.href = url;
+    openExternal(url);
   };
 
   if (isLoading) {
