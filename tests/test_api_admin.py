@@ -10,8 +10,9 @@ from sqlalchemy import select  # noqa: E402
 
 from bot_package.config_loader import BotConfig  # noqa: E402
 from bot_package.database import async_session  # noqa: E402
-from bot_package.models import Admin, Config, ShopPlan  # noqa: E402
+from bot_package.models import Admin, Config, ShopPlan, User  # noqa: E402
 from bot_package.services.subscription_link_service import SubscriptionLinkService  # noqa: E402
+from bot_package.services.wallet_notification_service import WalletNotificationService  # noqa: E402
 from webapi.main import app  # noqa: E402
 
 
@@ -99,6 +100,49 @@ async def test_settings_roundtrip(client, monkeypatch):
     got = await client.get("/api/v1/admin/settings/trial", headers=h)
     assert got.json()["volume_mb"] == 500
     assert got.json()["enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_panel_wallet_charge_notifies_user(client, monkeypatch):
+    monkeypatch.setattr(BotConfig, "ADMIN_PASSWORD", "testpass", raising=False)
+    notifications = []
+
+    async def fake_notification(session, **kwargs):
+        notifications.append(kwargs)
+        return True
+
+    monkeypatch.setattr(
+        WalletNotificationService,
+        "send_charge_notification",
+        fake_notification,
+    )
+    async with async_session() as session:
+        session.add(
+            User(
+                telegram_id=99001,
+                first_name="Notify",
+                wallet_balance=10_000,
+            )
+        )
+        await session.commit()
+
+    res = await _login(client, 9001)
+    headers = {"Authorization": f"Bearer {res.json()['access_token']}"}
+    charged = await client.post(
+        "/api/v1/admin/users/99001/charge",
+        json={"amount": 25_000},
+        headers=headers,
+    )
+
+    assert charged.status_code == 200
+    assert charged.json()["wallet_balance"] == 35_000
+    assert notifications == [
+        {
+            "telegram_id": 99001,
+            "amount": 25_000,
+            "wallet_balance": 35_000,
+        }
+    ]
 
 
 @pytest.mark.asyncio

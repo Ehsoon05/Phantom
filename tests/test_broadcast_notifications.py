@@ -63,6 +63,34 @@ async def test_wallet_charge_notification_is_customizable(db):
     assert "شارژ شد" in message
 
 
+@pytest.mark.asyncio
+async def test_wallet_charge_notification_sends_rendered_message(db):
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+    from bot_package.services.wallet_notification_service import WalletNotificationService
+
+    sent = []
+
+    class FakeBot:
+        async def send_message(self, **kwargs):
+            sent.append(kwargs)
+
+    async with db.async_session() as session:
+        await ShopCustomizationService.init_defaults(session)
+        success = await WalletNotificationService.send_charge_notification(
+            session,
+            telegram_id=1001,
+            amount=25_000,
+            wallet_balance=80_000,
+            bot=FakeBot(),
+        )
+
+    assert success is True
+    assert sent[0]["chat_id"] == 1001
+    assert "25,000" in sent[0]["text"]
+    assert "80,000" in sent[0]["text"]
+    assert sent[0]["reply_markup"] is not None
+
+
 def test_admin_main_keyboard_contains_broadcast():
     from bot_package.utils.keyboards import ADMIN_BROADCAST, admin_main_keyboard
 

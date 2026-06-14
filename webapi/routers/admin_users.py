@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot_package.models import Admin, User
 from bot_package.services.user_service import UserService
+from bot_package.services.wallet_notification_service import WalletNotificationService
 
 from ..deps import get_session, require_permission
 from ..schemas import AdminUserOut, ChargeWalletRequest, SetBalanceRequest
@@ -110,7 +111,16 @@ async def charge_wallet(
     if not ok:
         raise HTTPException(status_code=404, detail="User not found")
     await session.commit()
-    return await get_user(telegram_id, session, admin)
+    user = (
+        await session.execute(select(User).where(User.telegram_id == telegram_id))
+    ).scalar_one()
+    await WalletNotificationService.send_charge_notification(
+        session,
+        telegram_id=telegram_id,
+        amount=body.amount,
+        wallet_balance=user.wallet_balance or 0,
+    )
+    return _user_out(user)
 
 
 @router.post("/{telegram_id}/balance", response_model=AdminUserOut)

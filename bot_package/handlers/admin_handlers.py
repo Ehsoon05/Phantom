@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from telegram import (
-    Bot,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     ReplyKeyboardMarkup,
@@ -33,6 +32,7 @@ from ..services.crypto_payment_service import CryptoPaymentService, available_co
 from ..services.rate_service import RateService
 from ..services.rial_payment_service import RialPaymentService
 from ..services.settings_service import SettingsService
+from ..services.wallet_notification_service import WalletNotificationService
 from ..services.inventory_service import InventoryService
 from ..services.price_service import PriceService
 from ..services.referral_service import ReferralService
@@ -1095,26 +1095,18 @@ async def charge_wallet_execute(update: Update, context: ContextTypes.DEFAULT_TY
             user = (
                 await session.execute(select(User).where(User.telegram_id == user_id))
             ).scalar_one()
-            notification = await ShopCustomizationService.get_message(
-                session,
-                "wallet_charge_notification",
-                amount=f"{amount:,}",
-                wallet_balance=f"{user.wallet_balance:,}",
-            )
-            notification_keyboard = await ShopCustomizationService.main_menu_keyboard(session)
 
     if success:
-        try:
-            async with Bot(BotConfig.MAIN_BOT_TOKEN) as main_bot:
-                await main_bot.send_message(
-                    chat_id=user_id,
-                    text=notification,
-                    parse_mode=getattr(notification, "parse_mode", constants.ParseMode.MARKDOWN),
-                    reply_markup=notification_keyboard,
-                )
+        async with async_session() as session:
+            notified = await WalletNotificationService.send_charge_notification(
+                session,
+                telegram_id=user_id,
+                amount=amount,
+                wallet_balance=user.wallet_balance,
+            )
+        if notified:
             notification_status = "\nپیام شارژ نیز برای کاربر ارسال شد."
-        except Exception as exc:
-            logger.info("Could not notify wallet charge for user %s: %s", user_id, exc)
+        else:
             notification_status = "\nشارژ ثبت شد، اما ارسال پیام به کاربر ممکن نبود."
         await update.message.reply_text(
             CHARGE_SUCCESS.format(user_id, f"{amount:,}", datetime.now().strftime("%H:%M:%S"))
