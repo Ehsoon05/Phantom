@@ -24,7 +24,7 @@ function formatStartDate(value: string | null) {
   const normalized = /(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? value : `${value}Z`;
   const date = new Date(normalized);
   if (Number.isNaN(date.getTime())) return "نامشخص";
-  return new Intl.DateTimeFormat("fa-IR", {
+  return new Intl.DateTimeFormat("en-GB", {
     dateStyle: "medium",
     timeStyle: "short",
     timeZone: "Asia/Tehran",
