@@ -3,8 +3,23 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
-from telegram import Bot, ReplyKeyboardMarkup, ReplyKeyboardRemove, Update, constants
-from telegram.ext import CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
+from telegram import (
+    Bot,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+    Update,
+    constants,
+)
+from telegram.ext import (
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    ConversationHandler,
+    MessageHandler,
+    filters,
+)
 from telegram.helpers import escape_markdown
 
 from ..auth import AuthManager
@@ -186,6 +201,9 @@ from ..utils.validators import extract_links_from_text
 
 logger = logging.getLogger(__name__)
 
+ADD_CONFIG_PAGE_SIZE = 8
+ADD_CONFIG_CALLBACK_PREFIX = "admin_addcfg"
+SHOP_PLAN_CALLBACK_PREFIX = "admin_planmgr"
 
 (
     CHOOSE_VOLUME_ADD,
@@ -354,6 +372,12 @@ def _plan_label(plan) -> str:
     return f"#{plan.id} [{plan.category_key}] {emoji}{plan.title} - {plan.volume_gb} گیگ ({status})"
 
 
+def _inline_plan_label(plan, *, include_status: bool = False) -> str:
+    status = "✅ " if include_status and plan.is_active else "⏸ " if include_status else ""
+    label = f"{status}📦 {plan.title} | {plan.volume_gb} گیگ | {plan.category_key}"
+    return label if len(label) <= 60 else f"{label[:57]}..."
+
+
 def _category_label(category) -> str:
     status = "✅" if category.is_active else "⏸"
     emoji = f"{category.emoji} " if category.emoji else ""
@@ -414,6 +438,114 @@ async def _admin_volume_keyboard(session, action: str) -> ReplyKeyboardMarkup:
     if not labels:
         labels = [f"📦 {volume} گیگ" for volume in (1, 2, 3, 5, 10, 20)]
     return _rows(labels, width=2)
+
+
+def _add_config_plan_keyboard(plans, page: int = 0) -> InlineKeyboardMarkup:
+    total_pages = max(1, (len(plans) + ADD_CONFIG_PAGE_SIZE - 1) // ADD_CONFIG_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * ADD_CONFIG_PAGE_SIZE
+    page_plans = plans[start : start + ADD_CONFIG_PAGE_SIZE]
+
+    rows = [
+        [
+            InlineKeyboardButton(
+                _inline_plan_label(plan),
+                callback_data=f"{ADD_CONFIG_CALLBACK_PREFIX}:select:{plan.id}",
+            )
+        ]
+        for plan in page_plans
+    ]
+    navigation = []
+    if page > 0:
+        navigation.append(
+            InlineKeyboardButton(
+                "قبلی",
+                callback_data=f"{ADD_CONFIG_CALLBACK_PREFIX}:page:{page - 1}",
+            )
+        )
+    navigation.append(
+        InlineKeyboardButton(
+            f"{page + 1} / {total_pages}",
+            callback_data=f"{ADD_CONFIG_CALLBACK_PREFIX}:noop",
+        )
+    )
+    if page + 1 < total_pages:
+        navigation.append(
+            InlineKeyboardButton(
+                "بعدی",
+                callback_data=f"{ADD_CONFIG_CALLBACK_PREFIX}:page:{page + 1}",
+            )
+        )
+    rows.append(navigation)
+    rows.append(
+        [
+            InlineKeyboardButton(
+                "لغو",
+                callback_data=f"{ADD_CONFIG_CALLBACK_PREFIX}:cancel",
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+def _shop_plan_management_keyboard(plans, page: int = 0) -> InlineKeyboardMarkup:
+    total_pages = max(1, (len(plans) + ADD_CONFIG_PAGE_SIZE - 1) // ADD_CONFIG_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * ADD_CONFIG_PAGE_SIZE
+    page_plans = plans[start : start + ADD_CONFIG_PAGE_SIZE]
+    rows = [
+        [
+            InlineKeyboardButton(
+                _inline_plan_label(plan, include_status=True),
+                callback_data=f"{SHOP_PLAN_CALLBACK_PREFIX}:select:{plan.id}",
+            )
+        ]
+        for plan in page_plans
+    ]
+    navigation = []
+    if page > 0:
+        navigation.append(
+            InlineKeyboardButton(
+                "قبلی",
+                callback_data=f"{SHOP_PLAN_CALLBACK_PREFIX}:page:{page - 1}",
+            )
+        )
+    navigation.append(
+        InlineKeyboardButton(
+            f"{page + 1} / {total_pages}",
+            callback_data=f"{SHOP_PLAN_CALLBACK_PREFIX}:noop",
+        )
+    )
+    if page + 1 < total_pages:
+        navigation.append(
+            InlineKeyboardButton(
+                "بعدی",
+                callback_data=f"{SHOP_PLAN_CALLBACK_PREFIX}:page:{page + 1}",
+            )
+        )
+    rows.append(navigation)
+    rows.append(
+        [
+            InlineKeyboardButton(
+                ADMIN_ADD_PLAN,
+                callback_data=f"{SHOP_PLAN_CALLBACK_PREFIX}:add",
+            )
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                "بازگشت",
+                callback_data=f"{SHOP_PLAN_CALLBACK_PREFIX}:back",
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+async def _active_plans_for_config(session):
+    plans = await ShopCustomizationService.list_plans(session)
+    return [plan for plan in plans if plan.is_active]
 
 
 def _normalize_nullable(text: str) -> str | None:
@@ -606,13 +738,72 @@ async def admin_logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @require_auth(permission="inventory")
 async def add_config_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with async_session() as session:
-        keyboard = await _admin_volume_keyboard(session, "add")
+        plans = await _active_plans_for_config(session)
+    if not plans:
+        await update.message.reply_text(
+            "هیچ سرویس فعالی برای افزودن کانفیگ وجود ندارد.",
+            reply_markup=admin_inventory_keyboard(),
+        )
+        return ConversationHandler.END
     await update.message.reply_text(
-        ADD_CONFIG_VOLUME,
-        reply_markup=keyboard,
+        f"{ADD_CONFIG_VOLUME}\n\nتعداد سرویس‌های فعال: **{len(plans)}**",
+        reply_markup=_add_config_plan_keyboard(plans),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     return CHOOSE_VOLUME_ADD
+
+
+@require_auth(permission="inventory")
+async def add_config_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = (query.data or "").split(":")
+    action = parts[1] if len(parts) > 1 else ""
+
+    if action == "noop":
+        return CHOOSE_VOLUME_ADD
+    if action == "cancel":
+        await query.edit_message_text("افزودن کانفیگ لغو شد.")
+        await query.message.reply_text(
+            ADMIN_INVENTORY_MENU,
+            reply_markup=admin_inventory_keyboard(),
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
+        return ConversationHandler.END
+
+    async with async_session() as session:
+        plans = await _active_plans_for_config(session)
+        if action == "page":
+            page = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+            await query.edit_message_reply_markup(
+                reply_markup=_add_config_plan_keyboard(plans, page)
+            )
+            return CHOOSE_VOLUME_ADD
+
+        plan_id = int(parts[2]) if action == "select" and len(parts) > 2 and parts[2].isdigit() else None
+        plan = await ShopCustomizationService.get_plan(session, plan_id) if plan_id else None
+
+    if not plan or not plan.is_active:
+        await query.message.reply_text("این سرویس دیگر فعال نیست؛ یک سرویس دیگر انتخاب کنید.")
+        return CHOOSE_VOLUME_ADD
+
+    context.user_data["adding_plan_id"] = plan.id
+    context.user_data["adding_volume"] = plan.volume_gb
+    context.user_data["adding_category_key"] = plan.category_key
+    context.user_data["collected_links"] = []
+    await query.edit_message_text(
+        f"سرویس انتخاب شد:\n"
+        f"**{escape_markdown(plan.title, version=1)}**\n"
+        f"دسته: `{escape_markdown(plan.category_key, version=1)}`\n"
+        f"حجم: **{plan.volume_gb} گیگ**",
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    await query.message.reply_text(
+        SEND_LINKS_PROMPT,
+        reply_markup=add_links_collecting_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return COLLECT_LINKS
 
 
 @require_auth(permission="inventory")
@@ -2726,14 +2917,57 @@ async def shop_button_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def shop_plans_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with async_session() as session:
         plans = await ShopCustomizationService.list_plans(session)
-    labels = [_plan_label(plan) for plan in plans]
-    labels.append(ADMIN_ADD_PLAN)
     await update.message.reply_text(
-        "**مدیریت سرویس‌ها**\n\nپلن موردنظر را انتخاب کنید یا سرویس جدید بسازید.",
-        reply_markup=_rows(labels, width=1),
+        "**مدیریت سرویس‌ها**\n\n"
+        f"تعداد کل سرویس‌ها: **{len(plans)}**\n"
+        "سرویس موردنظر را انتخاب کنید یا سرویس جدید بسازید.",
+        reply_markup=_shop_plan_management_keyboard(plans),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     return SHOP_PLAN_SELECT
+
+
+@require_auth(permission="shop")
+async def shop_plan_management_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = (query.data or "").split(":")
+    action = parts[1] if len(parts) > 1 else ""
+
+    if action == "noop":
+        return SHOP_PLAN_SELECT
+    if action == "back":
+        await query.edit_message_text("از مدیریت سرویس‌ها خارج شدید.")
+        await query.message.reply_text(
+            "به تنظیمات ربات فروش برگشتید.",
+            reply_markup=admin_shop_settings_keyboard(),
+        )
+        return ConversationHandler.END
+    if action == "add":
+        await query.edit_message_text("در حال ساخت سرویس جدید")
+        await query.message.reply_text(
+            "حجم سرویس جدید را به گیگ ارسال کنید. مثال: `30`",
+            reply_markup=_cancel_back_keyboard(),
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
+        return SHOP_PLAN_ADD_VOLUME
+
+    async with async_session() as session:
+        plans = await ShopCustomizationService.list_plans(session)
+    if action == "page":
+        page = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+        await query.edit_message_reply_markup(
+            reply_markup=_shop_plan_management_keyboard(plans, page)
+        )
+        return SHOP_PLAN_SELECT
+
+    plan_id = int(parts[2]) if action == "select" and len(parts) > 2 and parts[2].isdigit() else None
+    if plan_id is None:
+        await query.message.reply_text("سرویس انتخاب‌شده معتبر نیست.")
+        return SHOP_PLAN_SELECT
+    context.user_data["shop_plan_id"] = plan_id
+    await query.edit_message_text("سرویس انتخاب شد.")
+    return await _show_shop_plan_options(update, context)
 
 
 @require_auth(permission="shop")
@@ -2964,10 +3198,13 @@ async def _show_shop_plan_options(update: Update, context: ContextTypes.DEFAULT_
         price = await PriceService.get_plan_price(session, plan) if plan else None
 
     if not plan:
-        await update.message.reply_text("پلن پیدا نشد.", reply_markup=admin_shop_settings_keyboard())
+        await update.effective_message.reply_text(
+            "پلن پیدا نشد.",
+            reply_markup=admin_shop_settings_keyboard(),
+        )
         return ConversationHandler.END
 
-    await update.message.reply_text(
+    await update.effective_message.reply_text(
         "**ویرایش سرویس**\n\n"
         f"شناسه: `#{plan.id}`\n"
         f"حجم: **{plan.volume_gb} گیگ**\n"
@@ -3709,7 +3946,13 @@ async def admin_management_back(update: Update, context: ContextTypes.DEFAULT_TY
 add_config_conv = ConversationHandler(
     entry_points=[MessageHandler(_exact_filter(ADMIN_ADD_CONFIG), add_config_start)],
     states={
-        CHOOSE_VOLUME_ADD: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_config_volume)],
+        CHOOSE_VOLUME_ADD: [
+            CallbackQueryHandler(
+                add_config_plan_callback,
+                pattern=rf"^{ADD_CONFIG_CALLBACK_PREFIX}:",
+            ),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, add_config_volume),
+        ],
         COLLECT_LINKS: [
             MessageHandler(_exact_filter(DONE_ADDING_CONFIGS), done_collecting),
             MessageHandler(_exact_filter(CANCEL), cancel),
@@ -4049,6 +4292,10 @@ shop_plans_conv = ConversationHandler(
     entry_points=[MessageHandler(_exact_filter(ADMIN_SHOP_PLANS), shop_plans_start)],
     states={
         SHOP_PLAN_SELECT: [
+            CallbackQueryHandler(
+                shop_plan_management_callback,
+                pattern=rf"^{SHOP_PLAN_CALLBACK_PREFIX}:",
+            ),
             MessageHandler(_exact_filter(CANCEL), cancel),
             MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_select),
