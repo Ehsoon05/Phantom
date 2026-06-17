@@ -444,6 +444,7 @@ async def process_purchase(
 
     async with async_session() as session:
         try:
+            # purchase_plan locks the wallet row with .with_for_update() before debiting.
             result = await purchase_plan(
                 session,
                 telegram_id=update.effective_user.id,
