@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 from datetime import datetime, time, timedelta, timezone
@@ -25,7 +26,7 @@ from telegram.helpers import escape_markdown
 from ..auth import AuthManager
 from ..config_loader import BotConfig
 from ..database import async_session
-from ..models import Config, Purchase, ReferralRewardRule, User
+from ..models import Config, ProvisionPanel, Purchase, ReferralRewardRule, User
 from ..services.admin_service import ALL_PERMISSIONS, AdminService, normalize_permissions
 from ..services.broadcast_service import BroadcastService
 from ..services.coupon_service import CouponError, CouponService
@@ -36,6 +37,7 @@ from ..services.settings_service import SettingsService
 from ..services.wallet_notification_service import WalletNotificationService
 from ..services.inventory_service import InventoryService
 from ..services.price_service import PriceService
+from ..services.provisioning_service import ProvisioningService
 from ..services.referral_service import ReferralService
 from ..services.required_channel_service import RequiredChannelService
 from ..services.shop_customization_service import ShopCustomizationService
@@ -73,6 +75,18 @@ from ..utils.keyboards import (
     ADMIN_DELETE_BUTTON,
     ADMIN_DELETE_PLAN,
     ADMIN_DELETE_PLAN_CONFIRM,
+    ADMIN_PLAN_PROVISION_SETTINGS,
+    ADMIN_SET_PROVISION_MODE,
+    ADMIN_SET_PROVISION_PANEL,
+    ADMIN_TOGGLE_PROVISION,
+    ADMIN_TOGGLE_RENEW,
+    ADMIN_SET_NAME_PREFIX,
+    ADMIN_SET_PROVISION_VOLUME,
+    ADMIN_PLAN_BACK_TO_EDIT,
+    ADMIN_SET_PANEL_GROUPS,
+    ADMIN_SET_PANEL_INBOUNDS,
+    ADMIN_SET_PANEL_PROTOCOLS,
+    ADMIN_TOGGLE_PANEL_ENABLED,
     ADMIN_DELETE_CATEGORY,
     ADMIN_DELETE_CHANNEL,
     ADMIN_DELETE_COUPON,
@@ -121,6 +135,7 @@ from ..utils.keyboards import (
     ADMIN_SHOP_MENU_WALLET,
     ADMIN_SHOP_MESSAGES,
     ADMIN_SHOP_PLANS,
+    ADMIN_PROVISION_PANELS,
     ADMIN_SHOP_RESET_DEFAULTS,
     ADMIN_SHOP_SETTINGS,
     ADMIN_STOCK_STATUS,
@@ -161,7 +176,10 @@ from ..utils.keyboards import (
     admin_shop_category_edit_keyboard,
     admin_shop_menus_keyboard,
     admin_shop_plan_edit_keyboard,
+    admin_shop_plan_provision_keyboard,
     admin_shop_plan_delete_confirm_keyboard,
+    admin_provision_mode_keyboard,
+    admin_provision_panel_keyboard,
     admin_shop_settings_keyboard,
     admin_emoji_position_keyboard,
     admin_response_button_keyboard,
@@ -277,7 +295,10 @@ SHOP_PLAN_CALLBACK_PREFIX = "admin_planmgr"
     REFERRAL_RULE_OPTION,
     BROADCAST_MESSAGE,
     BROADCAST_CONFIRM,
-) = range(70)
+    PROVISION_PANEL_SELECT,
+    PROVISION_PANEL_OPTION,
+    PROVISION_PANEL_VALUE,
+) = range(73)
 
 
 SHOP_MENU_LABELS = {
@@ -313,6 +334,7 @@ SHOP_SETTINGS_LABELS = {
     ADMIN_SHOP_BUTTONS,
     ADMIN_SHOP_CATEGORIES,
     ADMIN_SHOP_PLANS,
+    ADMIN_PROVISION_PANELS,
     ADMIN_SHOP_RESET_DEFAULTS,
     ADMIN_REQUIRED_CHANNELS,
     ADMIN_TOGGLE_BRANDED_LINKS,
@@ -389,6 +411,62 @@ def _category_label(category) -> str:
     return f"#{category.id} {status} {emoji}{category.title}"
 
 
+def _panel_label(panel: ProvisionPanel) -> str:
+    status = "✅" if panel.is_enabled else "⏸"
+    return f"#{panel.id} {status} {panel.title} ({panel.key})"
+
+
+def _provision_mode_label(value: str | None) -> str:
+    return {
+        "inventory": "انبار فقط",
+        "inventory_then_panel": "اول انبار بعد پنل",
+        "panel_only": "فقط پنل",
+    }.get(value or "inventory", value or "inventory")
+
+
+PROVISION_MODE_VALUES = {
+    "انبار فقط": "inventory",
+    "اول انبار بعد پنل": "inventory_then_panel",
+    "فقط پنل": "panel_only",
+    "inventory": "inventory",
+    "inventory_then_panel": "inventory_then_panel",
+    "panel_only": "panel_only",
+}
+
+
+def _parse_inbounds_text(raw_value: str) -> dict[str, list[str]] | None:
+    value = raw_value.strip()
+    if value in {"-", "خاموش", "همه", "auto", "AUTO"}:
+        return {}
+    try:
+        payload = json.loads(value)
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict):
+        result = {}
+        for protocol, tags in payload.items():
+            if not isinstance(tags, list):
+                return None
+            clean_tags = [str(tag).strip() for tag in tags if str(tag).strip()]
+            if clean_tags:
+                result[str(protocol).strip()] = clean_tags
+        return result
+
+    result: dict[str, list[str]] = {}
+    for chunk in value.split(";"):
+        if not chunk.strip():
+            continue
+        if ":" not in chunk:
+            return None
+        protocol, tags_text = chunk.split(":", 1)
+        protocol = protocol.strip()
+        tags = [tag.strip() for tag in tags_text.split(",") if tag.strip()]
+        if not protocol or not tags:
+            return None
+        result[protocol] = tags
+    return result
+
+
 def _parse_hash_id(text: str) -> int | None:
     match = re.match(r"#(\d+)\b", text.strip())
     return int(match.group(1)) if match else None
@@ -418,6 +496,8 @@ async def _leave_shop_flow_if_navigation(update: Update, context: ContextTypes.D
             await shop_categories_start(update, context)
         elif text == ADMIN_SHOP_PLANS:
             await shop_plans_start(update, context)
+        elif text == ADMIN_PROVISION_PANELS:
+            await provision_panels_start(update, context)
         elif text == ADMIN_REQUIRED_CHANNELS:
             await required_channels_start(update, context)
         elif text == ADMIN_TOGGLE_BRANDED_LINKS:
@@ -3215,6 +3295,7 @@ async def _show_shop_plan_options(update: Update, context: ContextTypes.DEFAULT_
     async with async_session() as session:
         plan = await ShopCustomizationService.get_plan(session, plan_id)
         price = await PriceService.get_plan_price(session, plan) if plan else None
+        panel = await ProvisioningService.panel_for_plan(session, plan) if plan else None
 
     if not plan:
         await update.effective_message.reply_text(
@@ -3236,8 +3317,49 @@ async def _show_shop_plan_options(update: Update, context: ContextTypes.DEFAULT_
         f"جای ایموجی پریمیوم: {'راست' if plan.premium_emoji_position == 'right' else 'چپ'}\n"
         f"رنگ: `{plan.style or 'default'}`\n"
         f"ترتیب: {plan.display_order}\n"
+        f"ساخت از پنل: **{'روشن' if plan.provision_enabled else 'خاموش'}**\n"
+        f"حالت تامین: **{_provision_mode_label(plan.provision_mode)}**\n"
+        f"پنل ساخت: `{plan.provision_panel_key or (panel.key if panel else '-')}`\n"
+        f"پیشوند نام ساب: `{plan.name_prefix or '-'}`\n"
+        f"حجم واقعی ساخت/تمدید: **{_volume_label(plan.provision_volume_gb if plan.provision_volume_gb is not None else plan.volume_gb)}**\n"
+        f"تمدید: **{'روشن' if plan.renew_enabled else 'خاموش'}**\n"
         f"وضعیت: {'فعال' if plan.is_active else 'غیرفعال'}",
         reply_markup=admin_shop_plan_edit_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return SHOP_PLAN_OPTION
+
+
+async def _show_shop_plan_provision_options(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    plan_id = context.user_data.get("shop_plan_id")
+    async with async_session() as session:
+        plan = await ShopCustomizationService.get_plan(session, plan_id)
+        category = await ShopCustomizationService.get_category(session, plan.category_key) if plan else None
+        panel = await ProvisioningService.panel_for_plan(session, plan) if plan else None
+    if not plan:
+        await update.effective_message.reply_text("سرویس پیدا نشد.", reply_markup=admin_shop_settings_keyboard())
+        return ConversationHandler.END
+
+    category_panel = category.provision_panel_key if category else None
+    await update.effective_message.reply_text(
+        "**تنظیمات ساخت از پنل**\n\n"
+        f"سرویس: **{plan.title}** `#{plan.id}`\n"
+        f"دسته: `{plan.category_key}`\n"
+        f"ساخت خودکار پلن: **{'روشن' if plan.provision_enabled else 'خاموش'}**\n"
+        f"ساخت خودکار دسته: **{'روشن' if category and category.provision_enabled else 'خاموش'}**\n"
+        f"حالت تامین: **{_provision_mode_label(plan.provision_mode)}**\n"
+        f"پنل سرویس: `{plan.provision_panel_key or '-'}`\n"
+        f"پنل دسته: `{category_panel or '-'}`\n"
+        f"پنل موثر: `{panel.key if panel else '-'}`\n"
+        f"نوع پنل: `{panel.panel_type if panel else '-'}`\n"
+        f"پیشوند نام ساب: `{plan.name_prefix or '-'}`\n"
+        f"حجم واقعی ساخت/تمدید: **{_volume_label(plan.provision_volume_gb if plan.provision_volume_gb is not None else plan.volume_gb)}**\n"
+        f"تمدید: **{'روشن' if plan.renew_enabled else 'خاموش'}**\n\n"
+        "حالت‌ها:\n"
+        "`انبار فقط`: فقط از لینک‌های آماده می‌فروشد.\n"
+        "`اول انبار بعد پنل`: اول انبار، اگر نبود از پنل می‌سازد.\n"
+        "`فقط پنل`: همیشه مستقیم از پنل می‌سازد.",
+        reply_markup=admin_shop_plan_provision_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     return SHOP_PLAN_OPTION
@@ -3250,6 +3372,78 @@ async def shop_plan_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     option = update.message.text
     plan_id = context.user_data.get("shop_plan_id")
+
+    if option == ADMIN_PLAN_BACK_TO_EDIT:
+        context.user_data.pop("shop_plan_provision_mode", None)
+        return await _show_shop_plan_options(update, context)
+
+    if option == ADMIN_PLAN_PROVISION_SETTINGS:
+        context.user_data["shop_plan_provision_mode"] = True
+        return await _show_shop_plan_provision_options(update, context)
+
+    if context.user_data.get("shop_plan_provision_mode"):
+        if option == ADMIN_TOGGLE_PROVISION:
+            async with async_session() as session:
+                plan = await ShopCustomizationService.get_plan(session, plan_id)
+                if plan:
+                    await ShopCustomizationService.update_plan(
+                        session,
+                        plan_id,
+                        provision_enabled=not plan.provision_enabled,
+                    )
+            await update.message.reply_text("وضعیت ساخت خودکار تغییر کرد.")
+            return await _show_shop_plan_provision_options(update, context)
+
+        if option == ADMIN_TOGGLE_RENEW:
+            async with async_session() as session:
+                plan = await ShopCustomizationService.get_plan(session, plan_id)
+                if plan:
+                    await ShopCustomizationService.update_plan(
+                        session,
+                        plan_id,
+                        renew_enabled=not plan.renew_enabled,
+                    )
+            await update.message.reply_text("وضعیت تمدید تغییر کرد.")
+            return await _show_shop_plan_provision_options(update, context)
+
+        provision_fields = {
+            ADMIN_SET_PROVISION_MODE: (
+                "provision_mode",
+                "حالت تامین را انتخاب کنید.",
+                admin_provision_mode_keyboard(),
+            ),
+            ADMIN_SET_PROVISION_PANEL: (
+                "provision_panel_key",
+                "پنل ساخت را انتخاب کنید یا کلیدش را بفرستید.",
+                None,
+            ),
+            ADMIN_SET_NAME_PREFIX: (
+                "name_prefix",
+                "پیشوند نام ساب را بفرستید.\nمثال: `PhantomHubs_Express10gig`\nبرای پاک کردن، `-` بفرستید.",
+                _cancel_back_keyboard(),
+            ),
+            ADMIN_SET_PROVISION_VOLUME: (
+                "provision_volume_gb",
+                "حجم واقعی ساخت/تمدید در پنل را به گیگ بفرستید.\nبرای استفاده از حجم نمایشی سرویس، `-` بفرستید.\nبرای ۳۰۰ گیگ: `300`",
+                _cancel_back_keyboard(),
+            ),
+        }
+        selected = provision_fields.get(option)
+        if selected:
+            field, prompt, keyboard = selected
+            context.user_data["shop_plan_field"] = field
+            if field == "provision_panel_key":
+                async with async_session() as session:
+                    await ProvisioningService.ensure_env_panels(session)
+                    panels = (await session.execute(select(ProvisionPanel).order_by(ProvisionPanel.id))).scalars().all()
+                labels = [_panel_label(panel) for panel in panels]
+                labels.append("استفاده از پنل دسته")
+                keyboard = _rows(labels, width=1)
+            await update.message.reply_text(prompt, reply_markup=keyboard, parse_mode=constants.ParseMode.MARKDOWN)
+            return SHOP_PLAN_VALUE
+
+        await update.message.reply_text("گزینه تنظیمات ساخت معتبر نیست.", reply_markup=admin_shop_plan_provision_keyboard())
+        return SHOP_PLAN_OPTION
 
     if option == ADMIN_DELETE_PLAN:
         async with async_session() as session:
@@ -3356,7 +3550,50 @@ async def shop_plan_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("قیمت سرویس ذخیره شد.")
         return await _show_shop_plan_options(update, context)
 
-    if field == "display_order":
+    if field == "provision_mode":
+        value = PROVISION_MODE_VALUES.get(raw_value)
+        if not value:
+            await update.message.reply_text("حالت تامین معتبر نیست.", reply_markup=admin_provision_mode_keyboard())
+            return SHOP_PLAN_VALUE
+        updates = {"provision_mode": value, "provision_enabled": value != "inventory"}
+    elif field == "provision_panel_key":
+        if raw_value == "استفاده از پنل دسته" or raw_value == "-":
+            updates = {"provision_panel_key": None}
+        else:
+            panel_id = _parse_hash_id(raw_value)
+            async with async_session() as session:
+                await ProvisioningService.ensure_env_panels(session)
+                panels = (await session.execute(select(ProvisionPanel).order_by(ProvisionPanel.id))).scalars().all()
+            panel = next(
+                (
+                    item
+                    for item in panels
+                    if (panel_id is not None and item.id == panel_id)
+                    or item.key == raw_value
+                    or _panel_label(item) == raw_value
+                ),
+                None,
+            )
+            if not panel:
+                await update.message.reply_text("پنل معتبر نیست. از لیست انتخاب کنید یا کلید پنل را بفرستید.")
+                return SHOP_PLAN_VALUE
+            updates = {"provision_panel_key": panel.key}
+    elif field == "name_prefix":
+        updates = {"name_prefix": _normalize_nullable(raw_value)}
+    elif field == "provision_volume_gb":
+        if raw_value == "-":
+            updates = {"provision_volume_gb": None}
+        else:
+            try:
+                value = int(raw_value.replace(",", ""))
+            except ValueError:
+                await update.message.reply_text("حجم واقعی باید عدد باشد یا `-` بفرستید.", parse_mode=constants.ParseMode.MARKDOWN)
+                return SHOP_PLAN_VALUE
+            if value < 0:
+                await update.message.reply_text("حجم واقعی نمی‌تواند منفی باشد.")
+                return SHOP_PLAN_VALUE
+            updates = {"provision_volume_gb": value}
+    elif field == "display_order":
         try:
             updates = {"display_order": int(raw_value)}
         except ValueError:
@@ -3404,6 +3641,8 @@ async def shop_plan_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     await update.message.reply_text("سرویس ذخیره شد.")
+    if context.user_data.get("shop_plan_provision_mode"):
+        return await _show_shop_plan_provision_options(update, context)
     return await _show_shop_plan_options(update, context)
 
 
@@ -3508,6 +3747,174 @@ async def shop_plan_add_price(update: Update, context: ContextTypes.DEFAULT_TYPE
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     return ConversationHandler.END
+
+
+@require_auth(permission="shop")
+async def provision_panels_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        await ProvisioningService.ensure_env_panels(session)
+        panels = (await session.execute(select(ProvisionPanel).order_by(ProvisionPanel.id))).scalars().all()
+    labels = [_panel_label(panel) for panel in panels]
+    await update.message.reply_text(
+        "**مدیریت پنل‌های ساخت**\n\n"
+        "پنل موردنظر را انتخاب کنید.\n"
+        "برای آسان پنل معمولاً فقط `گروه‌ها` لازم است؛ برای مرزبان/Alien می‌توانید اینباندها را تنظیم کنید.",
+        reply_markup=_rows(labels, width=1),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return PROVISION_PANEL_SELECT
+
+
+@require_auth(permission="shop")
+async def provision_panel_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("provision_panel_key", None)
+        return ConversationHandler.END
+    panel_id = _parse_hash_id(update.message.text)
+    async with async_session() as session:
+        await ProvisioningService.ensure_env_panels(session)
+        panels = (await session.execute(select(ProvisionPanel).order_by(ProvisionPanel.id))).scalars().all()
+    panel = next(
+        (
+            item
+            for item in panels
+            if (panel_id is not None and item.id == panel_id)
+            or item.key == update.message.text.strip()
+            or _panel_label(item) == update.message.text
+        ),
+        None,
+    )
+    if not panel:
+        await update.message.reply_text("پنل انتخاب‌شده معتبر نیست.")
+        return PROVISION_PANEL_SELECT
+    context.user_data["provision_panel_key"] = panel.key
+    return await _show_provision_panel_options(update, context)
+
+
+async def _show_provision_panel_options(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = context.user_data.get("provision_panel_key")
+    async with async_session() as session:
+        panel = (
+            await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == key))
+        ).scalar_one_or_none()
+    if not panel:
+        await update.effective_message.reply_text("پنل پیدا نشد.", reply_markup=admin_shop_settings_keyboard())
+        return ConversationHandler.END
+
+    group_ids = json.loads(panel.group_ids or "[]")
+    inbounds = json.loads(panel.inbounds_json or "{}")
+    protocols = json.loads(panel.protocols_json or "[]")
+    await update.effective_message.reply_text(
+        "**تنظیمات پنل ساخت**\n\n"
+        f"عنوان: **{panel.title}**\n"
+        f"کلید: `{panel.key}`\n"
+        f"نوع: `{panel.panel_type}`\n"
+        f"آدرس: `{panel.base_url}`\n"
+        f"وضعیت: **{'فعال' if panel.is_enabled else 'غیرفعال'}**\n"
+        f"گروه‌های آسان پنل: `{group_ids or '-'}`\n"
+        f"اینباندهای مرزبان: `{inbounds or '-'}`\n"
+        f"پروتکل‌ها: `{protocols or '-'}`",
+        reply_markup=admin_provision_panel_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return PROVISION_PANEL_OPTION
+
+
+@require_auth(permission="shop")
+async def provision_panel_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("provision_panel_key", None)
+        context.user_data.pop("provision_panel_field", None)
+        return ConversationHandler.END
+    key = context.user_data.get("provision_panel_key")
+    if not key:
+        return await provision_panels_start(update, context)
+    option = update.message.text
+    if option == ADMIN_TOGGLE_PANEL_ENABLED:
+        async with async_session() as session:
+            panel = (
+                await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == key))
+            ).scalar_one_or_none()
+            if panel:
+                panel.is_enabled = not panel.is_enabled
+                panel.updated_at = datetime.now(timezone.utc)
+                await session.commit()
+        await update.message.reply_text("وضعیت پنل تغییر کرد.")
+        return await _show_provision_panel_options(update, context)
+
+    fields = {
+        ADMIN_SET_PANEL_GROUPS: (
+            "group_ids",
+            "شناسه گروه‌های آسان پنل را با کاما بفرستید.\nمثال: `1,2,3`\nبرای پیش‌فرض/خالی، `-` بفرستید.",
+        ),
+        ADMIN_SET_PANEL_INBOUNDS: (
+            "inbounds_json",
+            "اینباندهای مرزبان را بفرستید.\nمثال:\n`vless:reality-grpc,reality-tcp;trojan:trojan-ws`\nیا JSON کامل بفرستید. برای حالت خودکار، `-` بفرستید.",
+        ),
+        ADMIN_SET_PANEL_PROTOCOLS: (
+            "protocols_json",
+            "پروتکل‌ها را با کاما بفرستید.\nمثال: `vless,trojan,shadowsocks`\nبرای خالی، `-` بفرستید.",
+        ),
+    }
+    selected = fields.get(option)
+    if not selected:
+        await update.message.reply_text("گزینه معتبر نیست.", reply_markup=admin_provision_panel_keyboard())
+        return PROVISION_PANEL_OPTION
+    field, prompt = selected
+    context.user_data["provision_panel_field"] = field
+    await update.message.reply_text(prompt, reply_markup=_cancel_back_keyboard(), parse_mode=constants.ParseMode.MARKDOWN)
+    return PROVISION_PANEL_VALUE
+
+
+@require_auth(permission="shop")
+async def provision_panel_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("provision_panel_key", None)
+        context.user_data.pop("provision_panel_field", None)
+        return ConversationHandler.END
+    key = context.user_data.get("provision_panel_key")
+    field = context.user_data.get("provision_panel_field")
+    raw_value = update.message.text.strip()
+    if not key or not field:
+        return await provision_panels_start(update, context)
+
+    if field == "group_ids":
+        if raw_value == "-":
+            value = None
+        else:
+            try:
+                value = json.dumps([int(item.strip()) for item in raw_value.split(",") if item.strip()])
+            except ValueError:
+                await update.message.reply_text("گروه‌ها باید عددی و با کاما جدا شده باشند.")
+                return PROVISION_PANEL_VALUE
+    elif field == "inbounds_json":
+        parsed = _parse_inbounds_text(raw_value)
+        if parsed is None:
+            await update.message.reply_text("فرمت اینباندها معتبر نیست.")
+            return PROVISION_PANEL_VALUE
+        value = json.dumps(parsed, ensure_ascii=False)
+    elif field == "protocols_json":
+        if raw_value == "-":
+            value = None
+        else:
+            value = json.dumps([item.strip() for item in raw_value.split(",") if item.strip()], ensure_ascii=False)
+    else:
+        return await _show_provision_panel_options(update, context)
+
+    async with async_session() as session:
+        panel = (
+            await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == key))
+        ).scalar_one_or_none()
+        if not panel:
+            await update.message.reply_text("پنل پیدا نشد.")
+            return ConversationHandler.END
+        setattr(panel, field, value)
+        panel.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+
+    context.user_data.pop("provision_panel_field", None)
+    await update.message.reply_text("تنظیمات پنل ذخیره شد.")
+    return await _show_provision_panel_options(update, context)
 
 
 # ---------------------------------------------------------------------------
@@ -4357,6 +4764,28 @@ shop_plans_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
 )
 
+provision_panels_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_PROVISION_PANELS), provision_panels_start)],
+    states={
+        PROVISION_PANEL_SELECT: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, provision_panel_select),
+        ],
+        PROVISION_PANEL_OPTION: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, provision_panel_option),
+        ],
+        PROVISION_PANEL_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), provision_panels_start),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, provision_panel_value),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
 crypto_search_conv = ConversationHandler(
     entry_points=[MessageHandler(_exact_filter(ADMIN_CRYPTO_SEARCH), crypto_search_start)],
     states={
@@ -4563,6 +4992,7 @@ admin_handlers = [
     shop_messages_conv,
     shop_buttons_conv,
     shop_plans_conv,
+    provision_panels_conv,
     crypto_search_conv,
     crypto_set_margin_conv,
     crypto_set_usdt_conv,
@@ -4585,6 +5015,7 @@ admin_handlers = [
     MessageHandler(_exact_filter(ADMIN_ADMINS), admin_management_menu),
     MessageHandler(_exact_filter(ADMIN_REFRESH_ADMINS), list_admins),
     MessageHandler(_exact_filter(ADMIN_SHOP_SETTINGS), shop_settings_menu),
+    MessageHandler(_exact_filter(ADMIN_PROVISION_PANELS), provision_panels_start),
     MessageHandler(_exact_filter(ADMIN_TRIAL_SETTINGS), trial_settings_menu),
     MessageHandler(_exact_filter(ADMIN_TRIAL_TOGGLE), trial_toggle),
     MessageHandler(_exact_filter(ADMIN_TOGGLE_BRANDED_LINKS), toggle_branded_subscription_links),

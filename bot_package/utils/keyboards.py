@@ -66,6 +66,7 @@ ADMIN_SHOP_MESSAGES = "📝 مدیریت پیام‌ها"
 ADMIN_SHOP_BUTTONS = "🔘 مدیریت دکمه‌ها"
 ADMIN_SHOP_PLANS = "📦 مدیریت سرویس‌ها"
 ADMIN_SHOP_CATEGORIES = "🗂 مدیریت دسته‌ها"
+ADMIN_PROVISION_PANELS = "🧬 مدیریت پنل‌های ساخت"
 ADMIN_REQUIRED_CHANNELS = "📣 عضویت اجباری"
 ADMIN_TOGGLE_BRANDED_LINKS = "🔗 لینک اختصاصی ساب"
 ADMIN_TRIAL_SETTINGS = "🧪 تنظیمات کانفیگ تست"
@@ -88,6 +89,18 @@ ADMIN_ADD_BUTTON = "➕ افزودن دکمه سفارشی"
 ADMIN_DELETE_BUTTON = "🗑 حذف دکمه"
 ADMIN_DELETE_PLAN = "🗑 حذف کامل سرویس"
 ADMIN_DELETE_PLAN_CONFIRM = "⚠️ بله، سرویس کامل حذف شود"
+ADMIN_PLAN_PROVISION_SETTINGS = "🧬 تنظیمات ساخت از پنل"
+ADMIN_SET_PROVISION_MODE = "🔁 حالت تامین سرویس"
+ADMIN_SET_PROVISION_PANEL = "🖥 انتخاب پنل ساخت"
+ADMIN_TOGGLE_PROVISION = "⏯ ساخت خودکار"
+ADMIN_TOGGLE_RENEW = "🔄 تمدید سرویس"
+ADMIN_SET_NAME_PREFIX = "🏷 پیشوند نام ساب"
+ADMIN_SET_PROVISION_VOLUME = "📦 حجم واقعی ساخت"
+ADMIN_PLAN_BACK_TO_EDIT = "⬅️ بازگشت به ویرایش سرویس"
+ADMIN_SET_PANEL_GROUPS = "👥 گروه‌های آسان پنل"
+ADMIN_SET_PANEL_INBOUNDS = "🔌 اینباندهای مرزبان"
+ADMIN_SET_PANEL_PROTOCOLS = "🧩 پروتکل‌های پنل"
+ADMIN_TOGGLE_PANEL_ENABLED = "⏯ فعال/غیرفعال پنل"
 ADMIN_ADD_PLAN = "➕ افزودن سرویس"
 ADMIN_ADD_CATEGORY = "➕ افزودن دسته"
 ADMIN_DELETE_CATEGORY = "🗑 حذف دسته"
@@ -373,6 +386,7 @@ def admin_shop_settings_keyboard() -> ReplyKeyboardMarkup:
         [
             [_button(ADMIN_SHOP_MESSAGES), _button(ADMIN_SHOP_BUTTONS)],
             [_button(ADMIN_SHOP_PLANS), _button(ADMIN_SHOP_CATEGORIES)],
+            [_button(ADMIN_PROVISION_PANELS)],
             [_button(ADMIN_REQUIRED_CHANNELS), _button(ADMIN_TOGGLE_BRANDED_LINKS)],
             [_button(ADMIN_TRIAL_SETTINGS)],
             [_button(ADMIN_SHOP_RESET_DEFAULTS, style=STYLE_DANGER)],
@@ -424,8 +438,46 @@ def admin_shop_plan_edit_keyboard() -> ReplyKeyboardMarkup:
             [_button(ADMIN_EDIT_EMOJI_POSITION), _button(ADMIN_EDIT_PREMIUM_EMOJI_POSITION)],
             [_button(ADMIN_EDIT_STYLE)],
             [_button(ADMIN_EDIT_CATEGORY), _button(ADMIN_EDIT_ORDER)],
+            [_button(ADMIN_PLAN_PROVISION_SETTINGS)],
             [_button(ADMIN_TOGGLE_ENABLED)],
             [_button(ADMIN_DELETE_PLAN, style=STYLE_DANGER)],
+            [_button(CANCEL), _button(ADMIN_BACK)],
+        ],
+        one_time_keyboard=True,
+    )
+
+
+def admin_shop_plan_provision_keyboard() -> ReplyKeyboardMarkup:
+    return _keyboard(
+        [
+            [_button(ADMIN_SET_PROVISION_MODE), _button(ADMIN_SET_PROVISION_PANEL)],
+            [_button(ADMIN_TOGGLE_PROVISION), _button(ADMIN_TOGGLE_RENEW)],
+            [_button(ADMIN_SET_NAME_PREFIX), _button(ADMIN_SET_PROVISION_VOLUME)],
+            [_button(ADMIN_PLAN_BACK_TO_EDIT)],
+            [_button(CANCEL), _button(ADMIN_BACK)],
+        ],
+        one_time_keyboard=True,
+    )
+
+
+def admin_provision_panel_keyboard() -> ReplyKeyboardMarkup:
+    return _keyboard(
+        [
+            [_button(ADMIN_SET_PANEL_GROUPS)],
+            [_button(ADMIN_SET_PANEL_INBOUNDS), _button(ADMIN_SET_PANEL_PROTOCOLS)],
+            [_button(ADMIN_TOGGLE_PANEL_ENABLED)],
+            [_button(CANCEL), _button(ADMIN_BACK)],
+        ],
+        one_time_keyboard=True,
+    )
+
+
+def admin_provision_mode_keyboard() -> ReplyKeyboardMarkup:
+    return _keyboard(
+        [
+            [_button("انبار فقط")],
+            [_button("اول انبار بعد پنل")],
+            [_button("فقط پنل")],
             [_button(CANCEL), _button(ADMIN_BACK)],
         ],
         one_time_keyboard=True,
