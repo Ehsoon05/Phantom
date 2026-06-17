@@ -33,6 +33,10 @@ def _clean_username(value: str) -> str:
     return cleaned or "PhantomHubs"
 
 
+def effective_volume_gb(plan: ShopPlan) -> int:
+    return int(plan.provision_volume_gb if plan.provision_volume_gb is not None else plan.volume_gb)
+
+
 def _json_list(value: str | None) -> list:
     if not value:
         return []
@@ -233,7 +237,8 @@ class ProvisioningService:
         if panel is None:
             raise ProvisioningError("برای این دسته/پلن پنل فعال تنظیم نشده است.")
         username = await ProvisioningService.next_username(session, plan)
-        data_limit = int(plan.volume_gb) * 1024**3 if int(plan.volume_gb) > 0 else 0
+        volume_gb = effective_volume_gb(plan)
+        data_limit = volume_gb * 1024**3 if volume_gb > 0 else 0
         duration_days = int(plan.duration_days or 30)
         async with httpx.AsyncClient(
             base_url=panel.base_url.rstrip("/"),
@@ -272,7 +277,8 @@ class ProvisioningService:
         username = config.panel_username or username_from_subscription_url(config.sub_link)
         if panel is None or not username:
             raise ProvisioningError("برای این سرویس اطلاعات پنل یا نام کاربری قابل تشخیص نیست.")
-        data_limit = int(plan.volume_gb) * 1024**3 if int(plan.volume_gb) > 0 else 0
+        volume_gb = effective_volume_gb(plan)
+        data_limit = volume_gb * 1024**3 if volume_gb > 0 else 0
         expire = int((datetime.now(timezone.utc) + timedelta(days=int(plan.duration_days or 30))).timestamp())
         async with httpx.AsyncClient(
             base_url=panel.base_url.rstrip("/"),

@@ -12,6 +12,7 @@ export interface Plan {
   style: string | null;
   display_order: number;
   duration_days: number;
+  provision_volume_gb: number | null;
   name_prefix: string | null;
   provision_mode: string;
   provision_panel_key: string | null;

@@ -32,6 +32,10 @@ router = APIRouter(prefix="/shop", tags=["shop"])
 _idempotency_cache: dict[str, int] = {}
 
 
+def _volume_label(volume_gb: int) -> str:
+    return "حجم نامحدود" if volume_gb <= 0 else f"{volume_gb} گیگابایت"
+
+
 async def _stock_counts(session: AsyncSession, plans) -> dict[int, int]:
     rows = (
         await session.execute(
@@ -90,6 +94,7 @@ async def list_plans(
             PlanOut(
                 id=plan.id,
                 volume_gb=plan.volume_gb,
+                volume_label=_volume_label(plan.volume_gb),
                 category_key=plan.category_key,
                 title=plan.title,
                 price=price,
@@ -238,6 +243,7 @@ async def _purchase_out(session: AsyncSession, purchase_row: Purchase) -> Purcha
     return PurchaseOut(
         id=purchase_row.id,
         volume_gb=purchase_row.volume_gb,
+        volume_label=_volume_label(purchase_row.volume_gb),
         category_key=purchase_row.category_key,
         price=purchase_row.price,
         original_price=purchase_row.original_price,

@@ -854,6 +854,7 @@ class ShopCustomizationService:
             "style",
             "display_order",
             "duration_days",
+            "provision_volume_gb",
             "name_prefix",
             "provision_mode",
             "provision_panel_key",

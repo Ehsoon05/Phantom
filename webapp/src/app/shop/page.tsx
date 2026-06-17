@@ -47,7 +47,7 @@ function PlanCard({ plan, onSelect }: { plan: Plan; onSelect: (plan: Plan) => vo
             {plan.title}
           </p>
           <p className="text-xs text-muted-foreground">
-            {plan.volume_gb > 0 ? `${plan.volume_gb} گیگابایت` : "حجم نامحدود"}
+            {plan.volume_label}
           </p>
         </div>
         <div className="flex items-center gap-2 text-left">
@@ -144,7 +144,7 @@ function ShopContent() {
               {selected?.title}
             </SheetTitle>
             <SheetDescription>
-              {selected && (selected.volume_gb > 0 ? `${selected.volume_gb} گیگابایت` : "حجم نامحدود")}
+              {selected?.volume_label}
             </SheetDescription>
           </SheetHeader>
           <div className="space-y-4 p-4 pt-0">

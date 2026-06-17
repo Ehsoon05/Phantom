@@ -163,6 +163,7 @@ def _plan_out(plan: ShopPlan, stock_count: int | None = None) -> dict:
         "style": plan.style,
         "display_order": plan.display_order,
         "duration_days": plan.duration_days,
+        "provision_volume_gb": plan.provision_volume_gb,
         "name_prefix": plan.name_prefix,
         "provision_mode": plan.provision_mode,
         "provision_panel_key": plan.provision_panel_key,
@@ -181,6 +182,7 @@ class PlanUpsertRequest(BaseModel):
     emoji: str | None = "📦"
     style: str | None = None
     duration_days: int = 30
+    provision_volume_gb: int | None = None
     name_prefix: str | None = None
     provision_mode: str = "inventory"
     provision_panel_key: str | None = None
@@ -196,6 +198,7 @@ class PlanUpdateRequest(BaseModel):
     category_key: str | None = None
     display_order: int | None = None
     duration_days: int | None = None
+    provision_volume_gb: int | None = None
     name_prefix: str | None = None
     provision_mode: str | None = None
     provision_panel_key: str | None = None
@@ -231,6 +234,7 @@ async def upsert_plan(
         style=body.style or "success",
     )
     plan.duration_days = body.duration_days
+    plan.provision_volume_gb = body.provision_volume_gb
     plan.name_prefix = body.name_prefix
     plan.provision_mode = body.provision_mode
     plan.provision_panel_key = body.provision_panel_key

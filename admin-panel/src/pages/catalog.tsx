@@ -61,6 +61,7 @@ function PlansTab() {
       provision_enabled: boolean;
       renew_enabled: boolean;
       duration_days: number;
+      provision_volume_gb: number | null;
       name_prefix: string | null;
     }) => updatePlan(input.id, input),
     onSuccess: invalidate,
@@ -122,6 +123,13 @@ function PlansTab() {
                       if (prefix === null) return;
                       const duration = parseInt(prompt("مدت سرویس به روز:", String(p.duration_days ?? 30)) ?? "", 10);
                       if (Number.isNaN(duration) || duration <= 0) return;
+                      const actualVolumeRaw = prompt(
+                        "حجم واقعی ساخت/تمدید در پنل (GB). برای استفاده از حجم نمایشی خالی بگذارید:",
+                        p.provision_volume_gb != null ? String(p.provision_volume_gb) : ""
+                      );
+                      if (actualVolumeRaw === null) return;
+                      const actualVolume = actualVolumeRaw.trim() ? parseInt(actualVolumeRaw, 10) : null;
+                      if (actualVolumeRaw.trim() && (actualVolume == null || Number.isNaN(actualVolume) || actualVolume < 0)) return;
                       provision.mutate({
                         id: p.id,
                         provision_mode: mode,
@@ -129,6 +137,7 @@ function PlansTab() {
                         provision_enabled: mode !== "inventory",
                         renew_enabled: true,
                         duration_days: duration,
+                        provision_volume_gb: actualVolume,
                         name_prefix: prefix || null,
                       });
                     }}>تامین</Button>

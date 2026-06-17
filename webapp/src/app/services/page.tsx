@@ -7,6 +7,13 @@ import { useState } from "react";
 import { AuthGate } from "@/components/auth-gate";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   formatToman,
@@ -15,6 +22,7 @@ import {
   hiddifyLink,
   renewPurchase,
   streisandLink,
+  type Purchase,
   v2boxLink,
   v2rayNgLink,
 } from "@/lib/api";
@@ -56,6 +64,7 @@ function openExternal(url: string) {
 
 function ServicesContent() {
   const [notice, setNotice] = useState<string | null>(null);
+  const [renewTarget, setRenewTarget] = useState<Purchase | null>(null);
   const queryClient = useQueryClient();
   const { data: purchases, isLoading } = useQuery({
     queryKey: ["purchases"],
@@ -66,6 +75,7 @@ function ServicesContent() {
     onSuccess: () => {
       getWebApp()?.HapticFeedback?.notificationOccurred("success");
       showNotice("سرویس با موفقیت تمدید شد.");
+      setRenewTarget(null);
       queryClient.invalidateQueries({ queryKey: ["purchases"] });
       queryClient.invalidateQueries({ queryKey: ["me"] });
     },
@@ -91,13 +101,6 @@ function ServicesContent() {
     getWebApp()?.HapticFeedback?.notificationOccurred("success");
     showNotice(`لینک کپی شد؛ در حال باز کردن ${appName}…`);
     openExternal(url);
-  };
-
-  const confirmRenew = (purchaseId: number) => {
-    const ok = window.confirm(
-      "با تمدید، حجم سرویس ریست می‌شود و تاریخ اعتبار از ابتدا طبق مدت همین سرویس محاسبه می‌شود. تمدید انجام شود؟"
-    );
-    if (ok) renew.mutate(purchaseId);
   };
 
   if (isLoading) {
@@ -139,7 +142,7 @@ function ServicesContent() {
               </p>
             </div>
             <p className="text-xs text-muted-foreground">
-              {purchase.volume_gb} گیگابایت · {formatToman(purchase.price)}
+              {purchase.volume_label} · {formatToman(purchase.price)}
             </p>
             {purchase.sub_link && (
               <div className="space-y-3">
@@ -150,6 +153,17 @@ function ServicesContent() {
                   <Copy className="size-4" />
                   کپی لینک اشتراک
                 </Button>
+                {purchase.can_renew && (
+                  <Button
+                    variant="outline"
+                    className="min-h-11 w-full"
+                    disabled={renew.isPending}
+                    onClick={() => setRenewTarget(purchase)}
+                  >
+                    <RefreshCcw className="size-4" />
+                    تمدید سرویس
+                  </Button>
+                )}
                 <p className="text-xs text-muted-foreground">
                   اتصال سریع به برنامه
                 </p>
@@ -197,22 +211,41 @@ function ServicesContent() {
                     باز کردن پنل اشتراک
                   </a>
                 </Button>
-                {purchase.can_renew && (
-                  <Button
-                    variant="outline"
-                    className="min-h-11 w-full"
-                    disabled={renew.isPending}
-                    onClick={() => confirmRenew(purchase.id)}
-                  >
-                    <RefreshCcw className="size-4" />
-                    {renew.isPending ? "در حال تمدید…" : "تمدید سرویس"}
-                  </Button>
-                )}
               </div>
             )}
           </CardContent>
         </Card>
       ))}
+      <Sheet open={renewTarget != null} onOpenChange={(open) => !open && setRenewTarget(null)}>
+        <SheetContent side="bottom" className="rounded-t-2xl">
+          <SheetHeader className="text-right">
+            <SheetTitle>تمدید سرویس</SheetTitle>
+            <SheetDescription>
+              {renewTarget?.service_name ?? "سرویس انتخاب‌شده"}
+            </SheetDescription>
+          </SheetHeader>
+          <div className="space-y-4 p-4 pt-0">
+            <p className="text-sm leading-6 text-muted-foreground">
+              با تمدید، حجم سرویس ریست می‌شود و تاریخ اعتبار از ابتدا طبق مدت همین سرویس محاسبه می‌شود.
+            </p>
+            <Button
+              className="min-h-12 w-full"
+              disabled={!renewTarget || renew.isPending}
+              onClick={() => renewTarget && renew.mutate(renewTarget.id)}
+            >
+              <RefreshCcw className="size-4" />
+              {renew.isPending ? "در حال تمدید…" : "تایید تمدید"}
+            </Button>
+            <Button
+              variant="outline"
+              className="min-h-11 w-full"
+              onClick={() => setRenewTarget(null)}
+            >
+              انصراف
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

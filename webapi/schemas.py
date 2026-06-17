@@ -47,6 +47,7 @@ class AdminTokenResponse(TokenResponse):
 class PlanOut(BaseModel):
     id: int
     volume_gb: int
+    volume_label: str
     category_key: str
     title: str
     price: int | None
@@ -74,6 +75,7 @@ class PurchaseRequest(BaseModel):
 class PurchaseOut(BaseModel):
     id: int
     volume_gb: int
+    volume_label: str
     category_key: str
     price: int
     original_price: int | None

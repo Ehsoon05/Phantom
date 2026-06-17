@@ -232,6 +232,7 @@ class ShopPlan(Base):
     style = Column(String, nullable=True, default="success")
     display_order = Column(Integer, nullable=False, default=0)
     duration_days = Column(Integer, nullable=False, default=30)
+    provision_volume_gb = Column(Integer, nullable=True)
     name_prefix = Column(String, nullable=True)
     provision_mode = Column(String, nullable=False, default="inventory")
     provision_panel_key = Column(String, nullable=True)

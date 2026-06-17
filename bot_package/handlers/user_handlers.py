@@ -55,6 +55,7 @@ from ..utils.messages import (
 
 
 ACCEPT_RULES = "✅ تایید قوانین"
+RENEW_PREMIUM_EMOJI_ID = "6030657343744644592"
 
 
 async def open_webapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -768,7 +769,16 @@ async def service_details_callback(update: Update, context: ContextTypes.DEFAULT
         [InlineKeyboardButton("ساخت QR Code", callback_data=f"service_qr:{purchase.id}")],
     ]
     if purchase.config and purchase.config.shop_plan_id:
-        rows.append([InlineKeyboardButton("تمدید سرویس", callback_data=f"renew_confirm:{purchase.id}")])
+        rows.append([
+            InlineKeyboardButton(
+                "تمدید سرویس",
+                callback_data=f"renew_confirm:{purchase.id}",
+                api_kwargs={
+                    "style": "primary",
+                    "icon_custom_emoji_id": RENEW_PREMIUM_EMOJI_ID,
+                },
+            )
+        ])
     rows.append([InlineKeyboardButton("بازگشت به سرویس‌ها", callback_data="services:list")])
     keyboard = InlineKeyboardMarkup(rows)
     try:
@@ -796,7 +806,16 @@ async def renew_service_callback(update: Update, context: ContextTypes.DEFAULT_T
         )
         keyboard = InlineKeyboardMarkup(
             [
-                [InlineKeyboardButton("تایید تمدید", callback_data=f"renew_do:{purchase_id}")],
+                [
+                    InlineKeyboardButton(
+                        "تایید تمدید",
+                        callback_data=f"renew_do:{purchase_id}",
+                        api_kwargs={
+                            "style": "primary",
+                            "icon_custom_emoji_id": RENEW_PREMIUM_EMOJI_ID,
+                        },
+                    )
+                ],
                 [InlineKeyboardButton("انصراف", callback_data=f"service:{purchase_id}")],
             ]
         )

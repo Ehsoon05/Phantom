@@ -59,6 +59,7 @@ export async function authenticate(initData: string, startParam?: string) {
 export interface Plan {
   id: number;
   volume_gb: number;
+  volume_label: string;
   category_key: string;
   title: string;
   price: number | null;
@@ -81,6 +82,7 @@ export interface Category {
 export interface Purchase {
   id: number;
   volume_gb: number;
+  volume_label: string;
   category_key: string;
   price: number;
   original_price: number | null;
