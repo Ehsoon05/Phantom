@@ -460,16 +460,20 @@ def admin_shop_plan_provision_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
-def admin_provision_panel_keyboard() -> ReplyKeyboardMarkup:
-    return _keyboard(
-        [
+def admin_provision_panel_keyboard(panel_type: str | None = None) -> ReplyKeyboardMarkup:
+    if panel_type == "easy":
+        rows = [
             [_button(ADMIN_SET_PANEL_GROUPS)],
+            [_button(ADMIN_TOGGLE_PANEL_ENABLED)],
+            [_button(CANCEL), _button(ADMIN_BACK)],
+        ]
+    else:
+        rows = [
             [_button(ADMIN_SET_PANEL_INBOUNDS), _button(ADMIN_SET_PANEL_PROTOCOLS)],
             [_button(ADMIN_TOGGLE_PANEL_ENABLED)],
             [_button(CANCEL), _button(ADMIN_BACK)],
-        ],
-        one_time_keyboard=True,
-    )
+        ]
+    return _keyboard(rows, one_time_keyboard=True)
 
 
 def admin_provision_mode_keyboard() -> ReplyKeyboardMarkup:

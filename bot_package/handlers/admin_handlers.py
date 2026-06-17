@@ -3853,6 +3853,13 @@ async def _show_provision_panel_options(update: Update, context: ContextTypes.DE
     group_ids = json.loads(panel.group_ids or "[]")
     inbounds = json.loads(panel.inbounds_json or "{}")
     protocols = json.loads(panel.protocols_json or "[]")
+    if panel.panel_type == "easy":
+        panel_specific = f"گروه‌های آسان پنل: `{group_ids or '-'}`"
+    else:
+        panel_specific = (
+            f"اینباندهای مرزبان: `{inbounds or '-'}`\n"
+            f"پروتکل‌ها: `{protocols or '-'}`"
+        )
     await update.effective_message.reply_text(
         "**تنظیمات پنل ساخت**\n\n"
         f"عنوان: **{panel.title}**\n"
@@ -3860,10 +3867,8 @@ async def _show_provision_panel_options(update: Update, context: ContextTypes.DE
         f"نوع: `{panel.panel_type}`\n"
         f"آدرس: `{panel.base_url}`\n"
         f"وضعیت: **{'فعال' if panel.is_enabled else 'غیرفعال'}**\n"
-        f"گروه‌های آسان پنل: `{group_ids or '-'}`\n"
-        f"اینباندهای مرزبان: `{inbounds or '-'}`\n"
-        f"پروتکل‌ها: `{protocols or '-'}`",
-        reply_markup=admin_provision_panel_keyboard(),
+        f"{panel_specific}",
+        reply_markup=admin_provision_panel_keyboard(panel.panel_type),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     return PROVISION_PANEL_OPTION
@@ -3906,7 +3911,14 @@ async def provision_panel_option(update: Update, context: ContextTypes.DEFAULT_T
     }
     selected = fields.get(option)
     if not selected:
-        await update.message.reply_text("گزینه معتبر نیست.", reply_markup=admin_provision_panel_keyboard())
+        async with async_session() as session:
+            panel = (
+                await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == key))
+            ).scalar_one_or_none()
+        await update.message.reply_text(
+            "گزینه معتبر نیست.",
+            reply_markup=admin_provision_panel_keyboard(panel.panel_type if panel else None),
+        )
         return PROVISION_PANEL_OPTION
     field, prompt = selected
     context.user_data["provision_panel_field"] = field
@@ -3931,7 +3943,7 @@ async def _show_panel_inbound_selector(
     if panel.panel_type == "easy":
         await update.effective_message.reply_text(
             "این پنل از نوع آسان پنل است و اینباند جداگانه ندارد. برای این پنل از گزینه «گروه‌های آسان پنل» استفاده کنید.",
-            reply_markup=admin_provision_panel_keyboard(),
+            reply_markup=admin_provision_panel_keyboard(panel.panel_type),
         )
         return PROVISION_PANEL_OPTION
 
@@ -3943,13 +3955,13 @@ async def _show_panel_inbound_selector(
         except Exception as exc:
             await update.effective_message.reply_text(
                 f"دریافت اینباندها از پنل انجام نشد:\n{exc}",
-                reply_markup=admin_provision_panel_keyboard(),
+                reply_markup=admin_provision_panel_keyboard(panel.panel_type),
             )
             return PROVISION_PANEL_OPTION
         if not available:
             await update.effective_message.reply_text(
                 "هیچ اینباند فعالی از پنل دریافت نشد.",
-                reply_markup=admin_provision_panel_keyboard(),
+                reply_markup=admin_provision_panel_keyboard(panel.panel_type),
             )
             return PROVISION_PANEL_OPTION
         selected = _selected_inbounds_from_panel(panel, available)
