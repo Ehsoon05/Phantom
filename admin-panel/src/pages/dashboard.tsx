@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import {
   Bar,
   BarChart,
@@ -12,9 +13,10 @@ import {
 import CountUp from "@/components/reactbits/CountUp";
 import SpotlightCard from "@/components/reactbits/SpotlightCard";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatToman, getRevenueDaily, getSalesDaily, getStats, getStock, hasPermission } from "@/lib/api";
+import { formatToman, getRevenueDaily, getSalesReport, getStats, getStock, hasPermission } from "@/lib/api";
 
 function StatCard({
   title,
@@ -45,6 +47,7 @@ function StatCard({
 export function DashboardPage() {
   const canReports = hasPermission("reports");
   const canInventory = hasPermission("inventory");
+  const [reportDays, setReportDays] = useState(45);
   const { data: stats } = useQuery({
     queryKey: ["stats"],
     queryFn: getStats,
@@ -60,9 +63,9 @@ export function DashboardPage() {
     queryFn: getStock,
     enabled: canInventory,
   });
-  const { data: salesDaily } = useQuery({
-    queryKey: ["sales-daily"],
-    queryFn: () => getSalesDaily(45),
+  const { data: salesReport } = useQuery({
+    queryKey: ["sales-report", reportDays],
+    queryFn: () => getSalesReport(reportDays, 100),
     enabled: canReports,
   });
 
@@ -162,40 +165,156 @@ export function DashboardPage() {
       {canReports && (
         <Card>
           <CardContent className="p-4">
-            <p className="mb-4 text-sm font-semibold">گزارش روزانه ۴۵ روز اخیر</p>
-            {salesDaily === undefined ? (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold">گزارش کامل فروش</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  تفکیک خرید، تمدید، انبار، ساخت از پنل، دسته و سرویس
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {[7, 30, 45, 90].map((days) => (
+                  <Button
+                    key={days}
+                    size="sm"
+                    variant={reportDays === days ? "default" : "secondary"}
+                    onClick={() => setReportDays(days)}
+                  >
+                    {days} روز
+                  </Button>
+                ))}
+              </div>
+            </div>
+            {salesReport === undefined ? (
               <Skeleton className="h-32 w-full" />
             ) : (
-              <div className="max-h-80 overflow-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-right text-xs text-muted-foreground">
-                      <th className="pb-2 font-medium">تاریخ</th>
-                      <th className="pb-2 font-medium">فروش</th>
-                      <th className="pb-2 font-medium">تمدید</th>
-                      <th className="pb-2 font-medium">انبار</th>
-                      <th className="pb-2 font-medium">پنل</th>
-                      <th className="pb-2 font-medium">درآمد</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {salesDaily.map((row) => (
-                      <tr key={row.date} className="border-b last:border-0">
-                        <td className="py-2">{row.date}</td>
-                        <td className="py-2">{row.sales}</td>
-                        <td className="py-2">{row.renewals}</td>
-                        <td className="py-2">{row.inventory}</td>
-                        <td className="py-2">{row.panel}</td>
-                        <td className="py-2">{formatToman(row.revenue_toman)}</td>
+              <div className="space-y-5">
+                <div className="grid grid-cols-2 gap-2 lg:grid-cols-6">
+                  <div className="rounded-lg bg-muted p-3">
+                    <p className="text-xs text-muted-foreground">کل تراکنش</p>
+                    <p className="mt-1 font-bold">{salesReport.summary.total_transactions}</p>
+                  </div>
+                  <div className="rounded-lg bg-muted p-3">
+                    <p className="text-xs text-muted-foreground">خرید جدید</p>
+                    <p className="mt-1 font-bold">{salesReport.summary.sales}</p>
+                  </div>
+                  <div className="rounded-lg bg-muted p-3">
+                    <p className="text-xs text-muted-foreground">تمدید</p>
+                    <p className="mt-1 font-bold">{salesReport.summary.renewals}</p>
+                  </div>
+                  <div className="rounded-lg bg-muted p-3">
+                    <p className="text-xs text-muted-foreground">انبار</p>
+                    <p className="mt-1 font-bold">{salesReport.summary.inventory}</p>
+                  </div>
+                  <div className="rounded-lg bg-muted p-3">
+                    <p className="text-xs text-muted-foreground">پنل</p>
+                    <p className="mt-1 font-bold">{salesReport.summary.panel}</p>
+                  </div>
+                  <div className="rounded-lg bg-muted p-3">
+                    <p className="text-xs text-muted-foreground">درآمد</p>
+                    <p className="mt-1 font-bold">{formatToman(salesReport.summary.revenue_toman)}</p>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <BreakdownTable title="تفکیک سرویس‌ها" rows={salesReport.by_service} />
+                  <BreakdownTable title="تفکیک دسته‌ها" rows={salesReport.by_category} />
+                </div>
+
+                <div className="max-h-80 overflow-auto">
+                  <p className="mb-3 text-sm font-semibold">روزهای بازه انتخابی</p>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-right text-xs text-muted-foreground">
+                        <th className="pb-2 font-medium">تاریخ</th>
+                        <th className="pb-2 font-medium">فروش</th>
+                        <th className="pb-2 font-medium">تمدید</th>
+                        <th className="pb-2 font-medium">انبار</th>
+                        <th className="pb-2 font-medium">پنل</th>
+                        <th className="pb-2 font-medium">درآمد</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {salesReport.daily.map((row) => (
+                        <tr key={row.date} className="border-b last:border-0">
+                          <td className="py-2">{row.date}</td>
+                          <td className="py-2">{row.sales}</td>
+                          <td className="py-2">{row.renewals}</td>
+                          <td className="py-2">{row.inventory}</td>
+                          <td className="py-2">{row.panel}</td>
+                          <td className="py-2">{formatToman(row.revenue_toman)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="max-h-96 overflow-auto">
+                  <p className="mb-3 text-sm font-semibold">آخرین فروش‌ها و تمدیدها</p>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-right text-xs text-muted-foreground">
+                        <th className="pb-2 font-medium">زمان</th>
+                        <th className="pb-2 font-medium">کاربر</th>
+                        <th className="pb-2 font-medium">سرویس</th>
+                        <th className="pb-2 font-medium">دسته</th>
+                        <th className="pb-2 font-medium">نوع</th>
+                        <th className="pb-2 font-medium">تامین</th>
+                        <th className="pb-2 font-medium">مبلغ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {salesReport.recent.map((row) => (
+                        <tr key={row.id} className="border-b last:border-0">
+                          <td className="py-2">{new Date(row.purchased_at).toLocaleString("fa-IR")}</td>
+                          <td className="py-2" dir="ltr">{row.user_id}</td>
+                          <td className="py-2">{row.service_name ?? `${row.volume_gb} GB`}</td>
+                          <td className="py-2 text-muted-foreground">{row.category_key}</td>
+                          <td className="py-2">{row.kind === "renewal" ? "تمدید" : "خرید"}</td>
+                          <td className="py-2">{row.provision_source === "panel" ? "پنل" : "انبار"}</td>
+                          <td className="py-2">{formatToman(row.price)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </CardContent>
         </Card>
       )}
+    </div>
+  );
+}
+
+function BreakdownTable({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: { key: string; count: number; revenue_toman: number }[];
+}) {
+  return (
+    <div className="rounded-lg border p-3">
+      <p className="mb-3 text-sm font-semibold">{title}</p>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b text-right text-xs text-muted-foreground">
+            <th className="pb-2 font-medium">عنوان</th>
+            <th className="pb-2 font-medium">تعداد</th>
+            <th className="pb-2 font-medium">درآمد</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(0, 10).map((row) => (
+            <tr key={row.key} className="border-b last:border-0">
+              <td className="py-2">{row.key}</td>
+              <td className="py-2">{row.count}</td>
+              <td className="py-2">{formatToman(row.revenue_toman)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

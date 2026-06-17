@@ -159,7 +159,9 @@ from ..utils.keyboards import (
     DONE_ADDING_CONFIGS,
     CHANGE_USER,
     CONFIRM_USER,
+    REPORT_45_DAYS,
     REPORT_MONTH,
+    REPORT_90_DAYS,
     REPORT_TODAY,
     REPORT_WEEK,
     add_links_collecting_keyboard,
@@ -1439,6 +1441,8 @@ async def sales_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         REPORT_TODAY: (1, "امروز"),
         REPORT_WEEK: (7, "هفته جاری"),
         REPORT_MONTH: (30, "ماه جاری"),
+        REPORT_45_DAYS: (45, "۴۵ روز اخیر"),
+        REPORT_90_DAYS: (90, "۹۰ روز اخیر"),
     }
     days, period_name = period_map[update.message.text]
     tehran = ZoneInfo("Asia/Tehran")
@@ -1452,32 +1456,69 @@ async def sales_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         purchases = result.scalars().all()
 
+    purchases = sorted(purchases, key=lambda item: item.purchased_at, reverse=True)
     total_revenue = sum(purchase.price for purchase in purchases)
+    sale_count = sum(1 for purchase in purchases if purchase.kind != "renewal")
+    renewals = sum(1 for purchase in purchases if purchase.kind == "renewal")
     volume_stats = {}
+    category_stats = {}
+    plan_stats = {}
     source_stats = {"inventory": 0, "panel": 0}
-    renewals = 0
     for purchase in purchases:
         volume_stats[purchase.volume_gb] = volume_stats.get(purchase.volume_gb, 0) + 1
-        if purchase.kind == "renewal":
-            renewals += 1
+        category = purchase.category_key or "default"
+        category_bucket = category_stats.setdefault(category, {"count": 0, "revenue": 0})
+        category_bucket["count"] += 1
+        category_bucket["revenue"] += purchase.price
+        plan_key = purchase.service_name or f"{_volume_label(purchase.volume_gb)} [{category}]"
+        plan_bucket = plan_stats.setdefault(plan_key, {"count": 0, "revenue": 0})
+        plan_bucket["count"] += 1
+        plan_bucket["revenue"] += purchase.price
         if purchase.provision_source == "panel":
             source_stats["panel"] += 1
         else:
             source_stats["inventory"] += 1
 
     message = f"**گزارش فروش {period_name}**\n\n"
-    message += f"تعداد فروش: {len(purchases)}\n"
-    message += f"تمدیدها: {renewals}\n"
-    message += f"ارسال از انبار: {source_stats['inventory']}\n"
-    message += f"ساخت مستقیم از پنل: {source_stats['panel']}\n"
+    message += f"کل تراکنش‌های فروش/تمدید: **{len(purchases)}**\n"
+    message += f"خرید جدید: **{sale_count}**\n"
+    message += f"تمدید: **{renewals}**\n"
+    message += f"ارسال از انبار: **{source_stats['inventory']}**\n"
+    message += f"ساخت مستقیم از پنل: **{source_stats['panel']}**\n"
     message += f"درآمد کل: **{total_revenue:,} تومان**\n\n"
+
+    if category_stats:
+        message += "**تفکیک دسته‌ها:**\n"
+        for category, data in sorted(category_stats.items(), key=lambda item: item[1]["revenue"], reverse=True)[:10]:
+            message += f"`{category}`: {data['count']} مورد | {data['revenue']:,} تومان\n"
+        message += "\n"
+
+    if plan_stats:
+        message += "**پرفروش‌ترین سرویس‌ها:**\n"
+        for title, data in sorted(plan_stats.items(), key=lambda item: item[1]["count"], reverse=True)[:10]:
+            safe_title = escape_markdown(title, version=1)
+            message += f"{safe_title}: {data['count']} مورد | {data['revenue']:,} تومان\n"
+        message += "\n"
+
     if volume_stats:
-        message += "تفکیک بر اساس حجم:\n"
+        message += "**تفکیک حجم نمایشی:**\n"
         for volume, count in sorted(volume_stats.items()):
-            message += f"{volume} گیگ: {count} فروش\n"
+            message += f"{_volume_label(volume)}: {count} مورد\n"
+
+    if purchases:
+        message += "\n**آخرین فروش‌ها:**\n"
+        for purchase in purchases[:12]:
+            purchased_at = purchase.purchased_at
+            if purchased_at.tzinfo is None:
+                purchased_at = purchased_at.replace(tzinfo=timezone.utc)
+            local_time = purchased_at.astimezone(tehran).strftime("%m-%d %H:%M")
+            kind = "تمدید" if purchase.kind == "renewal" else "خرید"
+            source = "پنل" if purchase.provision_source == "panel" else "انبار"
+            title = escape_markdown(purchase.service_name or _volume_label(purchase.volume_gb), version=1)
+            message += f"{local_time} | {kind} | {source} | {title} | {purchase.price:,} تومان\n"
 
     await update.message.reply_text(
-        message,
+        message[:3900],
         reply_markup=admin_reports_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
@@ -5231,7 +5272,10 @@ admin_handlers = [
     MessageHandler(_exact_filter(ADMIN_VIEW_PRICES), view_prices),
     MessageHandler(_exact_filter(ADMIN_VIEW_COUPONS), list_coupons),
     MessageHandler(
-        filters.Regex(f"^({re.escape(REPORT_TODAY)}|{re.escape(REPORT_WEEK)}|{re.escape(REPORT_MONTH)})$"),
+        filters.Regex(
+            f"^({re.escape(REPORT_TODAY)}|{re.escape(REPORT_WEEK)}|{re.escape(REPORT_MONTH)}|"
+            f"{re.escape(REPORT_45_DAYS)}|{re.escape(REPORT_90_DAYS)})$"
+        ),
         sales_report,
     ),
     MessageHandler(_exact_filter(ADMIN_USER_STATS), user_stats),

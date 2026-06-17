@@ -124,6 +124,114 @@ async def sales_daily(
     return sorted(buckets.values(), key=lambda b: b["date"])
 
 
+@router.get("/sales-report")
+async def sales_report(
+    days: int = Query(default=45, ge=1, le=365),
+    limit: int = Query(default=50, ge=1, le=200),
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("reports")),
+):
+    start, end = _tehran_range(days)
+    purchases = (
+        await session.execute(
+            select(Purchase).where(Purchase.purchased_at >= start, Purchase.purchased_at < end)
+        )
+    ).scalars().all()
+    purchases = sorted(purchases, key=lambda item: item.purchased_at, reverse=True)
+
+    summary = {
+        "days": days,
+        "total_transactions": len(purchases),
+        "sales": 0,
+        "renewals": 0,
+        "inventory": 0,
+        "panel": 0,
+        "revenue_toman": 0,
+    }
+    by_category: dict[str, dict] = {}
+    by_service: dict[str, dict] = {}
+    by_source: dict[str, dict] = {}
+    by_kind: dict[str, dict] = {}
+    daily: dict[str, dict] = {}
+
+    for purchase in purchases:
+        price = purchase.price or 0
+        summary["revenue_toman"] += price
+        kind = "renewal" if purchase.kind == "renewal" else "purchase"
+        source = "panel" if purchase.provision_source == "panel" else "inventory"
+        category = purchase.category_key or "default"
+        service = purchase.service_name or f"{purchase.volume_gb}GB"
+        if kind == "renewal":
+            summary["renewals"] += 1
+        else:
+            summary["sales"] += 1
+        summary[source] += 1
+
+        for bucket_map, key in (
+            (by_category, category),
+            (by_service, service),
+            (by_source, source),
+            (by_kind, kind),
+        ):
+            bucket = bucket_map.setdefault(key, {"key": key, "count": 0, "revenue_toman": 0})
+            bucket["count"] += 1
+            bucket["revenue_toman"] += price
+
+        purchased_at = purchase.purchased_at
+        if purchased_at.tzinfo is None:
+            purchased_at = purchased_at.replace(tzinfo=timezone.utc)
+        date_key = purchased_at.astimezone(TEHRAN).date().isoformat()
+        day = daily.setdefault(
+            date_key,
+            {
+                "date": date_key,
+                "revenue_toman": 0,
+                "sales": 0,
+                "renewals": 0,
+                "inventory": 0,
+                "panel": 0,
+            },
+        )
+        day["revenue_toman"] += price
+        if kind == "renewal":
+            day["renewals"] += 1
+        else:
+            day["sales"] += 1
+        day[source] += 1
+
+    recent = []
+    for purchase in purchases[:limit]:
+        purchased_at = purchase.purchased_at
+        if purchased_at.tzinfo is None:
+            purchased_at = purchased_at.replace(tzinfo=timezone.utc)
+        recent.append(
+            {
+                "id": purchase.id,
+                "user_id": purchase.user_id,
+                "service_name": purchase.service_name,
+                "category_key": purchase.category_key,
+                "volume_gb": purchase.volume_gb,
+                "price": purchase.price,
+                "kind": purchase.kind,
+                "provision_source": purchase.provision_source,
+                "purchased_at": purchased_at.astimezone(TEHRAN).isoformat(),
+            }
+        )
+
+    def sorted_buckets(values: dict[str, dict]) -> list[dict]:
+        return sorted(values.values(), key=lambda item: (item["count"], item["revenue_toman"]), reverse=True)
+
+    return {
+        "summary": summary,
+        "daily": sorted(daily.values(), key=lambda item: item["date"]),
+        "by_category": sorted_buckets(by_category),
+        "by_service": sorted_buckets(by_service),
+        "by_source": sorted_buckets(by_source),
+        "by_kind": sorted_buckets(by_kind),
+        "recent": recent,
+    }
+
+
 @router.get("/stock")
 async def stock(
     session: AsyncSession = Depends(get_session),

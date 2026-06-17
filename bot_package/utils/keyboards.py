@@ -131,6 +131,8 @@ COUPON_SELECTED_USERS = "کاربران مشخص"
 REPORT_TODAY = "امروز"
 REPORT_WEEK = "هفته جاری"
 REPORT_MONTH = "ماه جاری"
+REPORT_45_DAYS = "۴۵ روز اخیر"
+REPORT_90_DAYS = "۹۰ روز اخیر"
 
 DONE_ADDING_CONFIGS = "✅ ثبت لینک‌ها"
 CANCEL = "❌ لغو"
@@ -354,6 +356,7 @@ def admin_reports_keyboard() -> ReplyKeyboardMarkup:
     return _keyboard(
         [
             [_button(REPORT_TODAY), _button(REPORT_WEEK), _button(REPORT_MONTH)],
+            [_button(REPORT_45_DAYS), _button(REPORT_90_DAYS)],
             [_button(ADMIN_BACK)],
         ]
     )
