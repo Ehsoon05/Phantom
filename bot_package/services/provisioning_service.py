@@ -227,6 +227,34 @@ class ProvisioningService:
         return {"proxies": {protocol: {} for protocol in inbounds}, "inbounds": inbounds}
 
     @staticmethod
+    async def fetch_inbounds(panel: ProvisionPanel) -> dict[str, list[str]]:
+        if panel.panel_type == "easy":
+            return {}
+        async with httpx.AsyncClient(
+            base_url=panel.base_url.rstrip("/"),
+            timeout=httpx.Timeout(35, connect=15),
+            verify=False,
+        ) as client:
+            token = await ProvisioningService._token(client, panel)
+            response = await client.get("/api/inbounds", headers={"Authorization": f"Bearer {token}"})
+            response.raise_for_status()
+            payload = response.json()
+
+        inbounds: dict[str, list[str]] = {}
+        if isinstance(payload, dict):
+            for protocol, items in payload.items():
+                if not isinstance(items, list):
+                    continue
+                tags = [
+                    str(item.get("tag")).strip()
+                    for item in items
+                    if isinstance(item, dict) and item.get("tag")
+                ]
+                if tags:
+                    inbounds[str(protocol)] = tags
+        return inbounds
+
+    @staticmethod
     async def create_for_plan(
         session: AsyncSession,
         plan: ShopPlan,
