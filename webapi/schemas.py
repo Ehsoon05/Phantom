@@ -56,6 +56,7 @@ class PlanOut(BaseModel):
     style: str | None
     display_order: int
     in_stock: bool
+    can_create: bool = False
 
 
 class CategoryOut(BaseModel):
@@ -81,6 +82,12 @@ class PurchaseOut(BaseModel):
     service_name: str | None
     purchased_at: datetime
     sub_link: str | None
+    can_renew: bool = False
+    renewed_at: datetime | None = None
+
+
+class RenewRequest(BaseModel):
+    confirm: bool = True
 
 
 class ApplyCouponRequest(BaseModel):

@@ -1,6 +1,7 @@
 import logging
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from telegram import (
@@ -1311,19 +1312,35 @@ async def sales_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         REPORT_MONTH: (30, "ماه جاری"),
     }
     days, period_name = period_map[update.message.text]
-    since = datetime.now(timezone.utc) - timedelta(days=days)
+    tehran = ZoneInfo("Asia/Tehran")
+    today = datetime.now(tehran).date()
+    since = datetime.combine(today - timedelta(days=days - 1), time.min, tehran).astimezone(timezone.utc)
+    until = datetime.combine(today + timedelta(days=1), time.min, tehran).astimezone(timezone.utc)
 
     async with async_session() as session:
-        result = await session.execute(select(Purchase).where(Purchase.purchased_at >= since))
+        result = await session.execute(
+            select(Purchase).where(Purchase.purchased_at >= since, Purchase.purchased_at < until)
+        )
         purchases = result.scalars().all()
 
     total_revenue = sum(purchase.price for purchase in purchases)
     volume_stats = {}
+    source_stats = {"inventory": 0, "panel": 0}
+    renewals = 0
     for purchase in purchases:
         volume_stats[purchase.volume_gb] = volume_stats.get(purchase.volume_gb, 0) + 1
+        if purchase.kind == "renewal":
+            renewals += 1
+        if purchase.provision_source == "panel":
+            source_stats["panel"] += 1
+        else:
+            source_stats["inventory"] += 1
 
     message = f"**گزارش فروش {period_name}**\n\n"
     message += f"تعداد فروش: {len(purchases)}\n"
+    message += f"تمدیدها: {renewals}\n"
+    message += f"ارسال از انبار: {source_stats['inventory']}\n"
+    message += f"ساخت مستقیم از پنل: {source_stats['panel']}\n"
     message += f"درآمد کل: **{total_revenue:,} تومان**\n\n"
     if volume_stats:
         message += "تفکیک بر اساس حجم:\n"

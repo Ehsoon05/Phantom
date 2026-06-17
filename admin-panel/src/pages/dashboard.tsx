@@ -14,7 +14,7 @@ import SpotlightCard from "@/components/reactbits/SpotlightCard";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatToman, getRevenueDaily, getStats, getStock, hasPermission } from "@/lib/api";
+import { formatToman, getRevenueDaily, getSalesDaily, getStats, getStock, hasPermission } from "@/lib/api";
 
 function StatCard({
   title,
@@ -59,6 +59,11 @@ export function DashboardPage() {
     queryKey: ["stock"],
     queryFn: getStock,
     enabled: canInventory,
+  });
+  const { data: salesDaily } = useQuery({
+    queryKey: ["sales-daily"],
+    queryFn: () => getSalesDaily(45),
+    enabled: canReports,
   });
 
   const lowStock = stock?.filter((row) => row.available <= 3) ?? [];
@@ -149,6 +154,44 @@ export function DashboardPage() {
                   ))}
                 </tbody>
               </table>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {canReports && (
+        <Card>
+          <CardContent className="p-4">
+            <p className="mb-4 text-sm font-semibold">گزارش روزانه ۴۵ روز اخیر</p>
+            {salesDaily === undefined ? (
+              <Skeleton className="h-32 w-full" />
+            ) : (
+              <div className="max-h-80 overflow-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-right text-xs text-muted-foreground">
+                      <th className="pb-2 font-medium">تاریخ</th>
+                      <th className="pb-2 font-medium">فروش</th>
+                      <th className="pb-2 font-medium">تمدید</th>
+                      <th className="pb-2 font-medium">انبار</th>
+                      <th className="pb-2 font-medium">پنل</th>
+                      <th className="pb-2 font-medium">درآمد</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {salesDaily.map((row) => (
+                      <tr key={row.date} className="border-b last:border-0">
+                        <td className="py-2">{row.date}</td>
+                        <td className="py-2">{row.sales}</td>
+                        <td className="py-2">{row.renewals}</td>
+                        <td className="py-2">{row.inventory}</td>
+                        <td className="py-2">{row.panel}</td>
+                        <td className="py-2">{formatToman(row.revenue_toman)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </CardContent>
         </Card>

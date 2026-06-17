@@ -1,0 +1,302 @@
+from __future__ import annotations
+
+import base64
+import json
+import re
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Any
+from urllib.parse import urljoin, urlparse
+
+import httpx
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..config_loader import BotConfig
+from ..models import BotSetting, Config, ProvisionPanel, ShopPlan, ShopPlanCategory
+
+
+class ProvisioningError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class ProvisionedSubscription:
+    panel_key: str
+    username: str
+    subscription_url: str
+
+
+def _clean_username(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_]+", "_", value.strip())
+    cleaned = re.sub(r"_+", "_", cleaned).strip("_")
+    return cleaned or "PhantomHubs"
+
+
+def _json_list(value: str | None) -> list:
+    if not value:
+        return []
+    try:
+        payload = json.loads(value)
+    except ValueError:
+        return []
+    return payload if isinstance(payload, list) else []
+
+
+def _json_dict(value: str | None) -> dict:
+    if not value:
+        return {}
+    try:
+        payload = json.loads(value)
+    except ValueError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _subscription_url(base_url: str, payload: dict[str, Any]) -> str:
+    subscription_url = str(payload.get("subscription_url") or "").strip()
+    if not subscription_url:
+        raise ProvisioningError("پنل لینک اشتراک برنگرداند.")
+    return urljoin(f"{base_url.rstrip('/')}/", subscription_url)
+
+
+def username_from_subscription_url(url: str) -> str | None:
+    parsed = urlparse(url.strip())
+    parts = [part for part in parsed.path.split("/") if part]
+    if not parts:
+        return None
+
+    token = parts[-1]
+    candidates = [token]
+    padded = token + "=" * (-len(token) % 4)
+    try:
+        decoded = base64.urlsafe_b64decode(padded.encode()).decode(errors="ignore")
+        candidates.append(decoded)
+    except Exception:
+        pass
+
+    for candidate in candidates:
+        match = re.search(r"([A-Za-z][A-Za-z0-9_]{2,80})", candidate)
+        if match:
+            return _clean_username(match.group(1))
+    return None
+
+
+class ProvisioningService:
+    @staticmethod
+    async def ensure_env_panels(session: AsyncSession) -> None:
+        defaults = [
+            (
+                "alien",
+                "Alien",
+                "marzban",
+                BotConfig.ALIEN_PANEL_URL or BotConfig.MARZBAN_API_URL,
+                BotConfig.ALIEN_PANEL_USERNAME or BotConfig.MARZBAN_API_USERNAME,
+                BotConfig.ALIEN_PANEL_PASSWORD or BotConfig.MARZBAN_API_PASSWORD,
+                None,
+            ),
+            (
+                "easy",
+                "آسان پنل",
+                "easy",
+                BotConfig.EASY_PANEL_URL,
+                BotConfig.EASY_PANEL_USERNAME,
+                BotConfig.EASY_PANEL_PASSWORD,
+                "[1]",
+            ),
+        ]
+        for key, title, panel_type, base_url, username, password, group_ids in defaults:
+            if not (base_url and username and password):
+                continue
+            existing = (
+                await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == key))
+            ).scalar_one_or_none()
+            if existing:
+                continue
+            session.add(
+                ProvisionPanel(
+                    key=key,
+                    title=title,
+                    panel_type=panel_type,
+                    base_url=base_url,
+                    username=username,
+                    password=password,
+                    group_ids=group_ids,
+                    is_enabled=True,
+                )
+            )
+        await session.flush()
+
+    @staticmethod
+    async def get_panel(session: AsyncSession, key: str | None) -> ProvisionPanel | None:
+        await ProvisioningService.ensure_env_panels(session)
+        if not key:
+            return None
+        return (
+            await session.execute(
+                select(ProvisionPanel).where(
+                    ProvisionPanel.key == key,
+                    ProvisionPanel.is_enabled.is_(True),
+                )
+            )
+        ).scalar_one_or_none()
+
+    @staticmethod
+    async def panel_for_plan(session: AsyncSession, plan: ShopPlan) -> ProvisionPanel | None:
+        category = (
+            await session.execute(
+                select(ShopPlanCategory).where(ShopPlanCategory.key == plan.category_key)
+            )
+        ).scalar_one_or_none()
+        key = plan.provision_panel_key or (category.provision_panel_key if category else None)
+        return await ProvisioningService.get_panel(session, key)
+
+    @staticmethod
+    def plan_provision_enabled(plan: ShopPlan, category: ShopPlanCategory | None = None) -> bool:
+        return bool(plan.provision_enabled or (category and category.provision_enabled))
+
+    @staticmethod
+    async def next_username(session: AsyncSession, plan: ShopPlan) -> str:
+        prefix = _clean_username(
+            plan.name_prefix
+            or f"PhantomHubs_{plan.category_key}_{plan.title}_{plan.volume_gb}GB"
+        )
+        key = f"provision_counter:{plan.id}"
+        setting = (
+            await session.execute(select(BotSetting).where(BotSetting.key == key).with_for_update())
+        ).scalar_one_or_none()
+        current = int(setting.value) if setting and str(setting.value or "").isdigit() else 0
+        current += 1
+        if setting:
+            setting.value = str(current)
+            setting.updated_at = datetime.now(timezone.utc)
+        else:
+            session.add(BotSetting(key=key, value=str(current)))
+        await session.flush()
+        return f"{prefix}_{current}"
+
+    @staticmethod
+    async def _token(client: httpx.AsyncClient, panel: ProvisionPanel) -> str:
+        response = await client.post(
+            "/api/admin/token",
+            data={"username": panel.username, "password": panel.password},
+        )
+        response.raise_for_status()
+        token = response.json().get("access_token")
+        if not token:
+            raise ProvisioningError("پنل توکن دسترسی برنگرداند.")
+        return str(token)
+
+    @staticmethod
+    async def _access_fields(client: httpx.AsyncClient, panel: ProvisionPanel, headers: dict) -> dict:
+        if panel.panel_type == "easy":
+            group_ids = [int(item) for item in _json_list(panel.group_ids) if str(item).isdigit()]
+            if not group_ids:
+                group_ids = [1]
+            return {"group_ids": group_ids}
+
+        configured = _json_dict(panel.inbounds_json)
+        if configured:
+            protocols = sorted(configured)
+            return {
+                "proxies": {protocol: {} for protocol in protocols},
+                "inbounds": configured,
+            }
+
+        response = await client.get("/api/inbounds", headers=headers)
+        response.raise_for_status()
+        payload = response.json()
+        inbounds: dict[str, list[str]] = {}
+        if isinstance(payload, dict):
+            for protocol, items in payload.items():
+                if not isinstance(items, list):
+                    continue
+                tags = [
+                    str(item.get("tag")).strip()
+                    for item in items
+                    if isinstance(item, dict) and item.get("tag")
+                ]
+                if tags:
+                    inbounds[str(protocol)] = tags
+        if not inbounds:
+            raise ProvisioningError("هیچ اینباند فعالی از پنل دریافت نشد.")
+        return {"proxies": {protocol: {} for protocol in inbounds}, "inbounds": inbounds}
+
+    @staticmethod
+    async def create_for_plan(
+        session: AsyncSession,
+        plan: ShopPlan,
+        *,
+        service_name: str | None = None,
+    ) -> ProvisionedSubscription:
+        panel = await ProvisioningService.panel_for_plan(session, plan)
+        if panel is None:
+            raise ProvisioningError("برای این دسته/پلن پنل فعال تنظیم نشده است.")
+        username = await ProvisioningService.next_username(session, plan)
+        data_limit = int(plan.volume_gb) * 1024**3 if int(plan.volume_gb) > 0 else 0
+        duration_days = int(plan.duration_days or 30)
+        async with httpx.AsyncClient(
+            base_url=panel.base_url.rstrip("/"),
+            timeout=httpx.Timeout(35, connect=15),
+            verify=False,
+        ) as client:
+            token = await ProvisioningService._token(client, panel)
+            headers = {"Authorization": f"Bearer {token}"}
+            access_fields = await ProvisioningService._access_fields(client, panel, headers)
+            response = await client.post(
+                "/api/user",
+                headers=headers,
+                json={
+                    "username": username,
+                    "status": "on_hold",
+                    "data_limit": data_limit,
+                    "data_limit_reset_strategy": "no_reset",
+                    "expire": 0,
+                    "on_hold_expire_duration": duration_days * 86400,
+                    **access_fields,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+        return ProvisionedSubscription(
+            panel_key=panel.key,
+            username=str(payload.get("username") or username),
+            subscription_url=_subscription_url(panel.base_url, payload),
+        )
+
+    @staticmethod
+    async def renew_config(session: AsyncSession, config: Config, plan: ShopPlan) -> None:
+        panel = await ProvisioningService.get_panel(session, config.panel_key)
+        if panel is None:
+            panel = await ProvisioningService.panel_for_plan(session, plan)
+        username = config.panel_username or username_from_subscription_url(config.sub_link)
+        if panel is None or not username:
+            raise ProvisioningError("برای این سرویس اطلاعات پنل یا نام کاربری قابل تشخیص نیست.")
+        data_limit = int(plan.volume_gb) * 1024**3 if int(plan.volume_gb) > 0 else 0
+        expire = int((datetime.now(timezone.utc) + timedelta(days=int(plan.duration_days or 30))).timestamp())
+        async with httpx.AsyncClient(
+            base_url=panel.base_url.rstrip("/"),
+            timeout=httpx.Timeout(35, connect=15),
+            verify=False,
+        ) as client:
+            token = await ProvisioningService._token(client, panel)
+            headers = {"Authorization": f"Bearer {token}"}
+            response = await client.put(
+                f"/api/user/{username}",
+                headers=headers,
+                json={
+                    "status": "active",
+                    "data_limit": data_limit,
+                    "data_limit_reset_strategy": "no_reset",
+                    "expire": expire,
+                    "on_hold_expire_duration": None,
+                },
+            )
+            response.raise_for_status()
+            reset = await client.post(f"/api/user/{username}/reset", headers=headers)
+            if reset.status_code not in {200, 204, 404, 405}:
+                reset.raise_for_status()
+
+        config.panel_key = panel.key
+        config.panel_username = username
+        await session.flush()

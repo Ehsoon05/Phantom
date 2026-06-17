@@ -28,12 +28,19 @@ except ImportError:
 from . import crypto_user, rial_user
 from ..config_loader import BotConfig
 from ..database import async_session
-from ..models import Config, Purchase, Transaction, User
+from ..models import Config, Purchase, User
 from ..services.coupon_service import CouponError, CouponService
 from ..services.settings_service import SettingsService
-from ..services.inventory_service import InventoryService
 from ..services.marzban_trial_service import MarzbanTrialError, MarzbanTrialService
 from ..services.price_service import PriceService
+from ..services.purchase_service import (
+    InsufficientBalance,
+    PlanNotFound,
+    PlanUnavailable,
+    PurchaseError,
+    purchase_plan,
+    renew_purchase,
+)
 from ..services.referral_service import ReferralService
 from ..services.required_channel_service import RequiredChannelService
 from ..services.shop_customization_service import ShopCustomizationService
@@ -436,131 +443,50 @@ async def process_purchase(
     )
 
     async with async_session() as session:
-        plan = await ShopCustomizationService.get_plan(session, selected_plan_id)
-        if not plan or not plan.is_active:
-            text = await ShopCustomizationService.get_message(session, "inactive_plan")
-            fallback_keyboard = await ShopCustomizationService.main_menu_keyboard(session)
-            keyboard = await _message_markup(session, "inactive_plan", fallback_keyboard, copy_text=text)
-            await update.message.reply_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
-            return
-
-        volume = plan.volume_gb
-        category_key = plan.category_key or "default"
-        # Lock the user row for the duration of the purchase transaction so that
-        # two concurrent buy clicks cannot both observe the pre-deduction balance
-        # and double-spend. SQLAlchemy emits FOR UPDATE on PostgreSQL and silently
-        # omits it on SQLite (which serializes writes via BEGIN IMMEDIATE anyway).
-        user_result = await session.execute(
-            select(User)
-            .where(User.telegram_id == update.effective_user.id)
-            .with_for_update()
-        )
-        db_user = user_result.scalar_one()
-
-        if db_user.is_blocked:
-            text = await ShopCustomizationService.get_message(session, "blocked_user")
-            fallback_keyboard = await ShopCustomizationService.main_menu_keyboard(session)
-            keyboard = await _message_markup(session, "blocked_user", fallback_keyboard, copy_text=text)
-            await update.message.reply_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
-            return
-
-        original_price = await PriceService.get_plan_price(session, plan)
-        if not original_price:
-            text = await ShopCustomizationService.get_message(session, "inactive_plan")
-            fallback_keyboard = await ShopCustomizationService.main_menu_keyboard(session)
-            keyboard = await _message_markup(session, "inactive_plan", fallback_keyboard, copy_text=text)
-            await update.message.reply_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
-            return
-
-        coupon = await CouponService.get_active_coupon(session, db_user.telegram_id)
-        final_price, discount_amount = CouponService.calculate_discount(original_price, coupon)
-
-        if db_user.wallet_balance < final_price:
-            text = await ShopCustomizationService.get_message(
+        try:
+            result = await purchase_plan(
                 session,
-                "insufficient_balance",
-                required_price=f"{final_price:,}",
+                telegram_id=update.effective_user.id,
+                plan_id=selected_plan_id,
+                service_name=service_name,
+                source_label="bot",
             )
+        except InsufficientBalance:
+            text = await ShopCustomizationService.get_message(session, "insufficient_balance", required_price="موردنیاز")
             fallback_keyboard = await ShopCustomizationService.wallet_keyboard(session)
             keyboard = await _message_markup(session, "insufficient_balance", fallback_keyboard, copy_text=text)
-            await update.message.reply_text(
-                text,
-                reply_markup=keyboard,
-                parse_mode=_parse_mode(text),
-            )
+            await update.message.reply_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
             return
-
-        config = await InventoryService.get_available_config(
-            session, volume, category_key, plan.id
-        )
-        if not config:
-            text = await ShopCustomizationService.get_message(session, "plan_unavailable", volume=volume)
+        except PlanNotFound:
+            text = await ShopCustomizationService.get_message(session, "inactive_plan")
+            fallback_keyboard = await ShopCustomizationService.main_menu_keyboard(session)
+            keyboard = await _message_markup(session, "inactive_plan", fallback_keyboard, copy_text=text)
+            await update.message.reply_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
+            return
+        except PlanUnavailable:
+            text = await ShopCustomizationService.get_message(session, "plan_unavailable", volume=0)
             fallback_keyboard = await ShopCustomizationService.main_menu_keyboard(session)
             keyboard = await _message_markup(session, "plan_unavailable", fallback_keyboard, copy_text=text)
-            await update.message.reply_text(
-                text,
-                reply_markup=keyboard,
-                parse_mode=_parse_mode(text),
-            )
+            await update.message.reply_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
             return
-
-        db_user.wallet_balance -= final_price
-        sold = await InventoryService.sell_config(session, config, db_user.telegram_id)
-        if not sold:
-            await session.rollback()
-            text = await ShopCustomizationService.get_message(session, "plan_sold_out", volume=volume)
+        except PurchaseError:
+            text = await ShopCustomizationService.get_message(session, "plan_sold_out", volume=0)
             fallback_keyboard = await ShopCustomizationService.main_menu_keyboard(session)
             keyboard = await _message_markup(session, "plan_sold_out", fallback_keyboard, copy_text=text)
-            await update.message.reply_text(
-                text,
-                reply_markup=keyboard,
-                parse_mode=_parse_mode(text),
-            )
+            await update.message.reply_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
             return
 
-        purchase = Purchase(
-            user_id=db_user.telegram_id,
-            config_id=config.id,
-            volume_gb=volume,
-            category_key=category_key,
-            price=final_price,
-            original_price=original_price,
-            discount_amount=discount_amount,
-            coupon_id=coupon.id if coupon else None,
-            coupon_code=coupon.code if coupon else None,
-            service_name=service_name,
-        )
-        session.add(purchase)
-        await session.flush()
-        await CouponService.mark_active_coupon_redeemed(session, db_user.telegram_id, purchase.id)
-        session.add(
-            Transaction(
-                user_id=db_user.telegram_id,
-                amount=-final_price,
-                type="purchase",
-                description=f"Purchase {volume}GB - {service_name or 'بدون نام'}",
-            )
-        )
-        await session.commit()
-
-        branded_links = await SettingsService.branded_links_enabled(session)
-        if branded_links:
-            public_sub_link = await SubscriptionLinkService.public_link_for_config(session, config)
-            await SubscriptionLinkService.sync_to_panel(config, service_name)
-        else:
-            public_sub_link = config.sub_link
-        await session.commit()
-        await _process_referral_rewards(context, db_user.telegram_id)
+        await _process_referral_rewards(context, update.effective_user.id)
 
         text = await ShopCustomizationService.get_message(
             session,
             "purchase_success",
-            service_name=escape_markdown(service_name or f"{volume} گیگ", version=1),
-            volume=volume,
-            price=f"{final_price:,}",
-            sub_link=public_sub_link,
+            service_name=escape_markdown(result.purchase.service_name or f"{result.purchase.volume_gb} گیگ", version=1),
+            volume=result.purchase.volume_gb,
+            price=f"{result.purchase.price:,}",
+            sub_link=result.sub_link,
         )
-        keyboard = await ShopCustomizationService.purchase_success_reply_markup(session, public_sub_link)
+        keyboard = await ShopCustomizationService.purchase_success_reply_markup(session, result.sub_link)
         if keyboard is None:
             keyboard = await ShopCustomizationService.back_keyboard(session)
         await update.message.reply_text(
@@ -746,7 +672,7 @@ async def service_details_callback(update: Update, context: ContextTypes.DEFAULT
         async with async_session() as session:
             result = await session.execute(
                 select(Purchase)
-                .where(Purchase.user_id == update.effective_user.id)
+                .where(Purchase.user_id == update.effective_user.id, Purchase.kind == "purchase")
                 .order_by(Purchase.purchased_at.desc())
                 .limit(10)
             )
@@ -835,20 +761,68 @@ async def service_details_callback(update: Update, context: ContextTypes.DEFAULT
             purchased_at=purchase.purchased_at.strftime("%Y-%m-%d %H:%M"),
             price=f"{purchase.price:,}",
         )
-    keyboard = InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("باز کردن لینک اشتراک", url=sub_link)],
-            [InlineKeyboardButton("کپی لینک", api_kwargs={"copy_text": {"text": sub_link}})],
-            [InlineKeyboardButton("ساخت QR Code", callback_data=f"service_qr:{purchase.id}")],
-            [InlineKeyboardButton("بازگشت به سرویس‌ها", callback_data="services:list")],
-        ]
-    )
+    rows = [
+        [InlineKeyboardButton("باز کردن لینک اشتراک", url=sub_link)],
+        [InlineKeyboardButton("کپی لینک", api_kwargs={"copy_text": {"text": sub_link}})],
+        [InlineKeyboardButton("ساخت QR Code", callback_data=f"service_qr:{purchase.id}")],
+    ]
+    if purchase.config and purchase.config.shop_plan_id:
+        rows.append([InlineKeyboardButton("تمدید سرویس", callback_data=f"renew_confirm:{purchase.id}")])
+    rows.append([InlineKeyboardButton("بازگشت به سرویس‌ها", callback_data="services:list")])
+    keyboard = InlineKeyboardMarkup(rows)
     try:
         await query.edit_message_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
     except BadRequest as exc:
         if "parse entities" not in str(exc).lower():
             raise
         await query.edit_message_text(str(text), reply_markup=keyboard, parse_mode=None)
+
+
+async def renew_service_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    try:
+        action, raw_purchase_id = query.data.split(":", 1)
+        purchase_id = int(raw_purchase_id)
+    except (AttributeError, IndexError, ValueError):
+        await query.answer("درخواست تمدید معتبر نیست.", show_alert=True)
+        return
+
+    if action == "renew_confirm":
+        await query.answer()
+        text = (
+            "با تمدید، حجم سرویس ریست می‌شود و تاریخ اعتبار از ابتدا طبق مدت همین سرویس محاسبه می‌شود.\n\n"
+            "آیا تمدید را تایید می‌کنید؟"
+        )
+        keyboard = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("تایید تمدید", callback_data=f"renew_do:{purchase_id}")],
+                [InlineKeyboardButton("انصراف", callback_data=f"service:{purchase_id}")],
+            ]
+        )
+        await query.edit_message_text(text, reply_markup=keyboard)
+        return
+
+    await query.answer("در حال تمدید...")
+    async with async_session() as session:
+        try:
+            result = await renew_purchase(
+                session,
+                telegram_id=update.effective_user.id,
+                purchase_id=purchase_id,
+                source_label="bot",
+            )
+        except InsufficientBalance:
+            text = await ShopCustomizationService.get_message(session, "insufficient_balance", required_price="موردنیاز")
+            keyboard = await ShopCustomizationService.wallet_keyboard(session)
+            await query.message.reply_text(text, reply_markup=keyboard, parse_mode=_parse_mode(text))
+            return
+        except PurchaseError as exc:
+            await query.message.reply_text(f"تمدید انجام نشد:\n{exc}")
+            return
+
+    await query.message.reply_text(
+        f"تمدید با موفقیت انجام شد.\nحجم سرویس ریست شد و اعتبار آن دوباره از ابتدا محاسبه شد.\n\n{result.sub_link}"
+    )
 
 
 async def cancel_coupon(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1060,6 +1034,7 @@ user_handlers = [
     CommandHandler("cancel", cancel_coupon),
     CallbackQueryHandler(response_button_callback, pattern=r"^shop_response:\d+$"),
     CallbackQueryHandler(service_details_callback, pattern=r"^(service:\d+|service_qr:\d+|services:list)$"),
+    CallbackQueryHandler(renew_service_callback, pattern=r"^renew_(confirm|do):\d+$"),
     MessageHandler(filters.CONTACT, rial_user.handle_contact),
     MessageHandler(filters.TEXT & ~filters.COMMAND, shop_text_router),
 ]

@@ -33,6 +33,9 @@ class SchemaService:
                         "shop_plan_id": "INTEGER",
                         "category_key": "VARCHAR DEFAULT 'default' NOT NULL",
                         "public_sub_token": "VARCHAR",
+                        "panel_key": "VARCHAR",
+                        "panel_username": "VARCHAR",
+                        "provision_source": "VARCHAR DEFAULT 'inventory' NOT NULL",
                     },
                 )
             if "purchases" in tables:
@@ -46,6 +49,10 @@ class SchemaService:
                         "coupon_id": "INTEGER",
                         "coupon_code": "VARCHAR",
                         "service_name": "VARCHAR",
+                        "kind": "VARCHAR DEFAULT 'purchase' NOT NULL",
+                        "provision_source": "VARCHAR DEFAULT 'inventory' NOT NULL",
+                        "renewed_at": "DATETIME",
+                        "renews_purchase_id": "INTEGER",
                     },
                 )
             if "shop_messages" in tables:
@@ -81,9 +88,24 @@ class SchemaService:
                         "price": "INTEGER",
                         "emoji_position": "VARCHAR DEFAULT 'left' NOT NULL",
                         "premium_emoji_position": "VARCHAR DEFAULT 'left' NOT NULL",
+                        "duration_days": "INTEGER DEFAULT 30 NOT NULL",
+                        "name_prefix": "VARCHAR",
+                        "provision_mode": "VARCHAR DEFAULT 'inventory' NOT NULL",
+                        "provision_panel_key": "VARCHAR",
+                        "provision_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
+                        "renew_enabled": "BOOLEAN DEFAULT 1 NOT NULL",
                     },
                 )
                 await SchemaService._drop_sqlite_shop_plan_volume_unique(conn)
+            if "shop_plan_categories" in tables:
+                await SchemaService._add_missing_columns(
+                    conn,
+                    "shop_plan_categories",
+                    {
+                        "provision_panel_key": "VARCHAR",
+                        "provision_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
+                    },
+                )
             if "configs" in tables and "shop_plans" in tables:
                 await conn.execute(text("""
                     UPDATE configs

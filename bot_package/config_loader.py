@@ -91,6 +91,12 @@ class BotConfig:
     MARZBAN_API_URL = os.getenv("MARZBAN_API_URL", "").strip().rstrip("/")
     MARZBAN_API_USERNAME = os.getenv("MARZBAN_API_USERNAME", "").strip()
     MARZBAN_API_PASSWORD = os.getenv("MARZBAN_API_PASSWORD", "").strip()
+    ALIEN_PANEL_URL = os.getenv("ALIEN_PANEL_URL", "").strip().rstrip("/")
+    ALIEN_PANEL_USERNAME = os.getenv("ALIEN_PANEL_USERNAME", "").strip()
+    ALIEN_PANEL_PASSWORD = os.getenv("ALIEN_PANEL_PASSWORD", "").strip()
+    EASY_PANEL_URL = os.getenv("EASY_PANEL_URL", "").strip().rstrip("/")
+    EASY_PANEL_USERNAME = os.getenv("EASY_PANEL_USERNAME", "").strip()
+    EASY_PANEL_PASSWORD = os.getenv("EASY_PANEL_PASSWORD", "").strip()
     SESSION_TIMEOUT_MINUTES = _parse_int_env("SESSION_TIMEOUT_MINUTES", 60)
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().upper()
 

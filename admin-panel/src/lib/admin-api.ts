@@ -11,6 +11,12 @@ export interface Plan {
   emoji: string | null;
   style: string | null;
   display_order: number;
+  duration_days: number;
+  name_prefix: string | null;
+  provision_mode: string;
+  provision_panel_key: string | null;
+  provision_enabled: boolean;
+  renew_enabled: boolean;
   is_active: boolean;
   stock: number | null;
 }
@@ -21,6 +27,8 @@ export interface Category {
   title: string;
   emoji: string | null;
   style: string | null;
+  provision_panel_key: string | null;
+  provision_enabled: boolean;
   display_order: number;
   is_active: boolean;
 }
@@ -93,6 +101,19 @@ export const replaceInventoryConfig = (id: number, subLink: string) =>
     method: "PATCH",
     body: JSON.stringify({ sub_link: subLink }),
   });
+
+export interface ProvisionPanel {
+  key: string;
+  title: string;
+  panel_type: string;
+  base_url: string;
+  group_ids: number[];
+  inbounds: Record<string, string[]>;
+  protocols: string[];
+  is_enabled: boolean;
+}
+
+export const listProvisionPanels = () => api<ProvisionPanel[]>("/admin/provision/panels");
 
 // --- Coupons ----------------------------------------------------------------
 

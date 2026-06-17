@@ -92,6 +92,15 @@ export interface RevenuePoint {
   purchases: number;
 }
 
+export interface SalesDailyPoint {
+  date: string;
+  revenue_toman: number;
+  sales: number;
+  renewals: number;
+  inventory: number;
+  panel: number;
+}
+
 export interface StockRow {
   category_key: string;
   volume_gb: number;
@@ -138,6 +147,8 @@ export interface CryptoInvoice {
 export const getStats = () => api<Stats>("/admin/stats");
 export const getRevenueDaily = (days = 30) =>
   api<RevenuePoint[]>(`/admin/stats/revenue-daily?days=${days}`);
+export const getSalesDaily = (days = 45) =>
+  api<SalesDailyPoint[]>(`/admin/stats/sales-daily?days=${days}`);
 export const getStock = () => api<StockRow[]>("/admin/stats/stock");
 export const getUsers = (q?: string, limit = 25, offset = 0) => {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });

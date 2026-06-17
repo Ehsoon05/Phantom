@@ -89,6 +89,8 @@ export interface Purchase {
   service_name: string | null;
   purchased_at: string;
   sub_link: string | null;
+  can_renew: boolean;
+  renewed_at: string | null;
 }
 
 export interface PaymentMethods {
@@ -213,6 +215,11 @@ export const buyPlan = (planId: number, idempotencyKey: string) =>
     method: "POST",
     body: JSON.stringify({ plan_id: planId }),
     headers: { "Idempotency-Key": idempotencyKey },
+  });
+export const renewPurchase = (purchaseId: number) =>
+  api<Purchase>(`/shop/purchases/${purchaseId}/renew`, {
+    method: "POST",
+    body: JSON.stringify({ confirm: true }),
   });
 
 export const formatToman = (value: number) =>

@@ -37,6 +37,9 @@ class Config(Base):
     category_key = Column(String, nullable=False, default="default")
     sub_link = Column(String, nullable=False, unique=True)
     public_sub_token = Column(String, nullable=True, unique=True)
+    panel_key = Column(String, nullable=True)
+    panel_username = Column(String, nullable=True)
+    provision_source = Column(String, nullable=False, default="inventory")
     is_sold = Column(Boolean, default=False)
     sold_to_user_id = Column(BigInteger, nullable=True)
     sold_at = Column(DateTime, nullable=True)
@@ -56,6 +59,10 @@ class Purchase(Base):
     coupon_id = Column(Integer, ForeignKey("coupons.id"), nullable=True)
     coupon_code = Column(String, nullable=True)
     service_name = Column(String, nullable=True)
+    kind = Column(String, nullable=False, default="purchase")
+    provision_source = Column(String, nullable=False, default="inventory")
+    renewed_at = Column(DateTime, nullable=True)
+    renews_purchase_id = Column(Integer, ForeignKey("purchases.id"), nullable=True)
     purchased_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     user = relationship("User", back_populates="purchases")
     config = relationship("Config", back_populates="purchases")
@@ -224,6 +231,12 @@ class ShopPlan(Base):
     emoji_position = Column(String, nullable=False, default="left")
     style = Column(String, nullable=True, default="success")
     display_order = Column(Integer, nullable=False, default=0)
+    duration_days = Column(Integer, nullable=False, default=30)
+    name_prefix = Column(String, nullable=True)
+    provision_mode = Column(String, nullable=False, default="inventory")
+    provision_panel_key = Column(String, nullable=True)
+    provision_enabled = Column(Boolean, nullable=False, default=False)
+    renew_enabled = Column(Boolean, nullable=False, default=True)
     is_active = Column(Boolean, default=True)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -237,6 +250,8 @@ class ShopPlanCategory(Base):
     premium_emoji_id = Column(String, nullable=True)
     emoji_position = Column(String, nullable=False, default="left")
     style = Column(String, nullable=True, default="primary")
+    provision_panel_key = Column(String, nullable=True)
+    provision_enabled = Column(Boolean, nullable=False, default=False)
     display_order = Column(Integer, nullable=False, default=0)
     is_active = Column(Boolean, default=True)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -248,6 +263,23 @@ class BotSetting(Base):
     id = Column(Integer, primary_key=True)
     key = Column(String, unique=True, nullable=False)
     value = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ProvisionPanel(Base):
+    __tablename__ = "provision_panels"
+
+    id = Column(Integer, primary_key=True)
+    key = Column(String, unique=True, nullable=False)
+    title = Column(String, nullable=False)
+    panel_type = Column(String, nullable=False, default="marzban")
+    base_url = Column(String, nullable=False)
+    username = Column(String, nullable=False)
+    password = Column(String, nullable=False)
+    group_ids = Column(Text, nullable=True)
+    inbounds_json = Column(Text, nullable=True)
+    protocols_json = Column(Text, nullable=True)
+    is_enabled = Column(Boolean, nullable=False, default=True)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 

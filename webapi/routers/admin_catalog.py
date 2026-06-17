@@ -1,5 +1,6 @@
 """Admin: inventory, shop plans/categories/prices, messages, buttons."""
 
+import json
 from urllib.parse import unquote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,9 +8,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot_package.models import Admin, Config, ShopButton, ShopMessage, ShopPlan, ShopPlanCategory
+from bot_package.models import Admin, Config, ProvisionPanel, ShopButton, ShopMessage, ShopPlan, ShopPlanCategory
 from bot_package.services.inventory_service import InventoryService
 from bot_package.services.price_service import PriceService
+from bot_package.services.provisioning_service import ProvisioningService
 from bot_package.services.shop_customization_service import ShopCustomizationService
 from bot_package.services.subscription_link_service import SubscriptionLinkService
 
@@ -160,6 +162,12 @@ def _plan_out(plan: ShopPlan, stock_count: int | None = None) -> dict:
         "emoji": plan.emoji,
         "style": plan.style,
         "display_order": plan.display_order,
+        "duration_days": plan.duration_days,
+        "name_prefix": plan.name_prefix,
+        "provision_mode": plan.provision_mode,
+        "provision_panel_key": plan.provision_panel_key,
+        "provision_enabled": plan.provision_enabled,
+        "renew_enabled": plan.renew_enabled,
         "is_active": plan.is_active,
         "stock": stock_count,
     }
@@ -172,6 +180,12 @@ class PlanUpsertRequest(BaseModel):
     category_key: str = "default"
     emoji: str | None = "📦"
     style: str | None = None
+    duration_days: int = 30
+    name_prefix: str | None = None
+    provision_mode: str = "inventory"
+    provision_panel_key: str | None = None
+    provision_enabled: bool = False
+    renew_enabled: bool = True
 
 
 class PlanUpdateRequest(BaseModel):
@@ -181,6 +195,12 @@ class PlanUpdateRequest(BaseModel):
     style: str | None = None
     category_key: str | None = None
     display_order: int | None = None
+    duration_days: int | None = None
+    name_prefix: str | None = None
+    provision_mode: str | None = None
+    provision_panel_key: str | None = None
+    provision_enabled: bool | None = None
+    renew_enabled: bool | None = None
     is_active: bool | None = None
 
 
@@ -210,6 +230,13 @@ async def upsert_plan(
         emoji=body.emoji,
         style=body.style or "success",
     )
+    plan.duration_days = body.duration_days
+    plan.name_prefix = body.name_prefix
+    plan.provision_mode = body.provision_mode
+    plan.provision_panel_key = body.provision_panel_key
+    plan.provision_enabled = body.provision_enabled
+    plan.renew_enabled = body.renew_enabled
+    await session.commit()
     return _plan_out(plan)
 
 
@@ -248,6 +275,8 @@ def _category_out(c: ShopPlanCategory) -> dict:
         "title": c.title,
         "emoji": c.emoji,
         "style": c.style,
+        "provision_panel_key": c.provision_panel_key,
+        "provision_enabled": c.provision_enabled,
         "display_order": c.display_order,
         "is_active": c.is_active,
     }
@@ -262,6 +291,8 @@ class CategoryUpdateRequest(BaseModel):
     title: str | None = None
     emoji: str | None = None
     style: str | None = None
+    provision_panel_key: str | None = None
+    provision_enabled: bool | None = None
     display_order: int | None = None
     is_active: bool | None = None
 
@@ -272,6 +303,70 @@ async def list_categories(
     _admin: Admin = Depends(require_permission("prices")),
 ):
     return [_category_out(c) for c in await ShopCustomizationService.list_categories(session)]
+
+
+# --- Provision panels --------------------------------------------------------
+
+def _panel_out(panel: ProvisionPanel) -> dict:
+    return {
+        "key": panel.key,
+        "title": panel.title,
+        "panel_type": panel.panel_type,
+        "base_url": panel.base_url,
+        "group_ids": json.loads(panel.group_ids or "[]"),
+        "inbounds": json.loads(panel.inbounds_json or "{}"),
+        "protocols": json.loads(panel.protocols_json or "[]"),
+        "is_enabled": panel.is_enabled,
+    }
+
+
+class PanelUpsertRequest(BaseModel):
+    key: str
+    title: str
+    panel_type: str = "marzban"
+    base_url: str
+    username: str
+    password: str
+    group_ids: list[int] = []
+    inbounds: dict[str, list[str]] = {}
+    protocols: list[str] = []
+    is_enabled: bool = True
+
+
+@router.get("/provision/panels")
+async def list_provision_panels(
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("shop")),
+):
+    await ProvisioningService.ensure_env_panels(session)
+    panels = (await session.execute(select(ProvisionPanel).order_by(ProvisionPanel.id))).scalars().all()
+    return [_panel_out(panel) for panel in panels]
+
+
+@router.put("/provision/panels/{key}")
+async def upsert_provision_panel(
+    key: str,
+    body: PanelUpsertRequest,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("shop")),
+):
+    panel = (
+        await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == key))
+    ).scalar_one_or_none()
+    if panel is None:
+        panel = ProvisionPanel(key=key, title=body.title, base_url=body.base_url, username=body.username, password=body.password)
+        session.add(panel)
+    panel.title = body.title
+    panel.panel_type = body.panel_type
+    panel.base_url = body.base_url.rstrip("/")
+    panel.username = body.username
+    panel.password = body.password
+    panel.group_ids = json.dumps(body.group_ids)
+    panel.inbounds_json = json.dumps(body.inbounds)
+    panel.protocols_json = json.dumps(body.protocols)
+    panel.is_enabled = body.is_enabled
+    await session.commit()
+    return _panel_out(panel)
 
 
 @router.post("/categories")

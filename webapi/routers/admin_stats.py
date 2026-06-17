@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
@@ -12,6 +13,14 @@ from ..deps import get_session, require_permission
 from ..schemas import AdminStatsOut
 
 router = APIRouter(prefix="/admin/stats", tags=["admin"])
+TEHRAN = ZoneInfo("Asia/Tehran")
+
+
+def _tehran_range(days: int) -> tuple[datetime, datetime]:
+    today = datetime.now(TEHRAN).date()
+    start = datetime.combine(today - timedelta(days=days - 1), time.min, TEHRAN)
+    end = datetime.combine(today + timedelta(days=1), time.min, TEHRAN)
+    return start.astimezone(timezone.utc), end.astimezone(timezone.utc)
 
 
 @router.get("", response_model=AdminStatsOut)
@@ -53,19 +62,65 @@ async def revenue_daily(
     session: AsyncSession = Depends(get_session),
     _admin: Admin = Depends(require_permission("reports")),
 ):
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff, end = _tehran_range(days)
     rows = (
         await session.execute(
-            select(Purchase.purchased_at, Purchase.price).where(Purchase.purchased_at >= cutoff)
+            select(Purchase.purchased_at, Purchase.price).where(
+                Purchase.purchased_at >= cutoff,
+                Purchase.purchased_at < end,
+            )
         )
     ).all()
-    # Bucket per calendar day in Python — portable across SQLite and Postgres.
+    # Bucket per Iran calendar day in Python — portable across SQLite and Postgres.
     buckets: dict[str, dict] = {}
     for purchased_at, price in rows:
-        key = purchased_at.date().isoformat()
+        if purchased_at.tzinfo is None:
+            purchased_at = purchased_at.replace(tzinfo=timezone.utc)
+        key = purchased_at.astimezone(TEHRAN).date().isoformat()
         bucket = buckets.setdefault(key, {"date": key, "revenue_toman": 0, "purchases": 0})
         bucket["revenue_toman"] += price
         bucket["purchases"] += 1
+    return sorted(buckets.values(), key=lambda b: b["date"])
+
+
+@router.get("/sales-daily")
+async def sales_daily(
+    days: int = Query(default=45, ge=1, le=365),
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("reports")),
+):
+    start, end = _tehran_range(days)
+    purchases = (
+        await session.execute(
+            select(Purchase).where(Purchase.purchased_at >= start, Purchase.purchased_at < end)
+        )
+    ).scalars().all()
+    buckets: dict[str, dict] = {}
+    for purchase in purchases:
+        purchased_at = purchase.purchased_at
+        if purchased_at.tzinfo is None:
+            purchased_at = purchased_at.replace(tzinfo=timezone.utc)
+        key = purchased_at.astimezone(TEHRAN).date().isoformat()
+        bucket = buckets.setdefault(
+            key,
+            {
+                "date": key,
+                "revenue_toman": 0,
+                "sales": 0,
+                "renewals": 0,
+                "inventory": 0,
+                "panel": 0,
+            },
+        )
+        bucket["revenue_toman"] += purchase.price
+        if purchase.kind == "renewal":
+            bucket["renewals"] += 1
+        else:
+            bucket["sales"] += 1
+        if purchase.provision_source == "panel":
+            bucket["panel"] += 1
+        else:
+            bucket["inventory"] += 1
     return sorted(buckets.values(), key=lambda b: b["date"])
 
 

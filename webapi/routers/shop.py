@@ -1,11 +1,14 @@
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import func, select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot_package.models import Config, Purchase, Transaction, User
+from bot_package.models import Config, Purchase, ShopPlanCategory, User
 from bot_package.services.coupon_service import CouponError, CouponService
 from bot_package.services.inventory_service import InventoryService
 from bot_package.services.price_service import PriceService
+from bot_package.services.provisioning_service import ProvisioningService
+from bot_package.services.purchase_service import PurchaseError, purchase_plan, renew_purchase
 from bot_package.services.referral_service import ReferralService
 from bot_package.services.settings_service import SettingsService
 from bot_package.services.shop_customization_service import ShopCustomizationService
@@ -19,6 +22,7 @@ from ..schemas import (
     PlanOut,
     PurchaseOut,
     PurchaseRequest,
+    RenewRequest,
 )
 
 router = APIRouter(prefix="/shop", tags=["shop"])
@@ -67,12 +71,20 @@ async def list_plans(
     plans = await ShopCustomizationService.list_plans(session, active_only=True)
     coupon = await CouponService.get_active_coupon(session, user.telegram_id)
     stock = await _stock_counts(session, plans)
+    category_rows = await ShopCustomizationService.list_categories(session, active_only=True)
+    category_map = {category.key: category for category in category_rows}
 
     by_category: dict[str, list[PlanOut]] = {}
     for plan in plans:
         price = await PriceService.get_plan_price(session, plan)
         final_price, discount = (
             CouponService.calculate_discount(price, coupon) if price else (price, 0)
+        )
+        category = category_map.get(plan.category_key)
+        can_create = (
+            plan.provision_mode in {"panel_only", "inventory_then_panel"}
+            and ProvisioningService.plan_provision_enabled(plan, category)
+            and await ProvisioningService.panel_for_plan(session, plan) is not None
         )
         by_category.setdefault(plan.category_key, []).append(
             PlanOut(
@@ -86,7 +98,8 @@ async def list_plans(
                 emoji=plan.emoji,
                 style=plan.style,
                 display_order=plan.display_order,
-                in_stock=stock.get(plan.id, 0) > 0,
+                in_stock=stock.get(plan.id, 0) > 0 or can_create,
+                can_create=can_create,
             )
         )
 
@@ -145,77 +158,26 @@ async def purchase(
     if plan is None or not plan.is_active:
         raise HTTPException(status_code=404, detail="Plan not found")
 
-    # Same flow as the bot's purchase handler: lock user row, price with
-    # coupon, take one unsold config, debit wallet, record purchase.
-    db_user = (
-        await session.execute(
-            select(User).where(User.telegram_id == user.telegram_id).with_for_update()
+    try:
+        result = await purchase_plan(
+            session,
+            telegram_id=user.telegram_id,
+            plan_id=body.plan_id,
+            service_name=plan.title,
+            source_label="webapp",
         )
-    ).scalar_one()
-    if db_user.is_blocked:
-        raise HTTPException(status_code=403, detail="User is blocked")
+    except PurchaseError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
 
-    original_price = await PriceService.get_plan_price(session, plan)
-    if not original_price:
-        raise HTTPException(status_code=409, detail="Plan has no active price")
-
-    coupon = await CouponService.get_active_coupon(session, db_user.telegram_id)
-    final_price, discount_amount = CouponService.calculate_discount(original_price, coupon)
-
-    if (db_user.wallet_balance or 0) < final_price:
-        raise HTTPException(status_code=402, detail="Insufficient wallet balance")
-
-    config = await InventoryService.get_available_config(
-        session, plan.volume_gb, plan.category_key, plan.id
-    )
-    if config is None:
-        raise HTTPException(status_code=409, detail="Plan is out of stock")
-
-    db_user.wallet_balance -= final_price
-    sold = await InventoryService.sell_config(session, config, db_user.telegram_id)
-    if not sold:
-        await session.rollback()
-        raise HTTPException(status_code=409, detail="Plan is out of stock")
-
-    purchase_row = Purchase(
-        user_id=db_user.telegram_id,
-        config_id=config.id,
-        volume_gb=plan.volume_gb,
-        category_key=plan.category_key,
-        price=final_price,
-        original_price=original_price,
-        discount_amount=discount_amount,
-        coupon_id=coupon.id if coupon else None,
-        coupon_code=coupon.code if coupon else None,
-        service_name=plan.title,
-    )
-    session.add(purchase_row)
-    await session.flush()
-    await CouponService.mark_active_coupon_redeemed(session, db_user.telegram_id, purchase_row.id)
-    session.add(
-        Transaction(
-            user_id=db_user.telegram_id,
-            amount=-final_price,
-            type="purchase",
-            description=f"Purchase {plan.volume_gb}GB - {plan.title} (webapp)",
-        )
-    )
-    await session.commit()
-
-    if await SettingsService.branded_links_enabled(session):
-        await SubscriptionLinkService.public_link_for_config(session, config)
-        await SubscriptionLinkService.sync_to_panel(config, plan.title)
-        await session.commit()
-
-    rewards = await ReferralService.evaluate_referred_user(session, db_user.telegram_id)
+    rewards = await ReferralService.evaluate_referred_user(session, user.telegram_id)
     await session.commit()
     for reward in rewards:
         if reward.get("config") is not None:
             await SubscriptionLinkService.sync_to_panel(reward["config"], reward["service_name"])
 
     if cache_key:
-        _idempotency_cache[cache_key] = purchase_row.id
-    return await _purchase_out(session, purchase_row)
+        _idempotency_cache[cache_key] = result.purchase.id
+    return await _purchase_out(session, result.purchase)
 
 
 @router.get("/purchases", response_model=list[PurchaseOut])
@@ -227,7 +189,7 @@ async def list_purchases(
         (
             await session.execute(
                 select(Purchase)
-                .where(Purchase.user_id == user.telegram_id)
+                .where(Purchase.user_id == user.telegram_id, Purchase.kind == "purchase")
                 .order_by(Purchase.purchased_at.desc())
             )
         )
@@ -235,6 +197,27 @@ async def list_purchases(
         .all()
     )
     return [await _purchase_out(session, p) for p in purchases]
+
+
+@router.post("/purchases/{purchase_id}/renew", response_model=PurchaseOut)
+async def renew(
+    purchase_id: int,
+    body: RenewRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    if not body.confirm:
+        raise HTTPException(status_code=400, detail="Renewal confirmation is required")
+    try:
+        result = await renew_purchase(
+            session,
+            telegram_id=user.telegram_id,
+            purchase_id=purchase_id,
+            source_label="webapp",
+        )
+    except PurchaseError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+    return await _purchase_out(session, result.purchase)
 
 
 async def _purchase_out(session: AsyncSession, purchase_row: Purchase) -> PurchaseOut:
@@ -248,6 +231,10 @@ async def _purchase_out(session: AsyncSession, purchase_row: Purchase) -> Purcha
             await session.commit()
         else:
             sub_link = config.sub_link
+    can_renew = False
+    if config and config.shop_plan_id:
+        plan = await ShopCustomizationService.get_plan(session, config.shop_plan_id)
+        can_renew = bool(plan and plan.is_active and plan.renew_enabled)
     return PurchaseOut(
         id=purchase_row.id,
         volume_gb=purchase_row.volume_gb,
@@ -259,4 +246,6 @@ async def _purchase_out(session: AsyncSession, purchase_row: Purchase) -> Purcha
         service_name=purchase_row.service_name,
         purchased_at=purchase_row.purchased_at,
         sub_link=sub_link,
+        can_renew=can_renew,
+        renewed_at=purchase_row.renewed_at,
     )

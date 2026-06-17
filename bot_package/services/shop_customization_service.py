@@ -706,7 +706,17 @@ class ShopCustomizationService:
         category = await ShopCustomizationService.get_category(session, key)
         if not category:
             return None
-        allowed = {"title", "emoji", "premium_emoji_id", "emoji_position", "style", "display_order", "is_active"}
+        allowed = {
+            "title",
+            "emoji",
+            "premium_emoji_id",
+            "emoji_position",
+            "style",
+            "provision_panel_key",
+            "provision_enabled",
+            "display_order",
+            "is_active",
+        }
         for field, value in values.items():
             if field in allowed:
                 setattr(category, field, value)
@@ -833,7 +843,24 @@ class ShopCustomizationService:
         if not plan:
             return None
 
-        allowed = {"title", "price", "emoji", "premium_emoji_id", "premium_emoji_position", "emoji_position", "category_key", "style", "display_order", "is_active"}
+        allowed = {
+            "title",
+            "price",
+            "emoji",
+            "premium_emoji_id",
+            "premium_emoji_position",
+            "emoji_position",
+            "category_key",
+            "style",
+            "display_order",
+            "duration_days",
+            "name_prefix",
+            "provision_mode",
+            "provision_panel_key",
+            "provision_enabled",
+            "renew_enabled",
+            "is_active",
+        }
         category_title = values.get("category_title")
         for key, value in values.items():
             if key == "category_title":

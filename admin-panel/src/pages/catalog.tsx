@@ -15,6 +15,7 @@ import {
   getInventoryStock,
   listCategories,
   listInventoryConfigs,
+  listProvisionPanels,
   listPlans,
   replaceInventoryConfig,
   setPlanPrice,
@@ -27,6 +28,7 @@ function PlansTab() {
   const qc = useQueryClient();
   const { data: plans, isLoading } = useQuery({ queryKey: ["admin-plans"], queryFn: listPlans });
   const { data: categories } = useQuery({ queryKey: ["admin-categories"], queryFn: listCategories });
+  const { data: panels } = useQuery({ queryKey: ["provision-panels"], queryFn: listProvisionPanels });
   const invalidate = () => qc.invalidateQueries({ queryKey: ["admin-plans"] });
 
   const [form, setForm] = useState({ volume_gb: "", title: "", price: "", category_key: "default" });
@@ -49,6 +51,18 @@ function PlansTab() {
   });
   const toggle = useMutation({
     mutationFn: (p: { id: number; is_active: boolean }) => updatePlan(p.id, { is_active: !p.is_active }),
+    onSuccess: invalidate,
+  });
+  const provision = useMutation({
+    mutationFn: (input: {
+      id: number;
+      provision_mode: string;
+      provision_panel_key: string | null;
+      provision_enabled: boolean;
+      renew_enabled: boolean;
+      duration_days: number;
+      name_prefix: string | null;
+    }) => updatePlan(input.id, input),
     onSuccess: invalidate,
   });
   const remove = useMutation({ mutationFn: (id: number) => deletePlan(id), onSuccess: invalidate });
@@ -82,7 +96,7 @@ function PlansTab() {
             <thead>
               <tr className="border-b text-right text-xs text-muted-foreground">
                 <th className="pb-2">عنوان</th><th className="pb-2">دسته</th><th className="pb-2">حجم</th>
-                <th className="pb-2">قیمت</th><th className="pb-2">موجودی</th><th className="pb-2">وضعیت</th><th className="pb-2">عملیات</th>
+                <th className="pb-2">قیمت</th><th className="pb-2">تامین</th><th className="pb-2">موجودی</th><th className="pb-2">وضعیت</th><th className="pb-2">عملیات</th>
               </tr>
             </thead>
             <tbody>
@@ -92,10 +106,32 @@ function PlansTab() {
                   <td className="py-2 text-muted-foreground">{p.category_key}</td>
                   <td className="py-2">{p.volume_gb > 0 ? `${p.volume_gb} GB` : "نامحدود"}</td>
                   <td className="py-2">{p.price != null ? formatToman(p.price) : "—"}</td>
+                  <td className="py-2 text-xs">
+                    {p.provision_enabled ? `${p.provision_mode} · ${p.provision_panel_key ?? "دسته"}` : "انبار"}
+                  </td>
                   <td className="py-2"><Badge variant={(p.stock ?? 0) <= 3 ? "destructive" : "secondary"}>{p.stock ?? 0}</Badge></td>
                   <td className="py-2">{p.is_active ? "✅" : "⛔"}</td>
                   <td className="flex flex-wrap gap-1 py-2">
                     <Button size="sm" variant="outline" onClick={() => { const v = prompt("قیمت جدید:", String(p.price ?? "")); const n = parseInt(v ?? "", 10); if (!Number.isNaN(n)) price.mutate({ id: p.id, p: n }); }}>قیمت</Button>
+                    <Button size="sm" variant="outline" onClick={() => {
+                      const panelKey = prompt(`کلید پنل (${panels?.map((panel) => panel.key).join(", ") || "easy/alien"}):`, p.provision_panel_key ?? "easy");
+                      if (panelKey === null) return;
+                      const mode = prompt("حالت تامین: inventory | inventory_then_panel | panel_only", p.provision_mode || "inventory_then_panel");
+                      if (!mode) return;
+                      const prefix = prompt("پیشوند نام ساب:", p.name_prefix ?? `PhantomHubs_${p.category_key}_${p.volume_gb}GB`);
+                      if (prefix === null) return;
+                      const duration = parseInt(prompt("مدت سرویس به روز:", String(p.duration_days ?? 30)) ?? "", 10);
+                      if (Number.isNaN(duration) || duration <= 0) return;
+                      provision.mutate({
+                        id: p.id,
+                        provision_mode: mode,
+                        provision_panel_key: panelKey || null,
+                        provision_enabled: mode !== "inventory",
+                        renew_enabled: true,
+                        duration_days: duration,
+                        name_prefix: prefix || null,
+                      });
+                    }}>تامین</Button>
                     <Button size="sm" variant="secondary" onClick={() => toggle.mutate({ id: p.id, is_active: p.is_active })}>{p.is_active ? "غیرفعال" : "فعال"}</Button>
                     <Button size="sm" variant="destructive" onClick={() => { if (confirm("حذف پلن؟")) remove.mutate(p.id); }}>حذف</Button>
                   </td>
