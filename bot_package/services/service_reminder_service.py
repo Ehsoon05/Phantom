@@ -172,8 +172,11 @@ class ServiceReminderService:
         remaining_percent_value: int | None = None
         if total and total > 0 and remaining is not None:
             remaining_percent_value = max(0, min(100, int((remaining / total) * 100)))
+            sent_volume_thresholds = _sent_thresholds(sent_rules, "volume_", "")
             for threshold in sorted(volume_thresholds):
                 rule_key = f"volume_{threshold}"
+                if any(sent_threshold <= threshold for sent_threshold in sent_volume_thresholds):
+                    continue
                 if remaining_percent_value <= threshold and rule_key not in sent_rules:
                     due_rules.append(rule_key)
                     reasons.append(f"حجم باقی‌مانده سرویس به کمتر از {threshold}٪ رسیده است.")
@@ -184,8 +187,11 @@ class ServiceReminderService:
         if expire:
             remaining_seconds_value = int(expire - datetime.now(timezone.utc).timestamp())
             if remaining_seconds_value > 0:
+                sent_time_days = _sent_thresholds(sent_rules, "time_", "d")
                 for days in sorted(time_thresholds):
                     rule_key = f"time_{days}d"
+                    if any(sent_days <= days for sent_days in sent_time_days):
+                        continue
                     if remaining_seconds_value <= days * 86400 and rule_key not in sent_rules:
                         due_rules.append(rule_key)
                         reasons.append(f"کمتر از {days} روز تا پایان اعتبار سرویس باقی مانده است.")
@@ -263,3 +269,20 @@ def _format_expiry(expire: int | None) -> tuple[str, str]:
     days = remaining.days
     hours = remaining.seconds // 3600
     return expiry.strftime("%Y-%m-%d %H:%M UTC"), f"{days} روز و {hours} ساعت"
+
+
+def _sent_thresholds(sent_rules: set[str], prefix: str, suffix: str) -> list[int]:
+    thresholds: list[int] = []
+    for rule in sent_rules:
+        if not rule.startswith(prefix):
+            continue
+        value = rule[len(prefix):]
+        if suffix:
+            if not value.endswith(suffix):
+                continue
+            value = value[: -len(suffix)]
+        try:
+            thresholds.append(int(value))
+        except ValueError:
+            continue
+    return thresholds
