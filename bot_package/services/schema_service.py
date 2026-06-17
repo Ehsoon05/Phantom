@@ -55,6 +55,15 @@ class SchemaService:
                         "renews_purchase_id": "INTEGER",
                     },
                 )
+            if "service_reminder_logs" in tables:
+                await SchemaService._add_missing_columns(
+                    conn,
+                    "service_reminder_logs",
+                    {
+                        "remaining_percent": "INTEGER",
+                        "remaining_seconds": "INTEGER",
+                    },
+                )
             if "shop_messages" in tables:
                 await SchemaService._add_missing_columns(
                     conn,

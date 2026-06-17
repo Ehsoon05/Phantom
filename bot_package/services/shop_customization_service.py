@@ -189,6 +189,17 @@ DEFAULT_MESSAGES: dict[str, str] = {
         "موجودی جدید: **{wallet_balance} تومان**\n\n"
         "اکنون می‌توانید سرویس موردنظرتان را تهیه کنید."
     ),
+    "service_expiry_reminder": (
+        "🔔 **یادآوری تمدید سرویس**\n\n"
+        "سرویس: **{service_name}**\n"
+        "{reason_lines}\n\n"
+        "حجم کل: **{total_volume}**\n"
+        "حجم باقی‌مانده: **{remaining_volume}**\n"
+        "درصد باقی‌مانده: **{remaining_percent}**\n"
+        "تاریخ انقضا: **{expiry_text}**\n"
+        "زمان باقی‌مانده: **{remaining_time}**\n\n"
+        "برای جلوگیری از قطع شدن سرویس، می‌توانید همین حالا تمدیدش کنید."
+    ),
     "purchase_success": (
         "**خرید با موفقیت انجام شد**\n\n"
         "نام سرویس: **{service_name}**\n"

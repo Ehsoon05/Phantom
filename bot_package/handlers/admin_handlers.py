@@ -145,6 +145,10 @@ from ..utils.keyboards import (
     ADMIN_TRIAL_SET_DURATION,
     ADMIN_TRIAL_SET_VOLUME,
     ADMIN_TRIAL_TOGGLE,
+    ADMIN_SERVICE_REMINDERS,
+    ADMIN_SERVICE_REMINDER_TOGGLE,
+    ADMIN_SERVICE_REMINDER_SET_VOLUME,
+    ADMIN_SERVICE_REMINDER_SET_DAYS,
     ADMIN_USERS,
     ADMIN_USER_STATS,
     ADMIN_EMOJI_LEFT,
@@ -189,6 +193,7 @@ from ..utils.keyboards import (
     admin_required_channel_keyboard,
     admin_style_keyboard,
     admin_trial_settings_keyboard,
+    admin_service_reminders_keyboard,
     admin_user_confirm_keyboard,
     admin_users_keyboard,
     coupon_target_keyboard,
@@ -301,7 +306,9 @@ PROVISION_INBOUND_CALLBACK_PREFIX = "admin_inb"
     PROVISION_PANEL_SELECT,
     PROVISION_PANEL_OPTION,
     PROVISION_PANEL_VALUE,
-) = range(73)
+    SERVICE_REMINDER_VOLUME_VALUE,
+    SERVICE_REMINDER_DAYS_VALUE,
+) = range(75)
 
 
 SHOP_MENU_LABELS = {
@@ -342,6 +349,7 @@ SHOP_SETTINGS_LABELS = {
     ADMIN_REQUIRED_CHANNELS,
     ADMIN_TOGGLE_BRANDED_LINKS,
     ADMIN_TRIAL_SETTINGS,
+    ADMIN_SERVICE_REMINDERS,
 }
 
 
@@ -555,6 +563,8 @@ async def _leave_shop_flow_if_navigation(update: Update, context: ContextTypes.D
             await toggle_branded_subscription_links(update, context)
         elif text == ADMIN_TRIAL_SETTINGS:
             await trial_settings_menu(update, context)
+        elif text == ADMIN_SERVICE_REMINDERS:
+            await service_reminders_menu(update, context)
         elif text == ADMIN_SHOP_RESET_DEFAULTS:
             await update.message.reply_text(
                 "از روند فعلی خارج شدید. برای بازگردانی، دکمه قرمز «بازگشت فروشگاه به پیش‌فرض» را دوباره بزنید.",
@@ -2589,6 +2599,97 @@ async def trial_set_duration_save(update: Update, context: ContextTypes.DEFAULT_
     await update.message.reply_text("مدت کانفیگ تست ذخیره شد.")
     await trial_settings_menu(update, context)
     return ConversationHandler.END
+
+
+@require_auth(permission="shop")
+async def service_reminders_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        enabled = await SettingsService.service_reminders_enabled(session)
+        volume_percents = await SettingsService.get_service_reminder_volume_percents(session)
+        time_days = await SettingsService.get_service_reminder_time_days(session)
+        interval = await SettingsService.get_service_reminder_interval_seconds(session)
+    await update.message.reply_text(
+        "**هشدار تمدید سرویس**\n\n"
+        f"وضعیت: **{'روشن' if enabled else 'خاموش'}**\n"
+        f"هشدار حجم: **{', '.join(str(value) + '٪' for value in volume_percents) or '-'}**\n"
+        f"هشدار زمان: **{', '.join(str(value) + ' روز' for value in time_days) or '-'}**\n"
+        f"فاصله بررسی خودکار: **{interval // 60} دقیقه**\n\n"
+        "متن پیام از بخش مدیریت پیام‌ها با کلید `service_expiry_reminder` قابل تغییر است.",
+        reply_markup=admin_service_reminders_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+
+
+@require_auth(permission="shop")
+async def service_reminders_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        enabled = not await SettingsService.service_reminders_enabled(session)
+        await SettingsService.set_service_reminders_enabled(session, enabled)
+    await update.message.reply_text(f"هشدار تمدید سرویس {'روشن' if enabled else 'خاموش'} شد.")
+    await service_reminders_menu(update, context)
+
+
+@require_auth(permission="shop")
+async def service_reminder_volume_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "درصدهای هشدار حجم را با کاما بفرستید.\nمثال: `20,10`\nبرای غیرفعال کردن هشدار حجم، `-` بفرستید.",
+        reply_markup=_cancel_back_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return SERVICE_REMINDER_VOLUME_VALUE
+
+
+@require_auth(permission="shop")
+async def service_reminder_volume_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    values = _parse_positive_int_list(update.message.text, maximum=100)
+    if update.message.text.strip() != "-" and not values:
+        await update.message.reply_text("درصدها معتبر نیستند. مثال: `20,10`", parse_mode=constants.ParseMode.MARKDOWN)
+        return SERVICE_REMINDER_VOLUME_VALUE
+    async with async_session() as session:
+        await SettingsService.set_service_reminder_volume_percents(session, values)
+    await update.message.reply_text("درصدهای هشدار حجم ذخیره شد.")
+    await service_reminders_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="shop")
+async def service_reminder_days_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "روزهای هشدار زمان را با کاما بفرستید.\nمثال: `3,1`\nبرای غیرفعال کردن هشدار زمان، `-` بفرستید.",
+        reply_markup=_cancel_back_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return SERVICE_REMINDER_DAYS_VALUE
+
+
+@require_auth(permission="shop")
+async def service_reminder_days_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    values = _parse_positive_int_list(update.message.text)
+    if update.message.text.strip() != "-" and not values:
+        await update.message.reply_text("روزها معتبر نیستند. مثال: `3,1`", parse_mode=constants.ParseMode.MARKDOWN)
+        return SERVICE_REMINDER_DAYS_VALUE
+    async with async_session() as session:
+        await SettingsService.set_service_reminder_time_days(session, values)
+    await update.message.reply_text("روزهای هشدار زمان ذخیره شد.")
+    await service_reminders_menu(update, context)
+    return ConversationHandler.END
+
+
+def _parse_positive_int_list(text: str, *, maximum: int | None = None) -> list[int]:
+    if text.strip() == "-":
+        return []
+    values: list[int] = []
+    for part in text.replace("،", ",").split(","):
+        try:
+            value = int(part.strip())
+        except ValueError:
+            continue
+        if value <= 0:
+            continue
+        if maximum is not None:
+            value = min(maximum, value)
+        values.append(value)
+    return sorted(set(values), reverse=True)
 
 
 @require_auth(permission="shop")
@@ -5123,6 +5224,30 @@ trial_set_duration_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
 )
 
+service_reminder_volume_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_SERVICE_REMINDER_SET_VOLUME), service_reminder_volume_start)],
+    states={
+        SERVICE_REMINDER_VOLUME_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, service_reminder_volume_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+service_reminder_days_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_SERVICE_REMINDER_SET_DAYS), service_reminder_days_start)],
+    states={
+        SERVICE_REMINDER_DAYS_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, service_reminder_days_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
 shop_reset_defaults_conv = ConversationHandler(
     entry_points=[MessageHandler(_exact_filter(ADMIN_SHOP_RESET_DEFAULTS), shop_reset_defaults)],
     states={
@@ -5242,6 +5367,8 @@ admin_handlers = [
     rial_set_support_conv,
     trial_set_volume_conv,
     trial_set_duration_conv,
+    service_reminder_volume_conv,
+    service_reminder_days_conv,
     shop_reset_defaults_conv,
     referral_rewards_conv,
     broadcast_conv,
@@ -5259,6 +5386,8 @@ admin_handlers = [
     MessageHandler(_exact_filter(ADMIN_PROVISION_PANELS), provision_panels_start),
     MessageHandler(_exact_filter(ADMIN_TRIAL_SETTINGS), trial_settings_menu),
     MessageHandler(_exact_filter(ADMIN_TRIAL_TOGGLE), trial_toggle),
+    MessageHandler(_exact_filter(ADMIN_SERVICE_REMINDERS), service_reminders_menu),
+    MessageHandler(_exact_filter(ADMIN_SERVICE_REMINDER_TOGGLE), service_reminders_toggle),
     MessageHandler(_exact_filter(ADMIN_TOGGLE_BRANDED_LINKS), toggle_branded_subscription_links),
     MessageHandler(
         filters.Regex(

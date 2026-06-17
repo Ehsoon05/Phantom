@@ -18,6 +18,10 @@ RIAL_SUPPORT_HANDLE = "rial_support_handle"
 TRIAL_ENABLED = "trial_enabled"
 TRIAL_VOLUME_MB = "trial_volume_mb"
 TRIAL_DURATION_HOURS = "trial_duration_hours"
+SERVICE_REMINDERS_ENABLED = "service_reminders_enabled"
+SERVICE_REMINDER_VOLUME_PERCENTS = "service_reminder_volume_percents"
+SERVICE_REMINDER_TIME_DAYS = "service_reminder_time_days"
+SERVICE_REMINDER_JOB_INTERVAL_SECONDS = "service_reminder_job_interval_seconds"
 
 DEFAULTS = {
     RATE_MODE: "online",
@@ -31,6 +35,10 @@ DEFAULTS = {
     TRIAL_ENABLED: "true",
     TRIAL_VOLUME_MB: "500",
     TRIAL_DURATION_HOURS: "24",
+    SERVICE_REMINDERS_ENABLED: "true",
+    SERVICE_REMINDER_VOLUME_PERCENTS: "20,10",
+    SERVICE_REMINDER_TIME_DAYS: "3,1",
+    SERVICE_REMINDER_JOB_INTERVAL_SECONDS: "3600",
 }
 
 
@@ -169,3 +177,49 @@ class SettingsService:
     @staticmethod
     async def set_trial_duration_hours(session: AsyncSession, hours: int) -> None:
         await SettingsService.set(session, TRIAL_DURATION_HOURS, str(max(1, int(hours))))
+
+    @staticmethod
+    async def service_reminders_enabled(session: AsyncSession) -> bool:
+        value = await SettingsService.get(session, SERVICE_REMINDERS_ENABLED, "true")
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    async def set_service_reminders_enabled(session: AsyncSession, enabled: bool) -> None:
+        await SettingsService.set(session, SERVICE_REMINDERS_ENABLED, "true" if enabled else "false")
+
+    @staticmethod
+    async def get_service_reminder_volume_percents(session: AsyncSession) -> list[int]:
+        return _parse_int_list(await SettingsService.get(session, SERVICE_REMINDER_VOLUME_PERCENTS, "20,10"), minimum=1)
+
+    @staticmethod
+    async def set_service_reminder_volume_percents(session: AsyncSession, values: list[int]) -> None:
+        cleaned = sorted({max(1, min(100, int(value))) for value in values}, reverse=True)
+        await SettingsService.set(session, SERVICE_REMINDER_VOLUME_PERCENTS, ",".join(str(value) for value in cleaned))
+
+    @staticmethod
+    async def get_service_reminder_time_days(session: AsyncSession) -> list[int]:
+        return _parse_int_list(await SettingsService.get(session, SERVICE_REMINDER_TIME_DAYS, "3,1"), minimum=1)
+
+    @staticmethod
+    async def set_service_reminder_time_days(session: AsyncSession, values: list[int]) -> None:
+        cleaned = sorted({max(1, int(value)) for value in values}, reverse=True)
+        await SettingsService.set(session, SERVICE_REMINDER_TIME_DAYS, ",".join(str(value) for value in cleaned))
+
+    @staticmethod
+    async def get_service_reminder_interval_seconds(session: AsyncSession) -> int:
+        try:
+            return max(300, int(await SettingsService.get(session, SERVICE_REMINDER_JOB_INTERVAL_SECONDS) or 3600))
+        except (TypeError, ValueError):
+            return 3600
+
+
+def _parse_int_list(value: str | None, *, minimum: int) -> list[int]:
+    result: list[int] = []
+    for part in str(value or "").replace("،", ",").split(","):
+        try:
+            item = int(part.strip())
+        except ValueError:
+            continue
+        if item >= minimum:
+            result.append(item)
+    return sorted(set(result), reverse=True)

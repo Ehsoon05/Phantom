@@ -68,6 +68,24 @@ class Purchase(Base):
     config = relationship("Config", back_populates="purchases")
     coupon = relationship("Coupon", back_populates="purchases")
 
+
+class ServiceReminderLog(Base):
+    __tablename__ = "service_reminder_logs"
+    __table_args__ = (
+        UniqueConstraint("purchase_id", "rule_key", name="uq_service_reminder_purchase_rule"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    purchase_id = Column(Integer, ForeignKey("purchases.id"), nullable=False)
+    config_id = Column(Integer, ForeignKey("configs.id"), nullable=False)
+    user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
+    rule_key = Column(String, nullable=False)
+    remaining_percent = Column(Integer, nullable=True)
+    remaining_seconds = Column(Integer, nullable=True)
+    sent_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    purchase = relationship("Purchase")
+
 class Transaction(Base):
     __tablename__ = "transactions"
     id = Column(Integer, primary_key=True)
