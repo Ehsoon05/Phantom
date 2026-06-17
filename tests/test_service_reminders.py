@@ -30,7 +30,10 @@ async def db(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_service_reminder_selects_most_urgent_rules_once(db):
     from bot_package.models import Config, Purchase, ServiceReminderLog, User
-    from bot_package.services.service_reminder_service import ServiceReminderService
+    import bot_package.services.service_reminder_service as reminder_module
+
+    reminder_module = importlib.reload(reminder_module)
+    ServiceReminderService = reminder_module.ServiceReminderService
 
     expire = int((datetime.now(timezone.utc) + timedelta(hours=12)).timestamp())
     async with db.async_session() as session:
@@ -95,7 +98,10 @@ def test_admin_shop_settings_keyboard_contains_service_reminders():
 @pytest.mark.asyncio
 async def test_service_reminder_handles_volume_only_and_finished_services(db):
     from bot_package.models import Config, Purchase, User
-    from bot_package.services.service_reminder_service import ServiceReminderService
+    import bot_package.services.service_reminder_service as reminder_module
+
+    reminder_module = importlib.reload(reminder_module)
+    ServiceReminderService = reminder_module.ServiceReminderService
 
     expired = int((datetime.now(timezone.utc) - timedelta(minutes=5)).timestamp())
     async with db.async_session() as session:
