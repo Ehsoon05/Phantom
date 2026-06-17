@@ -56,7 +56,10 @@ async def test_auth_rejects_bad_signature(client):
 async def test_auth_me_and_shop_flow(client):
     response = await client.post("/api/v1/auth/telegram", json={"init_data": make_init_data()})
     assert response.status_code == 200, response.text
-    token = response.json()["access_token"]
+    auth_body = response.json()
+    token = auth_body["access_token"]
+    assert auth_body["me"]["telegram_id"] == 777
+    assert auth_body["me"]["wallet_balance"] == 0
     headers = {"Authorization": f"Bearer {token}"}
 
     me = await client.get("/api/v1/auth/me", headers=headers)

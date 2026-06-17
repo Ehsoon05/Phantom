@@ -6,13 +6,26 @@ from bot_package.models import User
 from bot_package.services.referral_service import ReferralService
 
 from ..deps import get_current_user, get_session
-from ..schemas import MeResponse, TelegramAuthRequest, TokenResponse
+from ..schemas import MeResponse, TelegramAuthRequest, TelegramAuthResponse
 from ..security import AuthError, issue_user_token, validate_init_data
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.post("/telegram", response_model=TokenResponse)
+def _me_response(user: User) -> MeResponse:
+    return MeResponse(
+        telegram_id=user.telegram_id,
+        first_name=user.first_name,
+        username=user.username,
+        wallet_balance=user.wallet_balance or 0,
+        referral_code=user.referral_code,
+        trial_claimed=user.trial_claimed_at is not None,
+        accepted_rules=user.accepted_rules_at is not None,
+        phone_verified=bool(user.verified_phone_number and user.phone_verified_at),
+    )
+
+
+@router.post("/telegram", response_model=TelegramAuthResponse)
 async def telegram_auth(body: TelegramAuthRequest, session: AsyncSession = Depends(get_session)):
     try:
         data = validate_init_data(body.init_data)
@@ -44,19 +57,11 @@ async def telegram_auth(body: TelegramAuthRequest, session: AsyncSession = Depen
     payload = body.start_param or data.get("start_param")
     await ReferralService.apply_start_payload(session, user, payload)
     await session.commit()
+    await session.refresh(user)
 
-    return TokenResponse(access_token=issue_user_token(telegram_id))
+    return TelegramAuthResponse(access_token=issue_user_token(telegram_id), me=_me_response(user))
 
 
 @router.get("/me", response_model=MeResponse)
 async def me(user: User = Depends(get_current_user)):
-    return MeResponse(
-        telegram_id=user.telegram_id,
-        first_name=user.first_name,
-        username=user.username,
-        wallet_balance=user.wallet_balance or 0,
-        referral_code=user.referral_code,
-        trial_claimed=user.trial_claimed_at is not None,
-        accepted_rules=user.accepted_rules_at is not None,
-        phone_verified=bool(user.verified_phone_number and user.phone_verified_at),
-    )
+    return _me_response(user)

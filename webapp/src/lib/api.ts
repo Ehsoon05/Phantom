@@ -34,17 +34,6 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
-export async function authenticate(initData: string, startParam?: string) {
-  const data = await api<{ access_token: string }>("/auth/telegram", {
-    method: "POST",
-    body: JSON.stringify({ init_data: initData, start_param: startParam ?? null }),
-  });
-  setToken(data.access_token);
-  return data;
-}
-
-// --- Typed API surface -------------------------------------------------------
-
 export interface Me {
   telegram_id: number;
   first_name: string;
@@ -55,6 +44,17 @@ export interface Me {
   accepted_rules: boolean;
   phone_verified: boolean;
 }
+
+export async function authenticate(initData: string, startParam?: string) {
+  const data = await api<{ access_token: string; me: Me }>("/auth/telegram", {
+    method: "POST",
+    body: JSON.stringify({ init_data: initData, start_param: startParam ?? null }),
+  });
+  setToken(data.access_token);
+  return data;
+}
+
+// --- Typed API surface -------------------------------------------------------
 
 export interface Plan {
   id: number;

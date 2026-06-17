@@ -29,7 +29,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
     applyTelegramTheme(tg);
     tg.onEvent("themeChanged", () => applyTelegramTheme(tg));
     authenticate(tg.initData, tg.initDataUnsafe.start_param)
-      .then(() => setAuthState("ready"))
+      .then((auth) => {
+        queryClient.setQueryData(["me"], auth.me);
+        setAuthState("ready");
+      })
       .catch(() => setAuthState("error"));
   }, []);
 

@@ -5,9 +5,7 @@ import { Gift, ShoppingBag, Wallet } from "lucide-react";
 import Link from "next/link";
 
 import { AuthGate } from "@/components/auth-gate";
-import BlurText from "@/components/reactbits/BlurText";
 import CountUp from "@/components/reactbits/CountUp";
-import ShinyText from "@/components/reactbits/ShinyText";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -19,24 +17,12 @@ function HomeContent() {
   return (
     <div className="space-y-5">
       <header className="flex items-center justify-between">
-        {/* animateBy="words" only — letter splitting breaks Persian script joining */}
-        <BlurText
-          text={`سلام${me ? `، ${me.first_name}` : ""} 👋`}
-          animateBy="words"
-          delay={120}
-          className="text-lg font-bold"
-        />
+        <h1 className="text-lg font-bold">سلام{me ? `، ${me.first_name}` : ""} 👋</h1>
       </header>
 
       <Card className="bg-primary text-primary-foreground">
         <CardContent className="space-y-1 p-5">
-          <ShinyText
-            text="موجودی کیف پول"
-            speed={3}
-            color="rgba(255,255,255,0.75)"
-            shineColor="#ffffff"
-            className="text-xs"
-          />
+          <p className="text-xs opacity-80">موجودی کیف پول</p>
           {isLoading ? (
             <Skeleton className="h-8 w-32 bg-primary-foreground/20" />
           ) : (

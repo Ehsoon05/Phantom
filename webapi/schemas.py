@@ -12,9 +12,24 @@ class TelegramAuthRequest(BaseModel):
     start_param: str | None = None
 
 
+class MeResponse(BaseModel):
+    telegram_id: int
+    first_name: str
+    username: str | None
+    wallet_balance: int
+    referral_code: str | None
+    trial_claimed: bool
+    accepted_rules: bool
+    phone_verified: bool
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class TelegramAuthResponse(TokenResponse):
+    me: MeResponse
 
 
 class AdminLoginRequest(BaseModel):
@@ -28,17 +43,6 @@ class AdminTokenResponse(TokenResponse):
 
 
 # --- User -------------------------------------------------------------------
-
-class MeResponse(BaseModel):
-    telegram_id: int
-    first_name: str
-    username: str | None
-    wallet_balance: int
-    referral_code: str | None
-    trial_claimed: bool
-    accepted_rules: bool
-    phone_verified: bool
-
 
 class PlanOut(BaseModel):
     id: int
