@@ -33,6 +33,15 @@ def _clean_username(value: str) -> str:
     return cleaned or "PhantomHubs"
 
 
+def _username_base_and_start(value: str) -> tuple[str, int]:
+    cleaned = _clean_username(value)
+    match = re.match(r"^(.*?)(?:_([0-9]+))$", cleaned)
+    if not match:
+        return cleaned, 1
+    base = match.group(1).strip("_") or cleaned
+    return base, max(1, int(match.group(2)))
+
+
 def effective_volume_gb(plan: ShopPlan) -> int:
     return int(plan.provision_volume_gb if plan.provision_volume_gb is not None else plan.volume_gb)
 
@@ -161,23 +170,45 @@ class ProvisioningService:
 
     @staticmethod
     async def next_username(session: AsyncSession, plan: ShopPlan) -> str:
-        prefix = _clean_username(
+        raw_prefix = (
             plan.name_prefix
             or f"PhantomHubs_{plan.category_key}_{plan.title}_{plan.volume_gb}GB"
         )
+        base_name, start_number = _username_base_and_start(
+            raw_prefix
+        )
         key = f"provision_counter:{plan.id}"
+        name_key = f"provision_counter_name:{plan.id}"
         setting = (
             await session.execute(select(BotSetting).where(BotSetting.key == key).with_for_update())
         ).scalar_one_or_none()
-        current = int(setting.value) if setting and str(setting.value or "").isdigit() else 0
+        name_setting = (
+            await session.execute(select(BotSetting).where(BotSetting.key == name_key).with_for_update())
+        ).scalar_one_or_none()
+        prefix_changed = bool(name_setting and name_setting.value != base_name)
+        if not name_setting and setting and plan.name_prefix and re.search(r"_[0-9]+$", _clean_username(raw_prefix)):
+            prefix_changed = True
+
+        current = (
+            int(setting.value)
+            if setting and str(setting.value or "").isdigit() and not prefix_changed
+            else start_number - 1
+        )
+        if current < start_number - 1:
+            current = start_number - 1
         current += 1
         if setting:
             setting.value = str(current)
             setting.updated_at = datetime.now(timezone.utc)
         else:
             session.add(BotSetting(key=key, value=str(current)))
+        if name_setting:
+            name_setting.value = base_name
+            name_setting.updated_at = datetime.now(timezone.utc)
+        else:
+            session.add(BotSetting(key=name_key, value=base_name))
         await session.flush()
-        return f"{prefix}_{current}"
+        return f"{base_name}_{current}"
 
     @staticmethod
     async def _token(client: httpx.AsyncClient, panel: ProvisionPanel) -> str:
