@@ -8,7 +8,7 @@ from bot_package.services.coupon_service import CouponError, CouponService
 from bot_package.services.inventory_service import InventoryService
 from bot_package.services.price_service import PriceService
 from bot_package.services.provisioning_service import ProvisioningService
-from bot_package.services.purchase_service import PurchaseError, purchase_plan, renew_purchase
+from bot_package.services.purchase_service import InsufficientBalance, PurchaseError, purchase_plan, renew_purchase
 from bot_package.services.referral_service import ReferralService
 from bot_package.services.settings_service import SettingsService
 from bot_package.services.shop_customization_service import ShopCustomizationService
@@ -171,6 +171,8 @@ async def purchase(
             service_name=plan.title,
             source_label="webapp",
         )
+    except InsufficientBalance as exc:
+        raise HTTPException(status_code=exc.status_code, detail="موجودی کیف پول کافی نیست")
     except PurchaseError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
 
@@ -220,6 +222,8 @@ async def renew(
             purchase_id=purchase_id,
             source_label="webapp",
         )
+    except InsufficientBalance as exc:
+        raise HTTPException(status_code=exc.status_code, detail="موجودی کیف پول کافی نیست")
     except PurchaseError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
     return await _purchase_out(session, result.purchase)
@@ -237,9 +241,12 @@ async def _purchase_out(session: AsyncSession, purchase_row: Purchase) -> Purcha
         else:
             sub_link = config.sub_link
     can_renew = False
+    renewal_price = None
     if config and config.shop_plan_id:
         plan = await ShopCustomizationService.get_plan(session, config.shop_plan_id)
         can_renew = bool(plan and plan.is_active and plan.renew_enabled)
+        if can_renew and plan:
+            renewal_price = await PriceService.get_plan_price(session, plan)
     return PurchaseOut(
         id=purchase_row.id,
         volume_gb=purchase_row.volume_gb,
@@ -253,5 +260,6 @@ async def _purchase_out(session: AsyncSession, purchase_row: Purchase) -> Purcha
         purchased_at=purchase_row.purchased_at,
         sub_link=sub_link,
         can_renew=can_renew,
+        renewal_price=renewal_price,
         renewed_at=purchase_row.renewed_at,
     )

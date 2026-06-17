@@ -112,7 +112,7 @@ async def purchase_plan(
     coupon = await CouponService.get_active_coupon(session, user.telegram_id)
     final_price, discount_amount = CouponService.calculate_discount(original_price, coupon)
     if (user.wallet_balance or 0) < final_price:
-        raise InsufficientBalance("Insufficient wallet balance")
+        raise InsufficientBalance("موجودی کیف پول کافی نیست")
 
     category = (
         await session.execute(
@@ -221,7 +221,7 @@ async def renew_purchase(
     if not original_price:
         raise PlanUnavailable("Plan has no active price")
     if (user.wallet_balance or 0) < original_price:
-        raise InsufficientBalance("Insufficient wallet balance")
+        raise InsufficientBalance("موجودی کیف پول کافی نیست")
 
     try:
         await ProvisioningService.renew_config(session, purchase.config, plan)

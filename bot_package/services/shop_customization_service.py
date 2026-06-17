@@ -995,6 +995,35 @@ class ShopCustomizationService:
         return await ShopCustomizationService.buy_category_keyboard(session, "default", prices)
 
     @staticmethod
+    def duration_options_for_category(category_key: str) -> list[tuple[str, str]]:
+        options = {
+            "express": [("یک‌ماهه", "monthly")],
+            "unlimited": [("یک‌ماهه", "monthly")],
+            "nolimits": [("نامحدود", "unlimited")],
+        }
+        return options.get((category_key or "").strip().lower(), [])
+
+    @staticmethod
+    async def buy_duration_keyboard(session: AsyncSession, category_key: str) -> ReplyKeyboardMarkup:
+        rows: list[list[KeyboardButton]] = []
+        for label, _key in ShopCustomizationService.duration_options_for_category(category_key):
+            rows.append([ShopCustomizationService._keyboard_button(label, style=STYLE_PRIMARY)])
+
+        back_buttons = await ShopCustomizationService._buttons_for_menu(session, "shop_buy")
+        if back_buttons:
+            rows.append([ShopCustomizationService._button_from_model(button) for button in back_buttons])
+        return _reply_keyboard(rows)
+
+    @staticmethod
+    def duration_key_for_text(category_key: str | None, text: str) -> str | None:
+        if not category_key:
+            return None
+        for label, key in ShopCustomizationService.duration_options_for_category(category_key):
+            if label == text:
+                return key
+        return None
+
+    @staticmethod
     async def buy_category_keyboard(session: AsyncSession, category_key: str, prices: dict | None = None) -> ReplyKeyboardMarkup:
         if not prices:
             prices = {}

@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, ExternalLink, RefreshCcw, Smartphone } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 
 import { AuthGate } from "@/components/auth-gate";
@@ -18,6 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   formatToman,
   getPurchases,
+  getMe,
   happLink,
   hiddifyLink,
   renewPurchase,
@@ -70,6 +72,7 @@ function ServicesContent() {
     queryKey: ["purchases"],
     queryFn: getPurchases,
   });
+  const { data: me } = useQuery({ queryKey: ["me"], queryFn: getMe });
   const renew = useMutation({
     mutationFn: (purchaseId: number) => renewPurchase(purchaseId),
     onSuccess: () => {
@@ -89,6 +92,10 @@ function ServicesContent() {
     setNotice(message);
     window.setTimeout(() => setNotice(null), 2200);
   };
+
+  const renewPrice = renewTarget?.renewal_price ?? renewTarget?.price ?? 0;
+  const balance = me?.wallet_balance ?? 0;
+  const renewInsufficient = renewTarget != null && balance < renewPrice;
 
   const copySubscription = async (subLink: string) => {
     await copyText(subLink);
@@ -226,16 +233,45 @@ function ServicesContent() {
           </SheetHeader>
           <div className="space-y-4 p-4 pt-0">
             <p className="text-sm leading-6 text-muted-foreground">
-              با تمدید، حجم سرویس ریست می‌شود و تاریخ اعتبار از ابتدا طبق مدت همین سرویس محاسبه می‌شود.
+              تمدید این سرویس مثل خرید سرویس جدید از کیف پول شما پرداخت می‌شود. با تایید تمدید، حجم سرویس ریست می‌شود و تاریخ اعتبار از ابتدا طبق مدت همین سرویس محاسبه می‌شود.
             </p>
-            <Button
-              className="min-h-12 w-full"
-              disabled={!renewTarget || renew.isPending}
-              onClick={() => renewTarget && renew.mutate(renewTarget.id)}
-            >
-              <RefreshCcw className="size-4" />
-              {renew.isPending ? "در حال تمدید…" : "تایید تمدید"}
-            </Button>
+            <div className="space-y-2 rounded-lg bg-muted p-3 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">مبلغ تمدید</span>
+                <span className="font-bold">{formatToman(renewPrice)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">موجودی شما</span>
+                <span className={renewInsufficient ? "font-bold text-destructive" : "font-bold"}>
+                  {formatToman(balance)}
+                </span>
+              </div>
+            </div>
+            {renewInsufficient ? (
+              <div className="space-y-3">
+                <div
+                  role="alert"
+                  className="rounded-lg border border-destructive/30 bg-destructive/10 p-3"
+                >
+                  <p className="text-sm font-bold text-destructive">موجودی کیف پول کافی نیست</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    برای تمدید، حداقل {formatToman(Math.max(0, renewPrice - balance))} دیگر به کیف پول اضافه کنید.
+                  </p>
+                </div>
+                <Button asChild className="min-h-12 w-full">
+                  <Link href="/wallet">افزایش موجودی کیف پول</Link>
+                </Button>
+              </div>
+            ) : (
+              <Button
+                className="min-h-12 w-full"
+                disabled={!renewTarget || renew.isPending}
+                onClick={() => renewTarget && renew.mutate(renewTarget.id)}
+              >
+                <RefreshCcw className="size-4" />
+                {renew.isPending ? "در حال تمدید…" : "پرداخت و تمدید از کیف پول"}
+              </Button>
+            )}
             <Button
               variant="outline"
               className="min-h-11 w-full"

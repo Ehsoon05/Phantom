@@ -92,6 +92,7 @@ export interface Purchase {
   purchased_at: string;
   sub_link: string | null;
   can_renew: boolean;
+  renewal_price: number | null;
   renewed_at: string | null;
 }
 

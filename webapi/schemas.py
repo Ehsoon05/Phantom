@@ -85,6 +85,7 @@ class PurchaseOut(BaseModel):
     purchased_at: datetime
     sub_link: str | None
     can_renew: bool = False
+    renewal_price: int | None = None
     renewed_at: datetime | None = None
 
 

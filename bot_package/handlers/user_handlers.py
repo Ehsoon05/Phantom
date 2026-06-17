@@ -243,6 +243,18 @@ async def buy_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def buy_category_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, category_key: str):
     context.user_data["selected_plan_category"] = category_key
+    context.user_data.pop("selected_plan_duration", None)
+    if ShopCustomizationService.duration_options_for_category(category_key):
+        async with async_session() as session:
+            text = "لطفاً مدت زمان سرویس را مشخص کنید."
+            keyboard = await ShopCustomizationService.buy_duration_keyboard(session, category_key)
+        await update.message.reply_text(text, reply_markup=keyboard)
+        return
+
+    await buy_category_plans_menu(update, context, category_key)
+
+
+async def buy_category_plans_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, category_key: str):
     async with async_session() as session:
         prices = await PriceService.get_all_prices(session)
         discounted_prices = await CouponService.prices_with_active_discount(session, update.effective_user.id, prices)
@@ -799,9 +811,53 @@ async def renew_service_callback(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     if action == "renew_confirm":
+        async with async_session() as session:
+            purchase = (
+                await session.execute(
+                    select(Purchase)
+                    .options(selectinload(Purchase.config))
+                    .where(
+                        Purchase.id == purchase_id,
+                        Purchase.user_id == update.effective_user.id,
+                        Purchase.kind == "purchase",
+                    )
+                )
+            ).scalar_one_or_none()
+            user = (
+                await session.execute(select(User).where(User.telegram_id == update.effective_user.id))
+            ).scalar_one_or_none()
+            if not purchase or not purchase.config or not purchase.config.shop_plan_id or not user:
+                await query.answer("سرویس معتبر نیست.", show_alert=True)
+                return
+            plan = await ShopCustomizationService.get_plan(session, purchase.config.shop_plan_id)
+            if not plan or not plan.is_active or not plan.renew_enabled:
+                await query.answer("تمدید برای این سرویس فعال نیست.", show_alert=True)
+                return
+            renew_price = await PriceService.get_plan_price(session, plan)
+            if not renew_price:
+                await query.answer("قیمت تمدید برای این سرویس تنظیم نشده است.", show_alert=True)
+                return
+            wallet_balance = user.wallet_balance or 0
+
+        if wallet_balance < renew_price:
+            await query.answer("موجودی کیف پول کافی نیست.", show_alert=True)
+            text = (
+                "موجودی کیف پول برای تمدید این سرویس کافی نیست.\n\n"
+                f"مبلغ تمدید: {renew_price:,} تومان\n"
+                f"موجودی شما: {wallet_balance:,} تومان\n"
+                f"مبلغ موردنیاز برای شارژ: {max(0, renew_price - wallet_balance):,} تومان"
+            )
+            async with async_session() as session:
+                keyboard = await ShopCustomizationService.wallet_keyboard(session)
+            await query.message.reply_text(text, reply_markup=keyboard)
+            return
+
         await query.answer()
         text = (
-            "با تمدید، حجم سرویس ریست می‌شود و تاریخ اعتبار از ابتدا طبق مدت همین سرویس محاسبه می‌شود.\n\n"
+            "تمدید این سرویس مثل خرید سرویس جدید از کیف پول شما پرداخت می‌شود.\n\n"
+            "با تایید تمدید، حجم سرویس ریست می‌شود و تاریخ اعتبار از ابتدا طبق مدت همین سرویس محاسبه می‌شود.\n\n"
+            f"مبلغ تمدید: {renew_price:,} تومان\n"
+            f"موجودی شما: {wallet_balance:,} تومان\n\n"
             "آیا تمدید را تایید می‌کنید؟"
         )
         keyboard = InlineKeyboardMarkup(
@@ -841,7 +897,9 @@ async def renew_service_callback(update: Update, context: ContextTypes.DEFAULT_T
             return
 
     await query.message.reply_text(
-        f"تمدید با موفقیت انجام شد.\nحجم سرویس ریست شد و اعتبار آن دوباره از ابتدا محاسبه شد.\n\n{result.sub_link}"
+        f"تمدید با موفقیت انجام شد.\n"
+        f"مبلغ تمدید از کیف پول شما کسر شد.\n"
+        f"حجم سرویس ریست شد و اعتبار آن دوباره از ابتدا محاسبه شد.\n\n{result.sub_link}"
     )
 
 
@@ -941,6 +999,7 @@ async def shop_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         action = await ShopCustomizationService.action_for_text(session, text)
         category_key = await ShopCustomizationService.category_for_text(session, text)
         selected_category = context.user_data.get("selected_plan_category")
+        selected_duration = ShopCustomizationService.duration_key_for_text(selected_category, text)
         plan_id = await ShopCustomizationService.plan_for_text(session, text, discounted_prices, selected_category)
 
     if context.user_data.get(rial_user.STEP_KEY):
@@ -967,6 +1026,11 @@ async def shop_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if category_key:
         await buy_category_menu(update, context, category_key)
+        return
+
+    if selected_duration:
+        context.user_data["selected_plan_duration"] = selected_duration
+        await buy_category_plans_menu(update, context, selected_category)
         return
 
     if plan_id is not None:
