@@ -90,3 +90,61 @@ def test_admin_shop_settings_keyboard_contains_service_reminders():
 
     labels = [button.text for row in admin_shop_settings_keyboard().keyboard for button in row]
     assert ADMIN_SERVICE_REMINDERS in labels
+
+
+@pytest.mark.asyncio
+async def test_service_reminder_handles_volume_only_and_finished_services(db):
+    from bot_package.models import Config, Purchase, User
+    from bot_package.services.service_reminder_service import ServiceReminderService
+
+    expired = int((datetime.now(timezone.utc) - timedelta(minutes=5)).timestamp())
+    async with db.async_session() as session:
+        user = User(telegram_id=1002, first_name="Active")
+        config = Config(
+            volume_gb=30,
+            sub_link="https://example.com/sub/volume-only",
+            public_sub_token="volume-only",
+            is_sold=True,
+            sold_to_user_id=1002,
+        )
+        purchase = Purchase(
+            user_id=1002,
+            config=config,
+            volume_gb=30,
+            category_key="nolimits",
+            price=1000,
+            service_name="Volume Only",
+        )
+        session.add_all([user, config, purchase])
+        await session.commit()
+        purchase_id = purchase.id
+        config_id = config.id
+
+    async with db.async_session() as session:
+        purchase = await session.get(Purchase, purchase_id)
+        config = await session.get(Config, config_id)
+        rules, values = await ServiceReminderService._due_rules(
+            purchase,
+            config,
+            {"total": 1000, "remaining": 150, "expire": 0},
+            [20, 10],
+            [3, 1],
+        )
+
+    assert rules == ["volume_20"]
+    assert values["expiry_text"] == "نامحدود"
+
+    async with db.async_session() as session:
+        purchase = await session.get(Purchase, purchase_id)
+        config = await session.get(Config, config_id)
+        rules, values = await ServiceReminderService._due_rules(
+            purchase,
+            config,
+            {"total": 1000, "remaining": 0, "expire": expired},
+            [20, 10],
+            [3, 1],
+        )
+
+    assert rules == ["volume_empty", "time_expired"]
+    assert "تمام شده" in values["reason_lines"]
+    assert "پایان رسیده" in values["reason_lines"]

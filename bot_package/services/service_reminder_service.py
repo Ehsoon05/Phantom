@@ -172,21 +172,32 @@ class ServiceReminderService:
         remaining_percent_value: int | None = None
         if total and total > 0 and remaining is not None:
             remaining_percent_value = max(0, min(100, int((remaining / total) * 100)))
-            sent_volume_thresholds = _sent_thresholds(sent_rules, "volume_", "")
-            for threshold in sorted(volume_thresholds):
-                rule_key = f"volume_{threshold}"
-                if any(sent_threshold <= threshold for sent_threshold in sent_volume_thresholds):
-                    continue
-                if remaining_percent_value <= threshold and rule_key not in sent_rules:
+            if remaining <= 0:
+                rule_key = "volume_empty"
+                if rule_key not in sent_rules:
                     due_rules.append(rule_key)
-                    reasons.append(f"حجم باقی‌مانده سرویس به کمتر از {threshold}٪ رسیده است.")
-                    break
+                    reasons.append("حجم سرویس شما تمام شده است.")
+            else:
+                sent_volume_thresholds = _sent_thresholds(sent_rules, "volume_", "")
+                for threshold in sorted(volume_thresholds):
+                    rule_key = f"volume_{threshold}"
+                    if any(sent_threshold <= threshold for sent_threshold in sent_volume_thresholds):
+                        continue
+                    if remaining_percent_value <= threshold and rule_key not in sent_rules:
+                        due_rules.append(rule_key)
+                        reasons.append(f"حجم باقی‌مانده سرویس به کمتر از {threshold}٪ رسیده است.")
+                        break
 
         expire = _to_int(metadata.get("expire"))
         remaining_seconds_value: int | None = None
         if expire:
             remaining_seconds_value = int(expire - datetime.now(timezone.utc).timestamp())
-            if remaining_seconds_value > 0:
+            if remaining_seconds_value <= 0:
+                rule_key = "time_expired"
+                if rule_key not in sent_rules:
+                    due_rules.append(rule_key)
+                    reasons.append("زمان اعتبار سرویس شما به پایان رسیده است.")
+            else:
                 sent_time_days = _sent_thresholds(sent_rules, "time_", "d")
                 for days in sorted(time_thresholds):
                     rule_key = f"time_{days}d"
