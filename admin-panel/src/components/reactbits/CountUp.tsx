@@ -31,8 +31,9 @@ export default function CountUp({
   const ref = useRef<HTMLSpanElement>(null);
   const motionValue = useMotionValue(direction === 'down' ? to : from);
 
-  const damping = 20 + 40 * (1 / duration);
-  const stiffness = 100 * (1 / duration);
+  const visualDuration = Math.max(0.25, Math.min(duration, 0.6));
+  const damping = 28;
+  const stiffness = 360;
 
   const springValue = useSpring(motionValue, {
     damping,
@@ -89,11 +90,14 @@ export default function CountUp({
 
       const durationTimeoutId = setTimeout(
         () => {
+          if (ref.current) {
+            ref.current.textContent = formatValue(direction === 'down' ? from : to);
+          }
           if (typeof onEnd === 'function') {
             onEnd();
           }
         },
-        delay * 1000 + duration * 1000
+        delay * 1000 + visualDuration * 1000
       );
 
       return () => {
@@ -101,7 +105,7 @@ export default function CountUp({
         clearTimeout(durationTimeoutId);
       };
     }
-  }, [isInView, startWhen, motionValue, direction, from, to, delay, onStart, onEnd, duration]);
+  }, [isInView, startWhen, motionValue, direction, from, to, delay, onStart, onEnd, visualDuration, formatValue]);
 
   useEffect(() => {
     const unsubscribe = springValue.on('change', (latest: number) => {

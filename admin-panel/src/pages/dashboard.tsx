@@ -33,7 +33,7 @@ function StatCard({
           <Skeleton className="h-7 w-24" />
         ) : (
           <p className="text-xl font-bold">
-            <CountUp to={value} duration={1} separator="٬" locale="fa-IR" />
+            <CountUp to={value} duration={0.45} separator="٬" locale="fa-IR" />
             {suffix ? ` ${suffix}` : ""}
           </p>
         )}

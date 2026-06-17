@@ -41,7 +41,7 @@ function HomeContent() {
             <Skeleton className="h-8 w-32 bg-primary-foreground/20" />
           ) : (
             <p className="text-2xl font-bold">
-              <CountUp to={me?.wallet_balance ?? 0} duration={1.2} separator="٬" locale="fa-IR" />{" "}
+              <CountUp to={me?.wallet_balance ?? 0} duration={0.45} separator="٬" locale="fa-IR" />{" "}
               تومان
             </p>
           )}

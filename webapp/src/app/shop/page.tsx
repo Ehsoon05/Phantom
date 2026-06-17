@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronLeft } from "lucide-react";
 import { useState } from "react";
 
 import { AuthGate } from "@/components/auth-gate";
@@ -25,12 +26,18 @@ import {
   type Purchase,
 } from "@/lib/api";
 import { getWebApp } from "@/lib/telegram";
+import { cn } from "@/lib/utils";
 
 function PlanCard({ plan, onSelect }: { plan: Plan; onSelect: (plan: Plan) => void }) {
   const hasDiscount = plan.discount_amount > 0 && plan.price != null;
   return (
     <Card
-      className={!plan.in_stock ? "opacity-50" : "active:scale-[0.98] transition-transform"}
+      className={cn(
+        "transition-[border-color,transform,box-shadow]",
+        plan.in_stock
+          ? "cursor-pointer active:scale-[0.98] active:border-primary/50 active:shadow-sm"
+          : "opacity-50"
+      )}
       onClick={() => plan.in_stock && onSelect(plan)}
     >
       <CardContent className="flex items-center justify-between p-4">
@@ -43,19 +50,24 @@ function PlanCard({ plan, onSelect }: { plan: Plan; onSelect: (plan: Plan) => vo
             {plan.volume_gb > 0 ? `${plan.volume_gb} گیگابایت` : "حجم نامحدود"}
           </p>
         </div>
-        <div className="text-left">
+        <div className="flex items-center gap-2 text-left">
           {!plan.in_stock ? (
             <Badge variant="secondary">ناموجود</Badge>
           ) : (
             <>
-              {hasDiscount && (
-                <p className="text-xs text-muted-foreground line-through">
-                  {formatToman(plan.price!)}
+              <div>
+                {hasDiscount && (
+                  <p className="text-xs text-muted-foreground line-through">
+                    {formatToman(plan.price!)}
+                  </p>
+                )}
+                <p className="font-bold text-primary">
+                  {plan.final_price != null ? formatToman(plan.final_price) : "—"}
                 </p>
-              )}
-              <p className="font-bold text-primary">
-                {plan.final_price != null ? formatToman(plan.final_price) : "—"}
-              </p>
+              </div>
+              <span className="grid size-8 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
+                <ChevronLeft className="size-4" aria-hidden="true" />
+              </span>
             </>
           )}
         </div>
