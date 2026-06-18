@@ -116,3 +116,43 @@ def test_broadcast_preserves_telegram_html_entities():
 
     assert "<tg-emoji" in text
     assert parse_mode == "HTML"
+
+
+def test_shop_message_storage_accepts_photo_caption():
+    from types import SimpleNamespace
+
+    from telegram import constants
+
+    from bot_package.handlers.admin_handlers import _message_text_for_storage
+
+    message = SimpleNamespace(
+        text=None,
+        caption="کپشن ساده",
+        caption_html="<b>کپشن</b> ساده",
+        photo=[SimpleNamespace(file_id="small"), SimpleNamespace(file_id="large")],
+        entities=[],
+        caption_entities=[],
+    )
+    text, parse_mode, photo_file_id = _message_text_for_storage(message)
+
+    assert text == "<b>کپشن</b> ساده"
+    assert parse_mode == constants.ParseMode.HTML
+    assert photo_file_id == "large"
+
+
+@pytest.mark.asyncio
+async def test_shop_message_can_return_photo_file_id(db):
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    async with db.async_session() as session:
+        await ShopCustomizationService.init_defaults(session)
+        await ShopCustomizationService.update_message(
+            session,
+            "main_menu",
+            "متن عکس‌دار",
+            photo_file_id="photo-file-id",
+        )
+        message = await ShopCustomizationService.get_message(session, "main_menu")
+
+    assert message == "متن عکس‌دار"
+    assert message.photo_file_id == "photo-file-id"

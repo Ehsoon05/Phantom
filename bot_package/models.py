@@ -207,6 +207,7 @@ class ShopMessage(Base):
     key = Column(String, unique=True, nullable=False)
     text = Column(Text, nullable=False)
     parse_mode = Column(String, nullable=True, default="Markdown")
+    photo_file_id = Column(String, nullable=True)
     premium_emoji_id = Column(String, nullable=True)
     premium_emoji_position = Column(String, nullable=False, default="none")
     response_button_type = Column(String, nullable=False, default="text")

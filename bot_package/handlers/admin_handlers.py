@@ -712,7 +712,7 @@ def _normalize_custom_emoji_id(text: str) -> str | None:
 
 def _extract_custom_emoji_id(message) -> str | None:
     custom_emoji_type = getattr(constants.MessageEntityType, "CUSTOM_EMOJI", "custom_emoji")
-    for entity in message.entities or []:
+    for entity in (message.entities or []) + (message.caption_entities or []):
         entity_type = getattr(entity, "type", "")
         if entity_type == custom_emoji_type or str(entity_type) == "custom_emoji":
             custom_emoji_id = getattr(entity, "custom_emoji_id", None)
@@ -725,12 +725,20 @@ def _read_custom_emoji_id(message, raw_text: str) -> str | None:
     return _extract_custom_emoji_id(message) or _normalize_custom_emoji_id(raw_text)
 
 
-def _message_text_for_storage(message) -> tuple[str, str]:
+def _message_text_for_storage(message) -> tuple[str, str, str | None]:
+    photo_file_id = None
+    if getattr(message, "photo", None):
+        photo_file_id = message.photo[-1].file_id
+        caption = message.caption or ""
+        caption_html = getattr(message, "caption_html", None)
+        if isinstance(caption_html, str) and caption_html:
+            return caption_html, constants.ParseMode.HTML, photo_file_id
+        return caption, constants.ParseMode.MARKDOWN, photo_file_id
     if _extract_custom_emoji_id(message):
         text_html = getattr(message, "text_html", None)
         if isinstance(text_html, str) and text_html:
-            return text_html, constants.ParseMode.HTML
-    return message.text, constants.ParseMode.MARKDOWN
+            return text_html, constants.ParseMode.HTML, None
+    return message.text or "", constants.ParseMode.MARKDOWN, None
 
 
 def _broadcast_text(message) -> tuple[str, str | None]:
@@ -2775,6 +2783,7 @@ async def _show_shop_message_editor(update: Update, context: ContextTypes.DEFAUL
     button_premium_emoji = message.response_button_premium_emoji_id or "-"
     source_button_id = message.response_button_source_id or "-"
     premium_emoji = message.premium_emoji_id or "-"
+    photo_status = "دارد" if message.photo_file_id else "ندارد"
     premium_position = {
         "left": "چپ",
         "right": "راست",
@@ -2798,7 +2807,10 @@ async def _show_shop_message_editor(update: Update, context: ContextTypes.DEFAUL
     )
     placeholder_note = MESSAGE_PLACEHOLDER_HINTS.get(key, "")
     await update.message.reply_text(
-        f"ویرایش پیام {key}\n\nمتن فعلی:\n\n{message.text}{placeholder_note}{extra_note}\n\nمتن جدید را ارسال کنید.",
+        f"ویرایش پیام {key}\n\n"
+        f"عکس پیام: {photo_status}\n\n"
+        f"متن فعلی:\n\n{message.text}{placeholder_note}{extra_note}\n\n"
+        "متن جدید را ارسال کنید؛ اگر می‌خواهید پاسخ عکس‌دار باشد، عکس را همراه کپشن بفرستید.",
         reply_markup=admin_response_button_keyboard(),
     )
     return SHOP_MESSAGE_TEXT
@@ -2810,7 +2822,7 @@ async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("shop_message_key", None)
         return ConversationHandler.END
     key = context.user_data.get("shop_message_key")
-    raw_value = update.message.text.strip()
+    raw_value = (update.message.text or update.message.caption or "").strip()
     pending_field = context.user_data.get("shop_message_field")
     if pending_field == "premium_emoji_id":
         premium_emoji_id = _read_custom_emoji_id(update.message, raw_value)
@@ -2950,13 +2962,14 @@ async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("لینک/متن کپی دکمه جواب پیام ذخیره شد.")
         return await _show_shop_message_editor(update, context, key)
 
-    message_text, parse_mode = _message_text_for_storage(update.message)
+    message_text, parse_mode, photo_file_id = _message_text_for_storage(update.message)
     async with async_session() as session:
         message = await ShopCustomizationService.update_message(
             session,
             key,
             message_text,
             parse_mode=parse_mode,
+            photo_file_id=photo_file_id,
         )
 
     context.user_data.pop("shop_message_key", None)
@@ -5012,7 +5025,7 @@ shop_messages_conv = ConversationHandler(
         SHOP_MESSAGE_TEXT: [
             MessageHandler(_exact_filter(CANCEL), cancel),
             MessageHandler(_exact_filter(ADMIN_BACK), shop_message_text_back),
-            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_message_save),
+            MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, shop_message_save),
         ],
     },
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],

@@ -484,11 +484,14 @@ def test_admin_message_storage_uses_telegram_html_for_custom_emoji():
                 custom_emoji_id="5373141891321699086",
             )
         ],
+        caption_entities=[],
+        photo=[],
     )
 
-    text, parse_mode = _message_text_for_storage(message)
+    text, parse_mode, photo_file_id = _message_text_for_storage(message)
 
     assert parse_mode == "HTML"
+    assert photo_file_id is None
     assert 'emoji-id="5373141891321699086"' in text
 
 

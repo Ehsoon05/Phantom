@@ -69,6 +69,7 @@ class SchemaService:
                     conn,
                     "shop_messages",
                     {
+                        "photo_file_id": "VARCHAR",
                         "premium_emoji_id": "VARCHAR",
                         "premium_emoji_position": "VARCHAR DEFAULT 'none' NOT NULL",
                         "response_button_type": "VARCHAR DEFAULT 'text' NOT NULL",

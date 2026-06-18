@@ -36,10 +36,12 @@ PARSE_MODE_MARKDOWN = "Markdown"
 
 class RenderedMessage(str):
     parse_mode: str
+    photo_file_id: str | None
 
-    def __new__(cls, value: str, parse_mode: str = PARSE_MODE_MARKDOWN):
+    def __new__(cls, value: str, parse_mode: str = PARSE_MODE_MARKDOWN, photo_file_id: str | None = None):
         instance = super().__new__(cls, value)
         instance.parse_mode = parse_mode
+        instance.photo_file_id = photo_file_id
         return instance
 
     def __add__(self, other):
@@ -47,16 +49,16 @@ class RenderedMessage(str):
         if self.parse_mode == "HTML" or other_mode == "HTML":
             left = str(self) if self.parse_mode == "HTML" else _markdown_to_telegram_html(str(self))
             right = str(other) if other_mode == "HTML" else _markdown_to_telegram_html(str(other))
-            return RenderedMessage(left + right, "HTML")
-        return RenderedMessage(super().__add__(str(other)), self.parse_mode)
+            return RenderedMessage(left + right, "HTML", self.photo_file_id)
+        return RenderedMessage(super().__add__(str(other)), self.parse_mode, self.photo_file_id)
 
     def __radd__(self, other):
         other_mode = getattr(other, "parse_mode", PARSE_MODE_MARKDOWN)
         if self.parse_mode == "HTML" or other_mode == "HTML":
             left = str(other) if other_mode == "HTML" else _markdown_to_telegram_html(str(other))
             right = str(self) if self.parse_mode == "HTML" else _markdown_to_telegram_html(str(self))
-            return RenderedMessage(left + right, "HTML")
-        return RenderedMessage(str(other) + str(self), self.parse_mode)
+            return RenderedMessage(left + right, "HTML", self.photo_file_id)
+        return RenderedMessage(str(other) + str(self), self.parse_mode, self.photo_file_id)
 
 
 def _markdown_to_telegram_html(value: str) -> str:
@@ -577,12 +579,14 @@ class ShopCustomizationService:
         key: str,
         text: str,
         parse_mode: str = PARSE_MODE_MARKDOWN,
+        photo_file_id: str | None = None,
     ) -> ShopMessage | None:
         message = await ShopCustomizationService.get_message_row(session, key)
         if not message:
             return None
         message.text = text
         message.parse_mode = parse_mode
+        message.photo_file_id = photo_file_id
         message.updated_at = datetime.now(timezone.utc)
         await session.commit()
         return message
@@ -595,6 +599,7 @@ class ShopCustomizationService:
         allowed = {
             "premium_emoji_id",
             "premium_emoji_position",
+            "photo_file_id",
             "response_button_type",
             "response_button_text",
             "response_button_url",
@@ -961,8 +966,9 @@ class ShopCustomizationService:
             rendered = template
         premium_id = message.premium_emoji_id if message else None
         position = message.premium_emoji_position if message else "none"
+        photo_file_id = message.photo_file_id if message else None
         if not _is_valid_custom_emoji_id(premium_id) or position == "none":
-            return RenderedMessage(rendered, parse_mode)
+            return RenderedMessage(rendered, parse_mode, photo_file_id)
 
         custom_emoji = f'<tg-emoji emoji-id="{premium_id}">⭐</tg-emoji>'
         rendered_html = rendered if parse_mode == "HTML" else _markdown_to_telegram_html(rendered)
@@ -970,7 +976,7 @@ class ShopCustomizationService:
             rendered_html = f"{rendered_html} {custom_emoji}"
         else:
             rendered_html = f"{custom_emoji} {rendered_html}"
-        return RenderedMessage(rendered_html, "HTML")
+        return RenderedMessage(rendered_html, "HTML", photo_file_id)
 
     @staticmethod
     async def main_menu_keyboard(session: AsyncSession) -> ReplyKeyboardMarkup:
