@@ -77,6 +77,7 @@ ADMIN_SERVICE_REMINDERS = "🔔 هشدار تمدید سرویس"
 ADMIN_SERVICE_REMINDER_TOGGLE = "⏯ روشن/خاموش هشدارها"
 ADMIN_SERVICE_REMINDER_SET_VOLUME = "📉 درصدهای هشدار حجم"
 ADMIN_SERVICE_REMINDER_SET_DAYS = "⏳ روزهای هشدار زمان"
+ADMIN_SERVICE_REMINDER_SET_HOURS = "⏱ ساعت‌های هشدار زمان"
 ADMIN_SHOP_RESET_DEFAULTS = "↩️ بازگشت فروشگاه به پیش‌فرض"
 ADMIN_SHOP_MENU_MAIN = "منوی اصلی فروش"
 ADMIN_SHOP_MENU_WALLET = "منوی کیف پول"
@@ -418,7 +419,7 @@ def admin_service_reminders_keyboard() -> ReplyKeyboardMarkup:
         [
             [_button(ADMIN_SERVICE_REMINDER_TOGGLE)],
             [_button(ADMIN_SERVICE_REMINDER_SET_VOLUME)],
-            [_button(ADMIN_SERVICE_REMINDER_SET_DAYS)],
+            [_button(ADMIN_SERVICE_REMINDER_SET_DAYS), _button(ADMIN_SERVICE_REMINDER_SET_HOURS)],
             [_button(ADMIN_BACK)],
         ]
     )

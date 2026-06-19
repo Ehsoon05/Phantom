@@ -67,6 +67,7 @@ async def test_service_reminder_selects_most_urgent_rules_once(db):
             {"total": 1000, "remaining": 90, "expire": expire},
             [20, 10],
             [3, 1],
+            [2, 1],
         )
         session.add(ServiceReminderLog(purchase_id=purchase_id, config_id=config_id, user_id=1001, rule_key="volume_10"))
         await session.commit()
@@ -83,6 +84,7 @@ async def test_service_reminder_selects_most_urgent_rules_once(db):
             {"total": 1000, "remaining": 90, "expire": expire},
             [20, 10],
             [3, 1],
+            [2, 1],
         )
 
     assert rules == ["time_1d"]
@@ -93,6 +95,57 @@ def test_admin_shop_settings_keyboard_contains_service_reminders():
 
     labels = [button.text for row in admin_shop_settings_keyboard().keyboard for button in row]
     assert ADMIN_SERVICE_REMINDERS in labels
+
+
+@pytest.mark.asyncio
+async def test_service_reminder_uses_hour_thresholds_without_renew_for_trial(db):
+    from bot_package.models import Config, Purchase, User
+    import bot_package.services.service_reminder_service as reminder_module
+
+    reminder_module = importlib.reload(reminder_module)
+    ServiceReminderService = reminder_module.ServiceReminderService
+
+    expire = int((datetime.now(timezone.utc) + timedelta(minutes=90)).timestamp())
+    async with db.async_session() as session:
+        user = User(telegram_id=1003, first_name="Trial")
+        config = Config(
+            volume_gb=0,
+            category_key="trial",
+            sub_link="https://example.com/sub/trial",
+            public_sub_token="trial",
+            is_sold=True,
+            sold_to_user_id=1003,
+        )
+        purchase = Purchase(
+            user_id=1003,
+            config=config,
+            volume_gb=0,
+            category_key="trial",
+            price=0,
+            service_name="تست رایگان",
+        )
+        session.add_all([user, config, purchase])
+        await session.commit()
+        purchase_id = purchase.id
+        config_id = config.id
+
+    async with db.async_session() as session:
+        purchase = await session.get(Purchase, purchase_id)
+        config = await session.get(Config, config_id)
+        rules, values = await ServiceReminderService._due_rules(
+            purchase,
+            config,
+            {"total": 500 * 1024 * 1024, "remaining": 300 * 1024 * 1024, "expire": expire},
+            [20, 10],
+            [3, 1],
+            [2, 1],
+        )
+        keyboard = ServiceReminderService._renew_keyboard(purchase, config)
+
+    assert rules == ["time_2h"]
+    assert "۲ ساعت" not in values["reason_lines"]
+    assert "2 ساعت" in values["reason_lines"]
+    assert keyboard is None
 
 
 @pytest.mark.asyncio
@@ -135,6 +188,7 @@ async def test_service_reminder_handles_volume_only_and_finished_services(db):
             {"total": 1000, "remaining": 150, "expire": 0},
             [20, 10],
             [3, 1],
+            [2, 1],
         )
 
     assert rules == ["volume_20"]
@@ -149,6 +203,7 @@ async def test_service_reminder_handles_volume_only_and_finished_services(db):
             {"total": 1000, "remaining": 0, "expire": expired},
             [20, 10],
             [3, 1],
+            [2, 1],
         )
 
     assert rules == ["volume_empty", "time_expired"]

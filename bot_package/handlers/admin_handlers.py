@@ -149,6 +149,7 @@ from ..utils.keyboards import (
     ADMIN_SERVICE_REMINDER_TOGGLE,
     ADMIN_SERVICE_REMINDER_SET_VOLUME,
     ADMIN_SERVICE_REMINDER_SET_DAYS,
+    ADMIN_SERVICE_REMINDER_SET_HOURS,
     ADMIN_USERS,
     ADMIN_USER_STATS,
     ADMIN_EMOJI_LEFT,
@@ -308,7 +309,8 @@ PROVISION_INBOUND_CALLBACK_PREFIX = "admin_inb"
     PROVISION_PANEL_VALUE,
     SERVICE_REMINDER_VOLUME_VALUE,
     SERVICE_REMINDER_DAYS_VALUE,
-) = range(75)
+    SERVICE_REMINDER_HOURS_VALUE,
+) = range(76)
 
 
 SHOP_MENU_LABELS = {
@@ -2615,12 +2617,14 @@ async def service_reminders_menu(update: Update, context: ContextTypes.DEFAULT_T
         enabled = await SettingsService.service_reminders_enabled(session)
         volume_percents = await SettingsService.get_service_reminder_volume_percents(session)
         time_days = await SettingsService.get_service_reminder_time_days(session)
+        time_hours = await SettingsService.get_service_reminder_time_hours(session)
         interval = await SettingsService.get_service_reminder_interval_seconds(session)
     await update.message.reply_text(
         "**هشدار تمدید سرویس**\n\n"
         f"وضعیت: **{'روشن' if enabled else 'خاموش'}**\n"
         f"هشدار حجم: **{', '.join(str(value) + '٪' for value in volume_percents) or '-'}**\n"
-        f"هشدار زمان: **{', '.join(str(value) + ' روز' for value in time_days) or '-'}**\n"
+        f"هشدار روزانه: **{', '.join(str(value) + ' روز' for value in time_days) or '-'}**\n"
+        f"هشدار ساعتی: **{', '.join(str(value) + ' ساعت' for value in time_hours) or '-'}**\n"
         f"فاصله بررسی خودکار: **{interval // 60} دقیقه**\n\n"
         "متن پیام از بخش مدیریت پیام‌ها با کلید `service_expiry_reminder` قابل تغییر است.",
         reply_markup=admin_service_reminders_keyboard(),
@@ -2679,6 +2683,29 @@ async def service_reminder_days_save(update: Update, context: ContextTypes.DEFAU
     async with async_session() as session:
         await SettingsService.set_service_reminder_time_days(session, values)
     await update.message.reply_text("روزهای هشدار زمان ذخیره شد.")
+    await service_reminders_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="shop")
+async def service_reminder_hours_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "ساعت‌های هشدار زمان را با کاما بفرستید.\nمثال: `2,1`\nبرای غیرفعال کردن هشدار ساعتی، `-` بفرستید.",
+        reply_markup=_cancel_back_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return SERVICE_REMINDER_HOURS_VALUE
+
+
+@require_auth(permission="shop")
+async def service_reminder_hours_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    values = _parse_positive_int_list(update.message.text)
+    if update.message.text.strip() != "-" and not values:
+        await update.message.reply_text("ساعت‌ها معتبر نیستند. مثال: `2,1`", parse_mode=constants.ParseMode.MARKDOWN)
+        return SERVICE_REMINDER_HOURS_VALUE
+    async with async_session() as session:
+        await SettingsService.set_service_reminder_time_hours(session, values)
+    await update.message.reply_text("ساعت‌های هشدار زمان ذخیره شد.")
     await service_reminders_menu(update, context)
     return ConversationHandler.END
 
@@ -5261,6 +5288,18 @@ service_reminder_days_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
 )
 
+service_reminder_hours_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_SERVICE_REMINDER_SET_HOURS), service_reminder_hours_start)],
+    states={
+        SERVICE_REMINDER_HOURS_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, service_reminder_hours_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
 shop_reset_defaults_conv = ConversationHandler(
     entry_points=[MessageHandler(_exact_filter(ADMIN_SHOP_RESET_DEFAULTS), shop_reset_defaults)],
     states={
@@ -5382,6 +5421,7 @@ admin_handlers = [
     trial_set_duration_conv,
     service_reminder_volume_conv,
     service_reminder_days_conv,
+    service_reminder_hours_conv,
     shop_reset_defaults_conv,
     referral_rewards_conv,
     broadcast_conv,

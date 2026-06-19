@@ -21,6 +21,7 @@ TRIAL_DURATION_HOURS = "trial_duration_hours"
 SERVICE_REMINDERS_ENABLED = "service_reminders_enabled"
 SERVICE_REMINDER_VOLUME_PERCENTS = "service_reminder_volume_percents"
 SERVICE_REMINDER_TIME_DAYS = "service_reminder_time_days"
+SERVICE_REMINDER_TIME_HOURS = "service_reminder_time_hours"
 SERVICE_REMINDER_JOB_INTERVAL_SECONDS = "service_reminder_job_interval_seconds"
 
 DEFAULTS = {
@@ -38,6 +39,7 @@ DEFAULTS = {
     SERVICE_REMINDERS_ENABLED: "true",
     SERVICE_REMINDER_VOLUME_PERCENTS: "20,10",
     SERVICE_REMINDER_TIME_DAYS: "3,1",
+    SERVICE_REMINDER_TIME_HOURS: "2,1",
     SERVICE_REMINDER_JOB_INTERVAL_SECONDS: "3600",
 }
 
@@ -204,6 +206,15 @@ class SettingsService:
     async def set_service_reminder_time_days(session: AsyncSession, values: list[int]) -> None:
         cleaned = sorted({max(1, int(value)) for value in values}, reverse=True)
         await SettingsService.set(session, SERVICE_REMINDER_TIME_DAYS, ",".join(str(value) for value in cleaned))
+
+    @staticmethod
+    async def get_service_reminder_time_hours(session: AsyncSession) -> list[int]:
+        return _parse_int_list(await SettingsService.get(session, SERVICE_REMINDER_TIME_HOURS, "2,1"), minimum=1)
+
+    @staticmethod
+    async def set_service_reminder_time_hours(session: AsyncSession, values: list[int]) -> None:
+        cleaned = sorted({max(1, int(value)) for value in values}, reverse=True)
+        await SettingsService.set(session, SERVICE_REMINDER_TIME_HOURS, ",".join(str(value) for value in cleaned))
 
     @staticmethod
     async def get_service_reminder_interval_seconds(session: AsyncSession) -> int:

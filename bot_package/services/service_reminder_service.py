@@ -31,7 +31,8 @@ class ServiceReminderService:
             if not await SettingsService.service_reminders_enabled(session):
                 return {"checked": 0, "sent": 0, "skipped": 0}
             volume_thresholds = await SettingsService.get_service_reminder_volume_percents(session)
-            time_thresholds = await SettingsService.get_service_reminder_time_days(session)
+            time_day_thresholds = await SettingsService.get_service_reminder_time_days(session)
+            time_hour_thresholds = await SettingsService.get_service_reminder_time_hours(session)
 
         checked = sent = skipped = 0
         last_id = 0
@@ -61,7 +62,8 @@ class ServiceReminderService:
                         bot,
                         purchase,
                         volume_thresholds,
-                        time_thresholds,
+                        time_day_thresholds,
+                        time_hour_thresholds,
                     )
                     if delivered:
                         sent += 1
@@ -79,7 +81,8 @@ class ServiceReminderService:
         bot,
         purchase: Purchase,
         volume_thresholds: list[int],
-        time_thresholds: list[int],
+        time_day_thresholds: list[int],
+        time_hour_thresholds: list[int],
     ) -> bool:
         config = purchase.config
         if not config or not config.public_sub_token:
@@ -94,7 +97,8 @@ class ServiceReminderService:
             config,
             metadata,
             volume_thresholds,
-            time_thresholds,
+            time_day_thresholds,
+            time_hour_thresholds,
         )
         if not due_rules:
             return False
@@ -107,20 +111,7 @@ class ServiceReminderService:
                 **template_values,
             )
 
-        keyboard = InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton(
-                        "تمدید سرویس",
-                        callback_data=f"renew_confirm:{purchase.id}",
-                        api_kwargs={
-                            "style": "primary",
-                            "icon_custom_emoji_id": RENEW_PREMIUM_EMOJI_ID,
-                        },
-                    )
-                ]
-            ]
-        )
+        keyboard = ServiceReminderService._renew_keyboard(purchase, config)
         try:
             await bot.send_message(
                 chat_id=purchase.user_id,
@@ -157,7 +148,8 @@ class ServiceReminderService:
         config: Config,
         metadata: dict,
         volume_thresholds: list[int],
-        time_thresholds: list[int],
+        time_day_thresholds: list[int],
+        time_hour_thresholds: list[int],
     ) -> tuple[list[str], dict]:
         async with async_session() as session:
             result = await session.execute(
@@ -198,9 +190,25 @@ class ServiceReminderService:
                     due_rules.append(rule_key)
                     reasons.append("زمان اعتبار سرویس شما به پایان رسیده است.")
             else:
+                sent_time_hours = _sent_thresholds(sent_rules, "time_", "h")
+                hour_rule_added = False
+                for hours in sorted(time_hour_thresholds):
+                    rule_key = f"time_{hours}h"
+                    if any(sent_hours <= hours for sent_hours in sent_time_hours):
+                        continue
+                    if remaining_seconds_value <= hours * 3600 and rule_key not in sent_rules:
+                        due_rules.append(rule_key)
+                        reasons.append(f"کمتر از {hours} ساعت تا پایان اعتبار سرویس باقی مانده است.")
+                        hour_rule_added = True
+                        break
+
                 sent_time_days = _sent_thresholds(sent_rules, "time_", "d")
-                for days in sorted(time_thresholds):
+                for days in sorted(time_day_thresholds):
+                    if hour_rule_added:
+                        break
                     rule_key = f"time_{days}d"
+                    if any(sent_hours <= days * 24 for sent_hours in sent_time_hours):
+                        continue
                     if any(sent_days <= days for sent_days in sent_time_days):
                         continue
                     if remaining_seconds_value <= days * 86400 and rule_key not in sent_rules:
@@ -223,6 +231,27 @@ class ServiceReminderService:
             "remaining_seconds_value": remaining_seconds_value,
         }
         return due_rules, values
+
+    @staticmethod
+    def _renew_keyboard(purchase: Purchase, config: Config) -> InlineKeyboardMarkup | None:
+        if (purchase.category_key or config.category_key) == "trial":
+            return None
+        if not config.shop_plan_id:
+            return None
+        return InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "تمدید سرویس",
+                        callback_data=f"renew_confirm:{purchase.id}",
+                        api_kwargs={
+                            "style": "primary",
+                            "icon_custom_emoji_id": RENEW_PREMIUM_EMOJI_ID,
+                        },
+                    )
+                ]
+            ]
+        )
 
 
 async def service_reminders_job(context: ContextTypes.DEFAULT_TYPE) -> None:
