@@ -495,6 +495,22 @@ def test_admin_message_storage_uses_telegram_html_for_custom_emoji():
     assert 'emoji-id="5373141891321699086"' in text
 
 
+def test_admin_can_read_premium_emoji_from_custom_emoji_sticker():
+    from types import SimpleNamespace
+
+    from bot_package.handlers.admin_handlers import _read_custom_emoji_id
+
+    message = SimpleNamespace(
+        text=None,
+        caption=None,
+        entities=[],
+        caption_entities=[],
+        sticker=SimpleNamespace(custom_emoji_id="6030657343744644592"),
+    )
+
+    assert _read_custom_emoji_id(message, "") == "6030657343744644592"
+
+
 @pytest.mark.asyncio
 async def test_delete_plan_removes_unsold_inventory_but_preserves_sold_services(db):
     from bot_package.models import Config, ReferralRewardRule, ShopPlan

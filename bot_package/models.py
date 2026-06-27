@@ -43,6 +43,9 @@ class Config(Base):
     is_sold = Column(Boolean, default=False)
     sold_to_user_id = Column(BigInteger, nullable=True)
     sold_at = Column(DateTime, nullable=True)
+    expired_detected_at = Column(DateTime, nullable=True)
+    deletion_due_at = Column(DateTime, nullable=True)
+    panel_deleted_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     purchases = relationship("Purchase", back_populates="config")
 

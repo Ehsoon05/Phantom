@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -13,6 +13,7 @@ from telegram.ext import Application, ContextTypes
 
 from ..database import async_session
 from ..models import Config, Purchase, ServiceReminderLog, User
+from .provisioning_service import ProvisioningError, ProvisioningService
 from .settings_service import SettingsService
 from .shop_customization_service import ShopCustomizationService
 from .subscription_link_service import SubscriptionLinkService
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 RENEW_PREMIUM_EMOJI_ID = "6030657343744644592"
 SERVICE_REMINDER_BATCH_SIZE = 120
 SERVICE_REMINDER_SEND_DELAY_SECONDS = 0.35
+SERVICE_DELETION_GRACE = timedelta(days=3)
 
 
 class ServiceReminderService:
@@ -92,6 +94,16 @@ class ServiceReminderService:
         if not metadata:
             return False
 
+        finished = ServiceReminderService._metadata_finished(metadata)
+        config = await ServiceReminderService._sync_expiration_state(config, finished)
+        if config.panel_deleted_at:
+            return False
+
+        now = datetime.now(timezone.utc)
+        deletion_due_at = _as_utc(config.deletion_due_at)
+        if deletion_due_at and deletion_due_at <= now:
+            return await ServiceReminderService._delete_expired_service(bot, purchase, config, metadata)
+
         due_rules, template_values = await ServiceReminderService._due_rules(
             purchase,
             config,
@@ -136,6 +148,87 @@ class ServiceReminderService:
                         remaining_seconds=template_values["remaining_seconds_value"],
                     )
                 )
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+        return True
+
+    @staticmethod
+    async def _sync_expiration_state(config: Config, finished: bool) -> Config:
+        async with async_session() as session:
+            db_config = await session.get(Config, config.id)
+            if db_config is None:
+                return config
+            if db_config.panel_deleted_at:
+                await session.commit()
+                return db_config
+            if finished:
+                now = datetime.now(timezone.utc)
+                if db_config.expired_detected_at is None:
+                    db_config.expired_detected_at = now
+                    db_config.deletion_due_at = now + SERVICE_DELETION_GRACE
+            else:
+                db_config.expired_detected_at = None
+                db_config.deletion_due_at = None
+            await session.commit()
+            return db_config
+
+    @staticmethod
+    async def _delete_expired_service(bot, purchase: Purchase, config: Config, metadata: dict) -> bool:
+        async with async_session() as session:
+            db_config = await session.get(Config, config.id)
+            if db_config is None or db_config.panel_deleted_at:
+                return False
+            try:
+                await ProvisioningService.delete_config(session, db_config)
+                await session.commit()
+            except ProvisioningError as exc:
+                await session.rollback()
+                logger.warning("Could not delete expired config %s: %s", config.id, exc)
+                return False
+            except Exception as exc:  # noqa: BLE001
+                await session.rollback()
+                logger.warning("Panel delete failed for config %s: %s", config.id, exc, exc_info=True)
+                return False
+
+        _, values = await ServiceReminderService._due_rules(
+            purchase,
+            config,
+            metadata,
+            [],
+            [],
+            [],
+        )
+        values["reason_lines"] = "• مهلت ۳ روزه تمدید تمام شد و سرویس از پنل حذف شد."
+        async with async_session() as session:
+            message = await ShopCustomizationService.get_message(
+                session,
+                "service_expiry_reminder",
+                escape_markdown_values=True,
+                **values,
+            )
+        try:
+            await bot.send_message(
+                chat_id=purchase.user_id,
+                text=message,
+                reply_markup=None,
+                parse_mode=getattr(message, "parse_mode", None),
+                disable_web_page_preview=True,
+            )
+        except TelegramError as exc:
+            logger.info("Could not notify deleted service to %s: %s", purchase.user_id, exc)
+        async with async_session() as session:
+            session.add(
+                ServiceReminderLog(
+                    purchase_id=purchase.id,
+                    config_id=config.id,
+                    user_id=purchase.user_id,
+                    rule_key="panel_deleted",
+                    remaining_percent=values["remaining_percent_value"],
+                    remaining_seconds=0,
+                )
+            )
             try:
                 await session.commit()
             except IntegrityError:
@@ -216,6 +309,27 @@ class ServiceReminderService:
                         reasons.append(f"کمتر از {days} روز تا پایان اعتبار سرویس باقی مانده است.")
                         break
 
+        deletion_due_at = _as_utc(config.deletion_due_at)
+        deletion_remaining_seconds: int | None = None
+        if deletion_due_at and not config.panel_deleted_at:
+            deletion_remaining_seconds = int((deletion_due_at - datetime.now(timezone.utc)).total_seconds())
+            if deletion_remaining_seconds > 0:
+                deletion_rules = [
+                    ("delete_2h", 2 * 3600, "2 ساعت تا حذف خودکار سرویس از پنل باقی مانده است."),
+                    ("delete_1d", 86400, "1 روز تا حذف خودکار سرویس از پنل باقی مانده است."),
+                    ("delete_2d", 2 * 86400, "2 روز تا حذف خودکار سرویس از پنل باقی مانده است."),
+                    ("delete_3d", 3 * 86400, "مهلت تمدید شروع شد؛ 3 روز تا حذف خودکار سرویس از پنل باقی مانده است."),
+                ]
+                sent_delete_ranks = _sent_delete_ranks(sent_rules)
+                for rule_key, threshold_seconds, reason in deletion_rules:
+                    rank = DELETE_REMINDER_RANKS[rule_key]
+                    if any(sent_rank <= rank for sent_rank in sent_delete_ranks):
+                        continue
+                    if deletion_remaining_seconds <= threshold_seconds and rule_key not in sent_rules:
+                        due_rules.append(rule_key)
+                        reasons.append(reason)
+                        break
+
         expiry_text, remaining_time = _format_expiry(expire)
         service_name = purchase.service_name or metadata.get("title") or f"{purchase.volume_gb} گیگ"
         values = {
@@ -229,12 +343,16 @@ class ServiceReminderService:
             "category_key": purchase.category_key or config.category_key or "default",
             "remaining_percent_value": remaining_percent_value,
             "remaining_seconds_value": remaining_seconds_value,
+            "deletion_due_at": deletion_due_at.strftime("%Y-%m-%d %H:%M UTC") if deletion_due_at else "نامشخص",
+            "deletion_remaining_time": _format_duration(deletion_remaining_seconds),
         }
         return due_rules, values
 
     @staticmethod
     def _renew_keyboard(purchase: Purchase, config: Config) -> InlineKeyboardMarkup | None:
         if (purchase.category_key or config.category_key) == "trial":
+            return None
+        if config.panel_deleted_at:
             return None
         if not config.shop_plan_id:
             return None
@@ -252,6 +370,15 @@ class ServiceReminderService:
                 ]
             ]
         )
+
+    @staticmethod
+    def _metadata_finished(metadata: dict) -> bool:
+        total = _to_int(metadata.get("total"))
+        remaining = _to_int(metadata.get("remaining"))
+        if total and total > 0 and remaining is not None and remaining <= 0:
+            return True
+        expire = _to_int(metadata.get("expire"))
+        return bool(expire and expire <= int(datetime.now(timezone.utc).timestamp()))
 
 
 async def service_reminders_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -309,6 +436,36 @@ def _format_expiry(expire: int | None) -> tuple[str, str]:
     days = remaining.days
     hours = remaining.seconds // 3600
     return expiry.strftime("%Y-%m-%d %H:%M UTC"), f"{days} روز و {hours} ساعت"
+
+
+def _format_duration(seconds: int | None) -> str:
+    if seconds is None:
+        return "نامشخص"
+    if seconds <= 0:
+        return "تمام شده"
+    days = seconds // 86400
+    hours = (seconds % 86400) // 3600
+    minutes = (seconds % 3600) // 60
+    if days:
+        return f"{days} روز و {hours} ساعت"
+    if hours:
+        return f"{hours} ساعت و {minutes} دقیقه"
+    return f"{minutes} دقیقه"
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+DELETE_REMINDER_RANKS = {"delete_2h": 0, "delete_1d": 1, "delete_2d": 2, "delete_3d": 3}
+
+
+def _sent_delete_ranks(sent_rules: set[str]) -> list[int]:
+    return [DELETE_REMINDER_RANKS[rule] for rule in sent_rules if rule in DELETE_REMINDER_RANKS]
 
 
 def _sent_thresholds(sent_rules: set[str], prefix: str, suffix: str) -> list[int]:

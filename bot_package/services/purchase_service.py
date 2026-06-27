@@ -204,6 +204,8 @@ async def renew_purchase(
     ).scalar_one_or_none()
     if purchase is None or purchase.config is None:
         raise PlanNotFound("Purchase not found")
+    if purchase.config.panel_deleted_at:
+        raise PlanUnavailable("This service was deleted from panel after renewal grace period")
 
     plan = await ShopCustomizationService.get_plan(session, purchase.config.shop_plan_id)
     if plan is None or not plan.is_active or not plan.renew_enabled:

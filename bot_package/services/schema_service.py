@@ -36,6 +36,9 @@ class SchemaService:
                         "panel_key": "VARCHAR",
                         "panel_username": "VARCHAR",
                         "provision_source": "VARCHAR DEFAULT 'inventory' NOT NULL",
+                        "expired_detected_at": "DATETIME",
+                        "deletion_due_at": "DATETIME",
+                        "panel_deleted_at": "DATETIME",
                     },
                 )
             if "purchases" in tables:

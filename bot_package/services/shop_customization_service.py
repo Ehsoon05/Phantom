@@ -200,6 +200,8 @@ DEFAULT_MESSAGES: dict[str, str] = {
         "درصد باقی‌مانده: **{remaining_percent}**\n"
         "تاریخ انقضا: **{expiry_text}**\n"
         "زمان باقی‌مانده: **{remaining_time}**\n\n"
+        "مهلت حذف از پنل: **{deletion_due_at}**\n"
+        "زمان باقی‌مانده تا حذف: **{deletion_remaining_time}**\n\n"
         "برای جلوگیری از قطع شدن سرویس، می‌توانید همین حالا تمدیدش کنید."
     ),
     "purchase_success": (

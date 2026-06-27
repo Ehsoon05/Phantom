@@ -209,3 +209,75 @@ async def test_service_reminder_handles_volume_only_and_finished_services(db):
     assert rules == ["volume_empty", "time_expired"]
     assert "تمام شده" in values["reason_lines"]
     assert "پایان رسیده" in values["reason_lines"]
+
+
+@pytest.mark.asyncio
+async def test_service_reminder_announces_deletion_grace_thresholds(db):
+    from bot_package.models import Config, Purchase, ServiceReminderLog, User
+    import bot_package.services.service_reminder_service as reminder_module
+
+    reminder_module = importlib.reload(reminder_module)
+    ServiceReminderService = reminder_module.ServiceReminderService
+
+    expired = int((datetime.now(timezone.utc) - timedelta(minutes=1)).timestamp())
+    due_at = datetime.now(timezone.utc) + timedelta(days=3)
+    async with db.async_session() as session:
+        user = User(telegram_id=1004, first_name="Expired")
+        config = Config(
+            volume_gb=10,
+            category_key="express",
+            sub_link="https://example.com/sub/expired",
+            public_sub_token="expired",
+            panel_key="alien",
+            panel_username="expired_user",
+            is_sold=True,
+            sold_to_user_id=1004,
+            expired_detected_at=datetime.now(timezone.utc),
+            deletion_due_at=due_at,
+        )
+        purchase = Purchase(
+            user_id=1004,
+            config=config,
+            volume_gb=10,
+            category_key="express",
+            price=1000,
+            service_name="Expired",
+        )
+        session.add_all([user, config, purchase])
+        await session.commit()
+        purchase_id = purchase.id
+        config_id = config.id
+
+    async with db.async_session() as session:
+        purchase = await session.get(Purchase, purchase_id)
+        config = await session.get(Config, config_id)
+        rules, values = await ServiceReminderService._due_rules(
+            purchase,
+            config,
+            {"total": 1000, "remaining": 0, "expire": expired},
+            [20, 10],
+            [3, 1],
+            [2, 1],
+        )
+        session.add(ServiceReminderLog(purchase_id=purchase_id, config_id=config_id, user_id=1004, rule_key="delete_3d"))
+        config.deletion_due_at = datetime.now(timezone.utc) + timedelta(hours=1, minutes=30)
+        await session.commit()
+
+    assert "delete_3d" in rules
+    assert "3 روز تا حذف" in values["reason_lines"]
+    assert values["deletion_due_at"] != "نامشخص"
+
+    async with db.async_session() as session:
+        purchase = await session.get(Purchase, purchase_id)
+        config = await session.get(Config, config_id)
+        rules, values = await ServiceReminderService._due_rules(
+            purchase,
+            config,
+            {"total": 1000, "remaining": 0, "expire": expired},
+            [20, 10],
+            [3, 1],
+            [2, 1],
+        )
+
+    assert "delete_2h" in rules
+    assert "2 ساعت تا حذف" in values["reason_lines"]

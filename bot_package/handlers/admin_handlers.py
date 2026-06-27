@@ -713,8 +713,14 @@ def _normalize_custom_emoji_id(text: str) -> str | None:
 
 
 def _extract_custom_emoji_id(message) -> str | None:
+    sticker = getattr(message, "sticker", None)
+    sticker_custom_emoji_id = getattr(sticker, "custom_emoji_id", None)
+    if sticker_custom_emoji_id:
+        return str(sticker_custom_emoji_id)
     custom_emoji_type = getattr(constants.MessageEntityType, "CUSTOM_EMOJI", "custom_emoji")
-    for entity in (message.entities or []) + (message.caption_entities or []):
+    entities = list(getattr(message, "entities", None) or [])
+    entities += list(getattr(message, "caption_entities", None) or [])
+    for entity in entities:
         entity_type = getattr(entity, "type", "")
         if entity_type == custom_emoji_type or str(entity_type) == "custom_emoji":
             custom_emoji_id = getattr(entity, "custom_emoji_id", None)
@@ -3197,7 +3203,7 @@ async def shop_button_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     button_id = context.user_data.get("shop_button_id")
     field = context.user_data.get("shop_button_field")
-    raw_value = update.message.text.strip()
+    raw_value = (update.message.text or update.message.caption or "").strip()
     updates = {}
 
     if field == "position":
@@ -5116,7 +5122,7 @@ shop_plans_conv = ConversationHandler(
         SHOP_PLAN_VALUE: [
             MessageHandler(_exact_filter(CANCEL), cancel),
             MessageHandler(_exact_filter(ADMIN_BACK), shop_plan_value_back),
-            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_value),
+            MessageHandler((filters.TEXT | filters.Sticker.ALL | filters.PHOTO) & ~filters.COMMAND, shop_plan_value),
         ],
         SHOP_PLAN_ADD_VOLUME: [
             MessageHandler(_exact_filter(CANCEL), cancel),

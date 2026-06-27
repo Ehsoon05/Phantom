@@ -364,4 +364,33 @@ class ProvisioningService:
 
         config.panel_key = panel.key
         config.panel_username = username
+        config.expired_detected_at = None
+        config.deletion_due_at = None
+        config.panel_deleted_at = None
         await session.flush()
+
+    @staticmethod
+    async def delete_config(session: AsyncSession, config: Config) -> bool:
+        panel = await ProvisioningService.get_panel(session, config.panel_key)
+        username = config.panel_username or username_from_subscription_url(config.sub_link)
+        if panel is None or not username:
+            raise ProvisioningError("برای حذف سرویس، اطلاعات پنل یا نام کاربری قابل تشخیص نیست.")
+        async with httpx.AsyncClient(
+            base_url=panel.base_url.rstrip("/"),
+            timeout=httpx.Timeout(35, connect=15),
+            verify=False,
+        ) as client:
+            token = await ProvisioningService._token(client, panel)
+            response = await client.delete(
+                f"/api/user/{username}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if response.status_code not in {200, 204, 404}:
+                response.raise_for_status()
+
+        now = datetime.now(timezone.utc)
+        config.panel_key = panel.key
+        config.panel_username = username
+        config.panel_deleted_at = now
+        await session.flush()
+        return True

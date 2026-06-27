@@ -740,7 +740,7 @@ async def service_details_callback(update: Update, context: ContextTypes.DEFAULT
         [InlineKeyboardButton("کپی لینک", api_kwargs={"copy_text": {"text": sub_link}})],
         [InlineKeyboardButton("ساخت QR Code", callback_data=f"service_qr:{purchase.id}")],
     ]
-    if purchase.config and purchase.config.shop_plan_id:
+    if purchase.config and purchase.config.shop_plan_id and not purchase.config.panel_deleted_at:
         rows.append([
             InlineKeyboardButton(
                 "تمدید سرویس",
