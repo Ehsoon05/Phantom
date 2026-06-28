@@ -84,6 +84,7 @@ from ..utils.keyboards import (
     ADMIN_SET_PROVISION_VOLUME,
     ADMIN_PLAN_BACK_TO_EDIT,
     ADMIN_SET_PANEL_GROUPS,
+    ADMIN_SET_PANEL_HWID,
     ADMIN_SET_PANEL_INBOUNDS,
     ADMIN_SET_PANEL_PROTOCOLS,
     ADMIN_TOGGLE_PANEL_ENABLED,
@@ -4042,7 +4043,10 @@ async def _show_provision_panel_options(update: Update, context: ContextTypes.DE
     inbounds = json.loads(panel.inbounds_json or "{}")
     protocols = json.loads(panel.protocols_json or "[]")
     if panel.panel_type == "easy":
-        panel_specific = f"گروه‌های آسان پنل: `{group_ids or '-'}`"
+        panel_specific = (
+            f"گروه‌های آسان پنل: `{group_ids or '-'}`\n"
+            f"محدودیت HWID: `{panel.hwid_limit if panel.hwid_limit is not None else '-'}`"
+        )
     else:
         panel_specific = (
             f"اینباندهای مرزبان: `{inbounds or '-'}`\n"
@@ -4091,6 +4095,10 @@ async def provision_panel_option(update: Update, context: ContextTypes.DEFAULT_T
         ADMIN_SET_PANEL_GROUPS: (
             "group_ids",
             "شناسه گروه‌های آسان پنل را با کاما بفرستید.\nمثال: `1,2,3`\nبرای پیش‌فرض/خالی، `-` بفرستید.",
+        ),
+        ADMIN_SET_PANEL_HWID: (
+            "hwid_limit",
+            "عدد محدودیت HWID این پنل را بفرستید.\nبرای حذف مقدار اختصاصی و استفاده از پیش‌فرض پنل، `-` بفرستید.\nمثال: `2`",
         ),
         ADMIN_SET_PANEL_PROTOCOLS: (
             "protocols_json",
@@ -4270,6 +4278,18 @@ async def provision_panel_value(update: Update, context: ContextTypes.DEFAULT_TY
                 value = json.dumps([int(item.strip()) for item in raw_value.split(",") if item.strip()])
             except ValueError:
                 await update.message.reply_text("گروه‌ها باید عددی و با کاما جدا شده باشند.")
+                return PROVISION_PANEL_VALUE
+    elif field == "hwid_limit":
+        if raw_value == "-":
+            value = None
+        else:
+            try:
+                value = int(raw_value)
+            except ValueError:
+                await update.message.reply_text("محدودیت HWID باید عدد صحیح باشد.")
+                return PROVISION_PANEL_VALUE
+            if value < 0:
+                await update.message.reply_text("محدودیت HWID نمی‌تواند منفی باشد.")
                 return PROVISION_PANEL_VALUE
     elif field == "inbounds_json":
         parsed = _parse_inbounds_text(raw_value)

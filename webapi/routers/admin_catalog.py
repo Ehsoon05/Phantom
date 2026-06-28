@@ -320,6 +320,7 @@ def _panel_out(panel: ProvisionPanel) -> dict:
         "group_ids": json.loads(panel.group_ids or "[]"),
         "inbounds": json.loads(panel.inbounds_json or "{}"),
         "protocols": json.loads(panel.protocols_json or "[]"),
+        "hwid_limit": panel.hwid_limit,
         "is_enabled": panel.is_enabled,
     }
 
@@ -334,6 +335,7 @@ class PanelUpsertRequest(BaseModel):
     group_ids: list[int] = []
     inbounds: dict[str, list[str]] = {}
     protocols: list[str] = []
+    hwid_limit: int | None = None
     is_enabled: bool = True
 
 
@@ -368,6 +370,7 @@ async def upsert_provision_panel(
     panel.group_ids = json.dumps(body.group_ids)
     panel.inbounds_json = json.dumps(body.inbounds)
     panel.protocols_json = json.dumps(body.protocols)
+    panel.hwid_limit = body.hwid_limit
     panel.is_enabled = body.is_enabled
     await session.commit()
     return _panel_out(panel)

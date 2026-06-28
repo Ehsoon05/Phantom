@@ -120,6 +120,14 @@ class SchemaService:
                         "provision_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
                     },
                 )
+            if "provision_panels" in tables:
+                await SchemaService._add_missing_columns(
+                    conn,
+                    "provision_panels",
+                    {
+                        "hwid_limit": "INTEGER",
+                    },
+                )
             if "configs" in tables and "shop_plans" in tables:
                 await conn.execute(text("""
                     UPDATE configs

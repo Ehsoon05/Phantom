@@ -302,6 +302,7 @@ class ProvisionPanel(Base):
     group_ids = Column(Text, nullable=True)
     inbounds_json = Column(Text, nullable=True)
     protocols_json = Column(Text, nullable=True)
+    hwid_limit = Column(Integer, nullable=True)
     is_enabled = Column(Boolean, nullable=False, default=True)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 

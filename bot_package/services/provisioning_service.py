@@ -116,9 +116,30 @@ class ProvisioningService:
                 BotConfig.EASY_PANEL_USERNAME,
                 BotConfig.EASY_PANEL_PASSWORD,
                 "[1]",
+                None,
+            ),
+            (
+                "mexico_hajmi",
+                "Mexico Hajmi",
+                "easy",
+                BotConfig.MEXICO_HAJMI_PANEL_URL,
+                BotConfig.MEXICO_HAJMI_PANEL_USERNAME,
+                BotConfig.MEXICO_HAJMI_PANEL_PASSWORD,
+                "[1]",
+                BotConfig.MEXICO_HAJMI_PANEL_HWID_LIMIT,
+            ),
+            (
+                "mexico_namahdod",
+                "Mexico Namahdod",
+                "easy",
+                BotConfig.MEXICO_NAMAHDOD_PANEL_URL,
+                BotConfig.MEXICO_NAMAHDOD_PANEL_USERNAME,
+                BotConfig.MEXICO_NAMAHDOD_PANEL_PASSWORD,
+                "[1]",
+                BotConfig.MEXICO_NAMAHDOD_PANEL_HWID_LIMIT,
             ),
         ]
-        for key, title, panel_type, base_url, username, password, group_ids in defaults:
+        for key, title, panel_type, base_url, username, password, group_ids, hwid_limit in defaults:
             if not (base_url and username and password):
                 continue
             existing = (
@@ -135,6 +156,7 @@ class ProvisioningService:
                     username=username,
                     password=password,
                     group_ids=group_ids,
+                    hwid_limit=hwid_limit,
                     is_enabled=True,
                 )
             )
@@ -228,7 +250,10 @@ class ProvisioningService:
             group_ids = [int(item) for item in _json_list(panel.group_ids) if str(item).isdigit()]
             if not group_ids:
                 group_ids = [1]
-            return {"group_ids": group_ids}
+            fields: dict[str, Any] = {"group_ids": group_ids}
+            if panel.hwid_limit is not None:
+                fields["hwid_limit"] = int(panel.hwid_limit)
+            return fields
 
         configured = _json_dict(panel.inbounds_json)
         if configured:

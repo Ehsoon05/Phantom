@@ -360,6 +360,28 @@ def test_all_enabled_pasarguard_groups_are_selected_without_multilocation():
 
 
 @pytest.mark.asyncio
+async def test_easy_provision_panel_sends_hwid_limit():
+    from bot_package.models import ProvisionPanel
+    from bot_package.services.provisioning_service import ProvisioningService
+
+    panel = ProvisionPanel(
+        key="mexico_hajmi",
+        title="Mexico Hajmi",
+        panel_type="easy",
+        base_url="https://example.com",
+        username="admin",
+        password="secret",
+        group_ids="[1]",
+        hwid_limit=2,
+    )
+
+    fields = await ProvisioningService._access_fields(None, panel, {})
+
+    assert fields["group_ids"] == [1]
+    assert fields["hwid_limit"] == 2
+
+
+@pytest.mark.asyncio
 async def test_main_menu_keeps_original_layout(db):
     from bot_package.services.shop_customization_service import ShopCustomizationService
 

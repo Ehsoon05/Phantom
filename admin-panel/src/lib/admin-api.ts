@@ -111,6 +111,7 @@ export interface ProvisionPanel {
   group_ids: number[];
   inbounds: Record<string, string[]>;
   protocols: string[];
+  hwid_limit: number | null;
   is_enabled: boolean;
 }
 
