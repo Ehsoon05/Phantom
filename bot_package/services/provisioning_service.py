@@ -46,6 +46,52 @@ def effective_volume_gb(plan: ShopPlan) -> int:
     return int(plan.provision_volume_gb if plan.provision_volume_gb is not None else plan.volume_gb)
 
 
+def effective_duration_days(plan: ShopPlan) -> int:
+    return int(plan.provision_duration_days if plan.provision_duration_days is not None else (plan.duration_days or 30))
+
+
+def effective_time_mode(plan: ShopPlan) -> str:
+    mode = (plan.provision_time_mode or "on_hold").strip()
+    return mode if mode in {"on_hold", "date", "unlimited"} else "on_hold"
+
+
+def _create_timing_payload(plan: ShopPlan) -> dict[str, Any]:
+    mode = effective_time_mode(plan)
+    if mode == "unlimited":
+        return {
+            "status": "active",
+            "expire": 0,
+            "on_hold_expire_duration": None,
+        }
+    duration_days = effective_duration_days(plan)
+    if mode == "date":
+        return {
+            "status": "active",
+            "expire": int((datetime.now(timezone.utc) + timedelta(days=duration_days)).timestamp()),
+            "on_hold_expire_duration": None,
+        }
+    return {
+        "status": "on_hold",
+        "expire": 0,
+        "on_hold_expire_duration": duration_days * 86400,
+    }
+
+
+def _renew_timing_payload(plan: ShopPlan) -> dict[str, Any]:
+    if effective_time_mode(plan) == "unlimited":
+        return {
+            "status": "active",
+            "expire": 0,
+            "on_hold_expire_duration": None,
+        }
+    duration_days = effective_duration_days(plan)
+    return {
+        "status": "active",
+        "expire": int((datetime.now(timezone.utc) + timedelta(days=duration_days)).timestamp()),
+        "on_hold_expire_duration": None,
+    }
+
+
 def _json_list(value: str | None) -> list:
     if not value:
         return []
@@ -324,7 +370,6 @@ class ProvisioningService:
         username = await ProvisioningService.next_username(session, plan)
         volume_gb = effective_volume_gb(plan)
         data_limit = volume_gb * 1024**3 if volume_gb > 0 else 0
-        duration_days = int(plan.duration_days or 30)
         async with httpx.AsyncClient(
             base_url=panel.base_url.rstrip("/"),
             timeout=httpx.Timeout(35, connect=15),
@@ -338,11 +383,9 @@ class ProvisioningService:
                 headers=headers,
                 json={
                     "username": username,
-                    "status": "on_hold",
                     "data_limit": data_limit,
                     "data_limit_reset_strategy": "no_reset",
-                    "expire": 0,
-                    "on_hold_expire_duration": duration_days * 86400,
+                    **_create_timing_payload(plan),
                     **access_fields,
                 },
             )
@@ -364,7 +407,6 @@ class ProvisioningService:
             raise ProvisioningError("برای این سرویس اطلاعات پنل یا نام کاربری قابل تشخیص نیست.")
         volume_gb = effective_volume_gb(plan)
         data_limit = volume_gb * 1024**3 if volume_gb > 0 else 0
-        expire = int((datetime.now(timezone.utc) + timedelta(days=int(plan.duration_days or 30))).timestamp())
         async with httpx.AsyncClient(
             base_url=panel.base_url.rstrip("/"),
             timeout=httpx.Timeout(35, connect=15),
@@ -376,11 +418,9 @@ class ProvisioningService:
                 f"/api/user/{username}",
                 headers=headers,
                 json={
-                    "status": "active",
                     "data_limit": data_limit,
                     "data_limit_reset_strategy": "no_reset",
-                    "expire": expire,
-                    "on_hold_expire_duration": None,
+                    **_renew_timing_payload(plan),
                 },
             )
             response.raise_for_status()

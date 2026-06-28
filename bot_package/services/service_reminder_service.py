@@ -13,6 +13,7 @@ from telegram.ext import Application, ContextTypes
 
 from ..database import async_session
 from ..models import Config, Purchase, ServiceReminderLog, User
+from .marzban_trial_service import MarzbanTrialError, MarzbanTrialService
 from .provisioning_service import ProvisioningError, ProvisioningService
 from .settings_service import SettingsService
 from .shop_customization_service import ShopCustomizationService
@@ -95,6 +96,10 @@ class ServiceReminderService:
             return False
 
         finished = ServiceReminderService._metadata_finished(metadata)
+        trial = ServiceReminderService._is_trial(purchase, config)
+        if trial and finished:
+            return await ServiceReminderService._delete_expired_service(bot, purchase, config, metadata)
+
         config = await ServiceReminderService._sync_expiration_state(config, finished)
         if config.panel_deleted_at:
             return False
@@ -115,13 +120,17 @@ class ServiceReminderService:
         if not due_rules:
             return False
 
-        async with async_session() as session:
-            message = await ShopCustomizationService.get_message(
-                session,
-                "service_expiry_reminder",
-                escape_markdown_values=True,
-                **template_values,
-            )
+        trial = ServiceReminderService._is_trial(purchase, config)
+        if trial:
+            message = ServiceReminderService._trial_message(template_values)
+        else:
+            async with async_session() as session:
+                message = await ShopCustomizationService.get_message(
+                    session,
+                    "service_expiry_reminder",
+                    escape_markdown_values=True,
+                    **template_values,
+                )
 
         keyboard = ServiceReminderService._renew_keyboard(purchase, config)
         try:
@@ -129,7 +138,7 @@ class ServiceReminderService:
                 chat_id=purchase.user_id,
                 text=message,
                 reply_markup=keyboard,
-                parse_mode=getattr(message, "parse_mode", None),
+                parse_mode=None if trial else getattr(message, "parse_mode", None),
                 disable_web_page_preview=True,
             )
         except TelegramError as exc:
@@ -181,8 +190,18 @@ class ServiceReminderService:
             if db_config is None or db_config.panel_deleted_at:
                 return False
             try:
-                await ProvisioningService.delete_config(session, db_config)
+                if ServiceReminderService._is_trial(purchase, db_config):
+                    username = db_config.panel_username or MarzbanTrialService.username_for(purchase.user_id)
+                    await MarzbanTrialService.delete(username)
+                    db_config.panel_deleted_at = datetime.now(timezone.utc)
+                    await session.flush()
+                else:
+                    await ProvisioningService.delete_config(session, db_config)
                 await session.commit()
+            except MarzbanTrialError as exc:
+                await session.rollback()
+                logger.warning("Could not delete trial config %s: %s", config.id, exc)
+                return False
             except ProvisioningError as exc:
                 await session.rollback()
                 logger.warning("Could not delete expired config %s: %s", config.id, exc)
@@ -200,20 +219,27 @@ class ServiceReminderService:
             [],
             [],
         )
-        values["reason_lines"] = "• مهلت ۳ روزه تمدید تمام شد و سرویس از پنل حذف شد."
-        async with async_session() as session:
-            message = await ShopCustomizationService.get_message(
-                session,
-                "service_expiry_reminder",
-                escape_markdown_values=True,
-                **values,
-            )
+        if ServiceReminderService._is_trial(purchase, config):
+            values["reason_lines"] = "• زمان سرویس تست تمام شد و سرویس از پنل حذف شد."
+        else:
+            values["reason_lines"] = "• مهلت ۳ روزه تمدید تمام شد و سرویس از پنل حذف شد."
+        trial = ServiceReminderService._is_trial(purchase, config)
+        if trial:
+            message = ServiceReminderService._trial_message(values)
+        else:
+            async with async_session() as session:
+                message = await ShopCustomizationService.get_message(
+                    session,
+                    "service_expiry_reminder",
+                    escape_markdown_values=True,
+                    **values,
+                )
         try:
             await bot.send_message(
                 chat_id=purchase.user_id,
                 text=message,
                 reply_markup=None,
-                parse_mode=getattr(message, "parse_mode", None),
+                parse_mode=None if trial else getattr(message, "parse_mode", None),
                 disable_web_page_preview=True,
             )
         except TelegramError as exc:
@@ -311,7 +337,7 @@ class ServiceReminderService:
 
         deletion_due_at = _as_utc(config.deletion_due_at)
         deletion_remaining_seconds: int | None = None
-        if deletion_due_at and not config.panel_deleted_at:
+        if deletion_due_at and not config.panel_deleted_at and not ServiceReminderService._is_trial(purchase, config):
             deletion_remaining_seconds = int((deletion_due_at - datetime.now(timezone.utc)).total_seconds())
             if deletion_remaining_seconds > 0:
                 deletion_rules = [
@@ -350,7 +376,7 @@ class ServiceReminderService:
 
     @staticmethod
     def _renew_keyboard(purchase: Purchase, config: Config) -> InlineKeyboardMarkup | None:
-        if (purchase.category_key or config.category_key) == "trial":
+        if ServiceReminderService._is_trial(purchase, config):
             return None
         if config.panel_deleted_at:
             return None
@@ -379,6 +405,22 @@ class ServiceReminderService:
             return True
         expire = _to_int(metadata.get("expire"))
         return bool(expire and expire <= int(datetime.now(timezone.utc).timestamp()))
+
+    @staticmethod
+    def _is_trial(purchase: Purchase, config: Config | None = None) -> bool:
+        return (purchase.category_key or (config.category_key if config else None)) == "trial"
+
+    @staticmethod
+    def _trial_message(values: dict) -> str:
+        return (
+            "🔔 وضعیت سرویس تست\n\n"
+            f"سرویس: {values.get('service_name', 'تست رایگان')}\n"
+            f"{values.get('reason_lines') or '• وضعیت باقی‌مانده سرویس تست به‌روزرسانی شد.'}\n\n"
+            f"حجم باقی‌مانده: {values.get('remaining_volume', 'نامشخص')}\n"
+            f"درصد باقی‌مانده: {values.get('remaining_percent', 'نامشخص')}\n"
+            f"تاریخ انقضا: {values.get('expiry_text', 'نامشخص')}\n"
+            f"زمان باقی‌مانده: {values.get('remaining_time', 'نامشخص')}"
+        )
 
 
 async def service_reminders_job(context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -381,6 +381,44 @@ async def test_easy_provision_panel_sends_hwid_limit():
     assert fields["hwid_limit"] == 2
 
 
+def test_provision_timing_payloads_respect_plan_settings():
+    from bot_package.models import ShopPlan
+    from bot_package.services.provisioning_service import _create_timing_payload, _renew_timing_payload
+
+    unlimited = ShopPlan(
+        volume_gb=0,
+        title="NoLimit",
+        category_key="nolimit",
+        duration_days=30,
+        provision_time_mode="unlimited",
+    )
+    assert _create_timing_payload(unlimited)["status"] == "active"
+    assert _create_timing_payload(unlimited)["expire"] == 0
+    assert _renew_timing_payload(unlimited)["expire"] == 0
+
+    hold = ShopPlan(
+        volume_gb=10,
+        title="Hold",
+        category_key="express",
+        duration_days=30,
+        provision_duration_days=7,
+        provision_time_mode="on_hold",
+    )
+    hold_payload = _create_timing_payload(hold)
+    assert hold_payload["status"] == "on_hold"
+    assert hold_payload["on_hold_expire_duration"] == 7 * 86400
+
+    dated = ShopPlan(
+        volume_gb=10,
+        title="Date",
+        category_key="express",
+        duration_days=30,
+        provision_time_mode="date",
+    )
+    assert _create_timing_payload(dated)["status"] == "active"
+    assert _create_timing_payload(dated)["expire"] > 0
+
+
 @pytest.mark.asyncio
 async def test_main_menu_keeps_original_layout(db):
     from bot_package.services.shop_customization_service import ShopCustomizationService

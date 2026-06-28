@@ -81,7 +81,9 @@ from ..utils.keyboards import (
     ADMIN_TOGGLE_PROVISION,
     ADMIN_TOGGLE_RENEW,
     ADMIN_SET_NAME_PREFIX,
+    ADMIN_SET_PROVISION_DURATION,
     ADMIN_SET_PROVISION_VOLUME,
+    ADMIN_SET_PROVISION_TIME_MODE,
     ADMIN_PLAN_BACK_TO_EDIT,
     ADMIN_SET_PANEL_GROUPS,
     ADMIN_SET_PANEL_HWID,
@@ -188,6 +190,7 @@ from ..utils.keyboards import (
     admin_shop_plan_delete_confirm_keyboard,
     admin_provision_mode_keyboard,
     admin_provision_panel_keyboard,
+    admin_provision_time_mode_keyboard,
     admin_shop_settings_keyboard,
     admin_emoji_position_keyboard,
     admin_response_button_keyboard,
@@ -446,6 +449,25 @@ PROVISION_MODE_VALUES = {
     "inventory_then_panel": "inventory_then_panel",
     "panel_only": "panel_only",
 }
+
+PROVISION_TIME_MODE_LABELS = {
+    "on_hold": "شروع از اولین اتصال",
+    "date": "تاریخ‌دار از زمان ساخت",
+    "unlimited": "زمان نامحدود",
+}
+
+PROVISION_TIME_MODE_VALUES = {
+    "شروع از اولین اتصال": "on_hold",
+    "تاریخ‌دار از زمان ساخت": "date",
+    "زمان نامحدود": "unlimited",
+    "on_hold": "on_hold",
+    "date": "date",
+    "unlimited": "unlimited",
+}
+
+
+def _provision_time_mode_label(value: str | None) -> str:
+    return PROVISION_TIME_MODE_LABELS.get(value or "on_hold", value or "on_hold")
 
 
 def _parse_inbounds_text(raw_value: str) -> dict[str, list[str]] | None:
@@ -3560,6 +3582,8 @@ async def _show_shop_plan_options(update: Update, context: ContextTypes.DEFAULT_
         f"پنل ساخت: `{plan.provision_panel_key or (panel.key if panel else '-')}`\n"
         f"پیشوند نام ساب: `{plan.name_prefix or '-'}`\n"
         f"حجم واقعی ساخت/تمدید: **{_volume_label(plan.provision_volume_gb if plan.provision_volume_gb is not None else plan.volume_gb)}**\n"
+        f"نوع زمان ساخت: **{_provision_time_mode_label(plan.provision_time_mode)}**\n"
+        f"مدت واقعی ساخت/تمدید: **{plan.provision_duration_days if plan.provision_duration_days is not None else plan.duration_days} روز**\n"
         f"تمدید: **{'روشن' if plan.renew_enabled else 'خاموش'}**\n"
         f"وضعیت: {'فعال' if plan.is_active else 'غیرفعال'}",
         reply_markup=admin_shop_plan_edit_keyboard(),
@@ -3592,6 +3616,8 @@ async def _show_shop_plan_provision_options(update: Update, context: ContextType
         f"نوع پنل: `{panel.panel_type if panel else '-'}`\n"
         f"پیشوند نام ساب: `{plan.name_prefix or '-'}`\n"
         f"حجم واقعی ساخت/تمدید: **{_volume_label(plan.provision_volume_gb if plan.provision_volume_gb is not None else plan.volume_gb)}**\n"
+        f"نوع زمان ساخت: **{_provision_time_mode_label(plan.provision_time_mode)}**\n"
+        f"مدت واقعی ساخت/تمدید: **{plan.provision_duration_days if plan.provision_duration_days is not None else plan.duration_days} روز**\n"
         f"تمدید: **{'روشن' if plan.renew_enabled else 'خاموش'}**\n\n"
         "حالت‌ها:\n"
         "`انبار فقط`: فقط از لینک‌های آماده می‌فروشد.\n"
@@ -3663,6 +3689,16 @@ async def shop_plan_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ADMIN_SET_PROVISION_VOLUME: (
                 "provision_volume_gb",
                 "حجم واقعی ساخت/تمدید در پنل را به گیگ بفرستید.\nبرای استفاده از حجم نمایشی سرویس، `-` بفرستید.\nبرای ۳۰۰ گیگ: `300`",
+                _cancel_back_keyboard(),
+            ),
+            ADMIN_SET_PROVISION_TIME_MODE: (
+                "provision_time_mode",
+                "نوع زمان ساخت کانفیگ از پنل را انتخاب کنید.",
+                admin_provision_time_mode_keyboard(),
+            ),
+            ADMIN_SET_PROVISION_DURATION: (
+                "provision_duration_days",
+                "مدت واقعی ساخت/تمدید در پنل را به روز بفرستید.\nبرای استفاده از مدت سرویس، `-` بفرستید.\nبرای نامحدود کردن زمان، از گزینه «نوع زمان ساخت» مقدار `زمان نامحدود` را انتخاب کنید.",
                 _cancel_back_keyboard(),
             ),
         }
@@ -3831,6 +3867,25 @@ async def shop_plan_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("حجم واقعی نمی‌تواند منفی باشد.")
                 return SHOP_PLAN_VALUE
             updates = {"provision_volume_gb": value}
+    elif field == "provision_time_mode":
+        value = PROVISION_TIME_MODE_VALUES.get(raw_value)
+        if not value:
+            await update.message.reply_text("نوع زمان ساخت معتبر نیست.", reply_markup=admin_provision_time_mode_keyboard())
+            return SHOP_PLAN_VALUE
+        updates = {"provision_time_mode": value}
+    elif field == "provision_duration_days":
+        if raw_value == "-":
+            updates = {"provision_duration_days": None}
+        else:
+            try:
+                value = int(raw_value.replace(",", ""))
+            except ValueError:
+                await update.message.reply_text("مدت واقعی باید عدد روز باشد یا `-` بفرستید.", parse_mode=constants.ParseMode.MARKDOWN)
+                return SHOP_PLAN_VALUE
+            if value <= 0:
+                await update.message.reply_text("مدت واقعی باید بیشتر از صفر باشد.")
+                return SHOP_PLAN_VALUE
+            updates = {"provision_duration_days": value}
     elif field == "display_order":
         try:
             updates = {"display_order": int(raw_value)}

@@ -164,6 +164,8 @@ def _plan_out(plan: ShopPlan, stock_count: int | None = None) -> dict:
         "display_order": plan.display_order,
         "duration_days": plan.duration_days,
         "provision_volume_gb": plan.provision_volume_gb,
+        "provision_duration_days": plan.provision_duration_days,
+        "provision_time_mode": plan.provision_time_mode,
         "name_prefix": plan.name_prefix,
         "provision_mode": plan.provision_mode,
         "provision_panel_key": plan.provision_panel_key,
@@ -183,6 +185,8 @@ class PlanUpsertRequest(BaseModel):
     style: str | None = None
     duration_days: int = 30
     provision_volume_gb: int | None = None
+    provision_duration_days: int | None = None
+    provision_time_mode: str = "on_hold"
     name_prefix: str | None = None
     provision_mode: str = "inventory"
     provision_panel_key: str | None = None
@@ -199,6 +203,8 @@ class PlanUpdateRequest(BaseModel):
     display_order: int | None = None
     duration_days: int | None = None
     provision_volume_gb: int | None = None
+    provision_duration_days: int | None = None
+    provision_time_mode: str | None = None
     name_prefix: str | None = None
     provision_mode: str | None = None
     provision_panel_key: str | None = None
@@ -235,6 +241,8 @@ async def upsert_plan(
     )
     plan.duration_days = body.duration_days
     plan.provision_volume_gb = body.provision_volume_gb
+    plan.provision_duration_days = body.provision_duration_days
+    plan.provision_time_mode = body.provision_time_mode
     plan.name_prefix = body.name_prefix
     plan.provision_mode = body.provision_mode
     plan.provision_panel_key = body.provision_panel_key
@@ -251,7 +259,7 @@ async def update_plan(
     session: AsyncSession = Depends(get_session),
     _admin: Admin = Depends(require_permission("prices")),
 ):
-    values = {k: v for k, v in body.model_dump(exclude_none=True).items()}
+    values = {k: v for k, v in body.model_dump(exclude_unset=True).items()}
     plan = await ShopCustomizationService.update_plan(session, plan_id, **values)
     if plan is None:
         raise HTTPException(status_code=404, detail="Plan not found")

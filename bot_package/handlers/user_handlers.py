@@ -580,9 +580,16 @@ async def trial_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 is_sold=True,
                 sold_to_user_id=user.telegram_id,
                 sold_at=datetime.now(timezone.utc),
+                panel_key="alien",
+                panel_username=trial.username,
+                provision_source="panel",
             )
             session.add(config)
             await session.flush()
+        else:
+            config.panel_key = config.panel_key or "alien"
+            config.panel_username = config.panel_username or trial.username
+            config.provision_source = config.provision_source or "panel"
 
         purchase = Purchase(
             user_id=user.telegram_id,

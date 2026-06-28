@@ -101,6 +101,8 @@ ADMIN_TOGGLE_PROVISION = "⏯ ساخت خودکار"
 ADMIN_TOGGLE_RENEW = "🔄 تمدید سرویس"
 ADMIN_SET_NAME_PREFIX = "🏷 پیشوند نام ساب"
 ADMIN_SET_PROVISION_VOLUME = "📦 حجم واقعی ساخت"
+ADMIN_SET_PROVISION_DURATION = "⏱ مدت واقعی ساخت"
+ADMIN_SET_PROVISION_TIME_MODE = "🕒 نوع زمان ساخت"
 ADMIN_PLAN_BACK_TO_EDIT = "⬅️ بازگشت به ویرایش سرویس"
 ADMIN_SET_PANEL_GROUPS = "👥 گروه‌های آسان پنل"
 ADMIN_SET_PANEL_HWID = "🔐 محدودیت HWID"
@@ -474,6 +476,7 @@ def admin_shop_plan_provision_keyboard() -> ReplyKeyboardMarkup:
             [_button(ADMIN_SET_PROVISION_MODE), _button(ADMIN_SET_PROVISION_PANEL)],
             [_button(ADMIN_TOGGLE_PROVISION), _button(ADMIN_TOGGLE_RENEW)],
             [_button(ADMIN_SET_NAME_PREFIX), _button(ADMIN_SET_PROVISION_VOLUME)],
+            [_button(ADMIN_SET_PROVISION_TIME_MODE), _button(ADMIN_SET_PROVISION_DURATION)],
             [_button(ADMIN_PLAN_BACK_TO_EDIT)],
             [_button(CANCEL), _button(ADMIN_BACK)],
         ],
@@ -503,6 +506,18 @@ def admin_provision_mode_keyboard() -> ReplyKeyboardMarkup:
             [_button("انبار فقط")],
             [_button("اول انبار بعد پنل")],
             [_button("فقط پنل")],
+            [_button(CANCEL), _button(ADMIN_BACK)],
+        ],
+        one_time_keyboard=True,
+    )
+
+
+def admin_provision_time_mode_keyboard() -> ReplyKeyboardMarkup:
+    return _keyboard(
+        [
+            [_button("شروع از اولین اتصال")],
+            [_button("تاریخ‌دار از زمان ساخت")],
+            [_button("زمان نامحدود")],
             [_button(CANCEL), _button(ADMIN_BACK)],
         ],
         one_time_keyboard=True,

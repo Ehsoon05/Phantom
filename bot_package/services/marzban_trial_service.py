@@ -158,3 +158,22 @@ class MarzbanTrialService:
                 return MarzbanTrialService._result(response.json())
         except (httpx.HTTPError, ValueError, TypeError) as exc:
             raise MarzbanTrialError("Could not create the Marzban trial") from exc
+
+    @staticmethod
+    async def delete(username: str) -> bool:
+        username = str(username or "").strip()
+        if not username:
+            raise MarzbanTrialError("Trial username is empty")
+        try:
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                token = await MarzbanTrialService._token(client)
+                response = await client.delete(
+                    f"{BotConfig.MARZBAN_API_URL}/api/user/{username}",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                if response.status_code in {200, 204, 404}:
+                    return True
+                response.raise_for_status()
+                return True
+        except (httpx.HTTPError, ValueError, TypeError) as exc:
+            raise MarzbanTrialError("Could not delete the Marzban trial") from exc

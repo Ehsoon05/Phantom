@@ -103,6 +103,8 @@ class SchemaService:
                         "premium_emoji_position": "VARCHAR DEFAULT 'left' NOT NULL",
                         "duration_days": "INTEGER DEFAULT 30 NOT NULL",
                         "provision_volume_gb": "INTEGER",
+                        "provision_duration_days": "INTEGER",
+                        "provision_time_mode": "VARCHAR DEFAULT 'on_hold' NOT NULL",
                         "name_prefix": "VARCHAR",
                         "provision_mode": "VARCHAR DEFAULT 'inventory' NOT NULL",
                         "provision_panel_key": "VARCHAR",

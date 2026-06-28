@@ -873,6 +873,8 @@ class ShopCustomizationService:
             "display_order",
             "duration_days",
             "provision_volume_gb",
+            "provision_duration_days",
+            "provision_time_mode",
             "name_prefix",
             "provision_mode",
             "provision_panel_key",

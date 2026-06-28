@@ -62,6 +62,8 @@ function PlansTab() {
       renew_enabled: boolean;
       duration_days: number;
       provision_volume_gb: number | null;
+      provision_duration_days: number | null;
+      provision_time_mode: string;
       name_prefix: string | null;
     }) => updatePlan(input.id, input),
     onSuccess: invalidate,
@@ -123,6 +125,14 @@ function PlansTab() {
                       if (prefix === null) return;
                       const duration = parseInt(prompt("مدت سرویس به روز:", String(p.duration_days ?? 30)) ?? "", 10);
                       if (Number.isNaN(duration) || duration <= 0) return;
+                      const provisionTimeMode = prompt("نوع زمان ساخت: on_hold | date | unlimited", p.provision_time_mode || "on_hold") || "on_hold";
+                      const provisionDurationRaw = prompt(
+                        "مدت واقعی ساخت/تمدید به روز. برای استفاده از مدت سرویس خالی بگذارید:",
+                        p.provision_duration_days != null ? String(p.provision_duration_days) : ""
+                      );
+                      if (provisionDurationRaw === null) return;
+                      const provisionDuration = provisionDurationRaw.trim() ? parseInt(provisionDurationRaw, 10) : null;
+                      if (provisionDurationRaw.trim() && (provisionDuration == null || Number.isNaN(provisionDuration) || provisionDuration <= 0)) return;
                       const actualVolumeRaw = prompt(
                         "حجم واقعی ساخت/تمدید در پنل (GB). برای استفاده از حجم نمایشی خالی بگذارید:",
                         p.provision_volume_gb != null ? String(p.provision_volume_gb) : ""
@@ -138,6 +148,8 @@ function PlansTab() {
                         renew_enabled: true,
                         duration_days: duration,
                         provision_volume_gb: actualVolume,
+                        provision_duration_days: provisionDuration,
+                        provision_time_mode: provisionTimeMode,
                         name_prefix: prefix || null,
                       });
                     }}>تامین</Button>
