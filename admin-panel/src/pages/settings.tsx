@@ -12,6 +12,7 @@ import {
   getTrialSettings,
   listChannels,
   setBrandedLinks,
+  setSubscriptionProfileTitle,
   setManualRate,
   setMargin,
   setRateMode,
@@ -108,10 +109,29 @@ function TrialSection() {
 function BrandedSection() {
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ["set-branded"], queryFn: getBrandedLinks });
+  const [title, setTitle] = useState("");
+  useEffect(() => {
+    if (data) setTitle(data.subscription_profile_title ?? "");
+  }, [data]);
   const save = useMutation({ mutationFn: (e: boolean) => setBrandedLinks(e), onSuccess: () => qc.invalidateQueries({ queryKey: ["set-branded"] }) });
+  const saveTitle = useMutation({
+    mutationFn: () => setSubscriptionProfileTitle(title),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["set-branded"] }),
+  });
   return (
     <Section title="لینک‌های اختصاصی">
-      <Button size="sm" variant="outline" onClick={() => save.mutate(!data?.enabled)}>وضعیت: {data?.enabled ? "فعال" : "غیرفعال"}</Button>
+      <div className="grid gap-2 md:grid-cols-[auto_minmax(0,1fr)_auto]">
+        <Button size="sm" variant="outline" onClick={() => save.mutate(!data?.enabled)}>وضعیت: {data?.enabled ? "فعال" : "غیرفعال"}</Button>
+        <Input
+          placeholder="نام نمایشی سابسکریپشن داخل برنامه‌ها"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+        />
+        <Button size="sm" onClick={() => saveTitle.mutate()} disabled={saveTitle.isPending}>ثبت نام</Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        این نام روی header لینک‌های ساب ست می‌شود تا داخل کلاینت‌ها به عنوان نام اشتراک دیده شود. خالی باشد، نام لینک اصلی یا نام سرویس نمایش داده می‌شود.
+      </p>
     </Section>
   );
 }

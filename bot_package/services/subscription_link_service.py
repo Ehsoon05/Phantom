@@ -82,6 +82,34 @@ class SubscriptionLinkService:
             logger.warning("Failed to sync subscription config %s to panel", config.id, exc_info=True)
 
     @staticmethod
+    async def sync_panel_settings(subscription_profile_title: str) -> None:
+        if not BotConfig.SUBSCRIPTION_PANEL_SYNC_URL or not BotConfig.SUBSCRIPTION_PANEL_SYNC_TOKEN:
+            return
+        settings_url = SubscriptionLinkService._internal_settings_url()
+        if not settings_url:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    settings_url,
+                    json={"subscription_profile_title": subscription_profile_title.strip()},
+                    headers={"Authorization": f"Bearer {BotConfig.SUBSCRIPTION_PANEL_SYNC_TOKEN}"},
+                )
+                response.raise_for_status()
+        except httpx.HTTPError:
+            logger.warning("Failed to sync subscription panel settings", exc_info=True)
+
+    @staticmethod
+    def _internal_settings_url() -> str:
+        sync_url = BotConfig.SUBSCRIPTION_PANEL_SYNC_URL.rstrip("/")
+        if sync_url.endswith("/internal/configs"):
+            return f"{sync_url.rsplit('/internal/configs', 1)[0]}/internal/settings"
+        parsed = urlparse(sync_url)
+        if not parsed.scheme or not parsed.netloc:
+            return ""
+        return f"{sync_url}/settings" if sync_url.endswith("/internal") else f"{sync_url}/internal/settings"
+
+    @staticmethod
     async def fetch_metadata(token: str) -> dict | None:
         if not BotConfig.SUBSCRIPTION_PANEL_SYNC_TOKEN:
             return None

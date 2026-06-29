@@ -247,11 +247,20 @@ export const getTrialSettings = () => api<TrialSettings>("/admin/settings/trial"
 export const setTrialSettings = (body: Partial<TrialSettings>) =>
   api<TrialSettings>("/admin/settings/trial", { method: "PUT", body: JSON.stringify(body) });
 
-export const getBrandedLinks = () => api<{ enabled: boolean }>("/admin/settings/branded-links");
+export interface BrandedLinksSettings {
+  enabled: boolean;
+  subscription_profile_title: string;
+}
+export const getBrandedLinks = () => api<BrandedLinksSettings>("/admin/settings/branded-links");
 export const setBrandedLinks = (enabled: boolean) =>
-  api<{ enabled: boolean }>("/admin/settings/branded-links", {
+  api<BrandedLinksSettings>("/admin/settings/branded-links", {
     method: "PUT",
     body: JSON.stringify({ enabled }),
+  });
+export const setSubscriptionProfileTitle = (title: string) =>
+  api<{ subscription_profile_title: string }>("/admin/settings/subscription-profile-title", {
+    method: "PUT",
+    body: JSON.stringify({ title }),
   });
 
 export interface Channel {

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot_package.models import Admin, RequiredChannel
 from bot_package.services.required_channel_service import RequiredChannelService
 from bot_package.services.settings_service import SettingsService
+from bot_package.services.subscription_link_service import SubscriptionLinkService
 
 from ..deps import get_session, require_permission
 
@@ -152,12 +153,19 @@ class BrandedLinksRequest(BaseModel):
     enabled: bool
 
 
+class SubscriptionProfileTitleRequest(BaseModel):
+    title: str = ""
+
+
 @router.get("/settings/branded-links")
 async def get_branded_links(
     session: AsyncSession = Depends(get_session),
     _admin: Admin = Depends(require_permission("shop")),
 ):
-    return {"enabled": await SettingsService.branded_links_enabled(session)}
+    return {
+        "enabled": await SettingsService.branded_links_enabled(session),
+        "subscription_profile_title": await SettingsService.get_subscription_profile_title(session),
+    }
 
 
 @router.put("/settings/branded-links")
@@ -167,7 +175,19 @@ async def set_branded_links(
     _admin: Admin = Depends(require_permission("shop")),
 ):
     await SettingsService.set_branded_links_enabled(session, body.enabled)
-    return {"enabled": body.enabled}
+    return await get_branded_links(session, _admin)
+
+
+@router.put("/settings/subscription-profile-title")
+async def set_subscription_profile_title(
+    body: SubscriptionProfileTitleRequest,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("shop")),
+):
+    title = body.title.strip()
+    await SettingsService.set_subscription_profile_title(session, title)
+    await SubscriptionLinkService.sync_panel_settings(title)
+    return {"subscription_profile_title": title}
 
 
 # --- Required channels -------------------------------------------------------
