@@ -233,3 +233,35 @@ async def test_inventory_link_replacement_preserves_stock_identity(client, monke
         assert stored.sub_link == "https://new.example.test/sub/replacement-token"
         await session.delete(stored)
         await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_inventory_config_can_be_deleted_from_stock(client, monkeypatch):
+    monkeypatch.setattr(BotConfig, "ADMIN_PASSWORD", "testpass", raising=False)
+    res = await _login(client, 9001)
+    h = {"Authorization": f"Bearer {res.json()['access_token']}"}
+
+    created = await client.post(
+        "/api/v1/admin/inventory/configs",
+        json={
+            "volume_gb": 23,
+            "category_key": "default",
+            "links": ["https://delete.example.test/sub/remove-me"],
+        },
+        headers=h,
+    )
+    assert created.status_code == 200, created.text
+
+    listed = await client.get(
+        "/api/v1/admin/inventory/configs?category_key=default&volume_gb=23",
+        headers=h,
+    )
+    config = next(row for row in listed.json() if row["sub_link"].startswith("https://delete."))
+
+    deleted = await client.delete(f"/api/v1/admin/inventory/configs/{config['id']}", headers=h)
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["deleted"] is True
+
+    async with async_session() as session:
+        stored = await session.get(Config, config["id"])
+        assert stored is None

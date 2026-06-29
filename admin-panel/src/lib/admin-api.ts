@@ -104,6 +104,8 @@ export const replaceInventoryConfig = (id: number, subLink: string) =>
     method: "PATCH",
     body: JSON.stringify({ sub_link: subLink }),
   });
+export const deleteInventoryConfig = (id: number) =>
+  api<{ deleted: boolean }>(`/admin/inventory/configs/${id}`, { method: "DELETE" });
 
 export interface ProvisionPanel {
   key: string;

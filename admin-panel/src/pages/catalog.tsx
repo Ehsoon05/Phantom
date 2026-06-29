@@ -11,6 +11,7 @@ import { formatToman } from "@/lib/api";
 import {
   addConfigs,
   deleteCategory,
+  deleteInventoryConfig,
   deletePlan,
   getInventoryStock,
   listCategories,
@@ -247,6 +248,23 @@ function InventoryTab() {
     },
     onError: (error) => alert(error instanceof Error ? error.message : "جایگزینی لینک انجام نشد."),
   });
+  const removeConfig = useMutation({
+    mutationFn: (id: number) => deleteInventoryConfig(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-stock"] });
+      qc.invalidateQueries({ queryKey: ["admin-inventory-configs"] });
+      alert("لینک از انبار حذف شد.");
+    },
+    onError: (error) => alert(error instanceof Error ? error.message : "حذف لینک انجام نشد."),
+  });
+  const copyLink = async (subLink: string) => {
+    try {
+      await navigator.clipboard.writeText(subLink);
+      alert("لینک کپی شد.");
+    } catch {
+      window.prompt("برای کپی لینک:", subLink);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -375,13 +393,32 @@ function InventoryTab() {
                             </Button>
                           </div>
                         ) : (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => { setEditingId(config.id); setReplacementLink(config.sub_link); }}
-                          >
-                            جایگزینی لینک
-                          </Button>
+                          <div className="flex flex-wrap gap-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => copyLink(config.sub_link)}
+                            >
+                              کپی لینک
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => { setEditingId(config.id); setReplacementLink(config.sub_link); }}
+                            >
+                              جایگزینی لینک
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              disabled={removeConfig.isPending}
+                              onClick={() => {
+                                if (confirm("این لینک از انبار حذف شود؟")) removeConfig.mutate(config.id);
+                              }}
+                            >
+                              حذف از انبار
+                            </Button>
+                          </div>
                         )}
                       </td>
                     </tr>

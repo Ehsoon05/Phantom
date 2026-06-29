@@ -150,6 +150,24 @@ async def replace_inventory_config(
     return _config_out(config)
 
 
+@router.delete("/inventory/configs/{config_id}")
+async def delete_inventory_config(
+    config_id: int,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("inventory")),
+):
+    config = (
+        await session.execute(select(Config).where(Config.id == config_id))
+    ).scalar_one_or_none()
+    if config is None:
+        raise HTTPException(status_code=404, detail="Config not found")
+    if config.is_sold:
+        raise HTTPException(status_code=409, detail="Sold configs cannot be deleted from inventory")
+    await session.delete(config)
+    await session.commit()
+    return {"deleted": True}
+
+
 # --- Plans -------------------------------------------------------------------
 
 def _plan_out(plan: ShopPlan, stock_count: int | None = None) -> dict:
