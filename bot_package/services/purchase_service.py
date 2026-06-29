@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from ..models import Config, Purchase, ShopPlan, ShopPlanCategory, Transaction, User
+from ..models import Config, ProvisionPanel, Purchase, ShopPlan, ShopPlanCategory, Transaction, User
 from .coupon_service import CouponService
 from .inventory_service import InventoryService
 from .price_service import PriceService
@@ -48,7 +48,13 @@ class PurchaseResult:
 async def _public_or_raw_link(session: AsyncSession, config: Config, service_name: str | None) -> str:
     if await SettingsService.branded_links_enabled(session):
         sub_link = await SubscriptionLinkService.public_link_for_config(session, config)
-        await SubscriptionLinkService.sync_to_panel(config, service_name)
+        device_limit = None
+        if config.panel_key:
+            panel = (
+                await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == config.panel_key))
+            ).scalar_one_or_none()
+            device_limit = panel.hwid_limit if panel else None
+        await SubscriptionLinkService.sync_to_panel(config, service_name, device_limit=device_limit)
         return sub_link
     return config.sub_link
 

@@ -56,7 +56,11 @@ class SubscriptionLinkService:
         return SubscriptionLinkService.public_link(token)
 
     @staticmethod
-    async def sync_to_panel(config: Config, service_name: str | None = None) -> None:
+    async def sync_to_panel(
+        config: Config,
+        service_name: str | None = None,
+        device_limit: int | None = None,
+    ) -> None:
         if not BotConfig.SUBSCRIPTION_PANEL_SYNC_URL or not BotConfig.SUBSCRIPTION_PANEL_SYNC_TOKEN:
             return
         if not config.public_sub_token:
@@ -69,6 +73,7 @@ class SubscriptionLinkService:
             "category_key": config.category_key or "default",
             "is_sold": bool(config.is_sold),
             "service_name": service_name,
+            "device_limit": max(0, int(device_limit)) if device_limit is not None else None,
         }
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
@@ -82,7 +87,10 @@ class SubscriptionLinkService:
             logger.warning("Failed to sync subscription config %s to panel", config.id, exc_info=True)
 
     @staticmethod
-    async def sync_panel_settings(subscription_profile_title: str) -> None:
+    async def sync_panel_settings(
+        subscription_profile_title: str,
+        subscription_device_limit: int | None = None,
+    ) -> None:
         if not BotConfig.SUBSCRIPTION_PANEL_SYNC_URL or not BotConfig.SUBSCRIPTION_PANEL_SYNC_TOKEN:
             return
         settings_url = SubscriptionLinkService._internal_settings_url()
@@ -92,7 +100,14 @@ class SubscriptionLinkService:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 response = await client.post(
                     settings_url,
-                    json={"subscription_profile_title": subscription_profile_title.strip()},
+                    json={
+                        "subscription_profile_title": subscription_profile_title.strip(),
+                        "subscription_device_limit": (
+                            max(0, int(subscription_device_limit))
+                            if subscription_device_limit is not None
+                            else None
+                        ),
+                    },
                     headers={"Authorization": f"Bearer {BotConfig.SUBSCRIPTION_PANEL_SYNC_TOKEN}"},
                 )
                 response.raise_for_status()

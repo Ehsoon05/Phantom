@@ -13,6 +13,7 @@ MANUAL_RATE_USDT = "crypto_manual_rate_usdt"  # toman per 1 USDT
 MANUAL_RATE_TON = "crypto_manual_rate_ton"    # toman per 1 TON
 BRANDED_SUBSCRIPTION_LINKS = "branded_subscription_links_enabled"
 SUBSCRIPTION_PROFILE_TITLE = "subscription_profile_title"
+SUBSCRIPTION_DEVICE_LIMIT = "subscription_device_limit"
 RIAL_MIN_AMOUNT = "rial_min_amount"
 RIAL_REQUIRE_PHONE = "rial_require_phone"
 RIAL_SUPPORT_HANDLE = "rial_support_handle"
@@ -32,6 +33,7 @@ DEFAULTS = {
     MANUAL_RATE_TON: "0",
     BRANDED_SUBSCRIPTION_LINKS: "true",
     SUBSCRIPTION_PROFILE_TITLE: "",
+    SUBSCRIPTION_DEVICE_LIMIT: "0",
     RIAL_MIN_AMOUNT: "100000",
     RIAL_REQUIRE_PHONE: "true",
     RIAL_SUPPORT_HANDLE: "@PhantomHubsSupport",
@@ -126,6 +128,17 @@ class SettingsService:
     @staticmethod
     async def set_subscription_profile_title(session: AsyncSession, title: str) -> None:
         await SettingsService.set(session, SUBSCRIPTION_PROFILE_TITLE, title.strip())
+
+    @staticmethod
+    async def get_subscription_device_limit(session: AsyncSession) -> int:
+        try:
+            return max(0, int(await SettingsService.get(session, SUBSCRIPTION_DEVICE_LIMIT, "0") or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    async def set_subscription_device_limit(session: AsyncSession, limit: int) -> None:
+        await SettingsService.set(session, SUBSCRIPTION_DEVICE_LIMIT, str(max(0, int(limit))))
 
     @staticmethod
     async def get_rial_min_amount(session: AsyncSession) -> int:

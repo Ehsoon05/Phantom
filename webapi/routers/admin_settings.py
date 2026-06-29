@@ -157,6 +157,10 @@ class SubscriptionProfileTitleRequest(BaseModel):
     title: str = ""
 
 
+class SubscriptionDeviceLimitRequest(BaseModel):
+    limit: int = Field(default=0, ge=0)
+
+
 @router.get("/settings/branded-links")
 async def get_branded_links(
     session: AsyncSession = Depends(get_session),
@@ -165,6 +169,7 @@ async def get_branded_links(
     return {
         "enabled": await SettingsService.branded_links_enabled(session),
         "subscription_profile_title": await SettingsService.get_subscription_profile_title(session),
+        "subscription_device_limit": await SettingsService.get_subscription_device_limit(session),
     }
 
 
@@ -186,8 +191,21 @@ async def set_subscription_profile_title(
 ):
     title = body.title.strip()
     await SettingsService.set_subscription_profile_title(session, title)
-    await SubscriptionLinkService.sync_panel_settings(title)
+    limit = await SettingsService.get_subscription_device_limit(session)
+    await SubscriptionLinkService.sync_panel_settings(title, subscription_device_limit=limit)
     return {"subscription_profile_title": title}
+
+
+@router.put("/settings/subscription-device-limit")
+async def set_subscription_device_limit(
+    body: SubscriptionDeviceLimitRequest,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("shop")),
+):
+    await SettingsService.set_subscription_device_limit(session, body.limit)
+    title = await SettingsService.get_subscription_profile_title(session)
+    await SubscriptionLinkService.sync_panel_settings(title, subscription_device_limit=body.limit)
+    return {"subscription_device_limit": body.limit}
 
 
 # --- Required channels -------------------------------------------------------

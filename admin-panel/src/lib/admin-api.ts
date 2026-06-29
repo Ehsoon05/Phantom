@@ -250,6 +250,7 @@ export const setTrialSettings = (body: Partial<TrialSettings>) =>
 export interface BrandedLinksSettings {
   enabled: boolean;
   subscription_profile_title: string;
+  subscription_device_limit: number;
 }
 export const getBrandedLinks = () => api<BrandedLinksSettings>("/admin/settings/branded-links");
 export const setBrandedLinks = (enabled: boolean) =>
@@ -261,6 +262,11 @@ export const setSubscriptionProfileTitle = (title: string) =>
   api<{ subscription_profile_title: string }>("/admin/settings/subscription-profile-title", {
     method: "PUT",
     body: JSON.stringify({ title }),
+  });
+export const setSubscriptionDeviceLimit = (limit: number) =>
+  api<{ subscription_device_limit: number }>("/admin/settings/subscription-device-limit", {
+    method: "PUT",
+    body: JSON.stringify({ limit }),
   });
 
 export interface Channel {

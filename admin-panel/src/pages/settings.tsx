@@ -12,6 +12,7 @@ import {
   getTrialSettings,
   listChannels,
   setBrandedLinks,
+  setSubscriptionDeviceLimit,
   setSubscriptionProfileTitle,
   setManualRate,
   setMargin,
@@ -110,12 +111,20 @@ function BrandedSection() {
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ["set-branded"], queryFn: getBrandedLinks });
   const [title, setTitle] = useState("");
+  const [deviceLimit, setDeviceLimit] = useState("");
   useEffect(() => {
-    if (data) setTitle(data.subscription_profile_title ?? "");
+    if (data) {
+      setTitle(data.subscription_profile_title ?? "");
+      setDeviceLimit(String(data.subscription_device_limit ?? 0));
+    }
   }, [data]);
   const save = useMutation({ mutationFn: (e: boolean) => setBrandedLinks(e), onSuccess: () => qc.invalidateQueries({ queryKey: ["set-branded"] }) });
   const saveTitle = useMutation({
     mutationFn: () => setSubscriptionProfileTitle(title),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["set-branded"] }),
+  });
+  const saveDeviceLimit = useMutation({
+    mutationFn: () => setSubscriptionDeviceLimit(Math.max(0, parseInt(deviceLimit || "0", 10) || 0)),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["set-branded"] }),
   });
   return (
@@ -129,8 +138,18 @@ function BrandedSection() {
         />
         <Button size="sm" onClick={() => saveTitle.mutate()} disabled={saveTitle.isPending}>ثبت نام</Button>
       </div>
+      <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+        <Input
+          type="number"
+          min={0}
+          placeholder="محدودیت دستگاه لینک‌های ساب؛ 0 یعنی خاموش"
+          value={deviceLimit}
+          onChange={(e) => setDeviceLimit(e.target.value)}
+        />
+        <Button size="sm" onClick={() => saveDeviceLimit.mutate()} disabled={saveDeviceLimit.isPending}>ثبت محدودیت</Button>
+      </div>
       <p className="text-xs text-muted-foreground">
-        این نام روی header لینک‌های ساب ست می‌شود تا داخل کلاینت‌ها به عنوان نام اشتراک دیده شود. خالی باشد، نام لینک اصلی یا نام سرویس نمایش داده می‌شود.
+        این نام و محدودیت روی خروجی خام لینک‌های ساب اعمال می‌شود. صفر یعنی محدودیت لینک اختصاصی خاموش باشد.
       </p>
     </Section>
   );
