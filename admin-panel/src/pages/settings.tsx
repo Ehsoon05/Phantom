@@ -142,14 +142,14 @@ function BrandedSection() {
         <Input
           type="number"
           min={0}
-          placeholder="محدودیت دستگاه لینک‌های ساب؛ 0 یعنی خاموش"
+          placeholder="محدودیت کاربر/دستگاه لینک‌های ساب؛ 0 یعنی نامحدود"
           value={deviceLimit}
           onChange={(e) => setDeviceLimit(e.target.value)}
         />
         <Button size="sm" onClick={() => saveDeviceLimit.mutate()} disabled={saveDeviceLimit.isPending}>ثبت محدودیت</Button>
       </div>
       <p className="text-xs text-muted-foreground">
-        این نام و محدودیت روی خروجی خام لینک‌های ساب اعمال می‌شود. صفر یعنی محدودیت لینک اختصاصی خاموش باشد.
+        این نام و محدودیت روی خروجی خام لینک‌های ساب اعمال می‌شود. صفر یعنی نامحدود باشد.
       </p>
     </Section>
   );
