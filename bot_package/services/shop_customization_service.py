@@ -875,6 +875,7 @@ class ShopCustomizationService:
             "provision_volume_gb",
             "provision_duration_days",
             "provision_time_mode",
+            "subscription_device_limit",
             "name_prefix",
             "provision_mode",
             "provision_panel_key",

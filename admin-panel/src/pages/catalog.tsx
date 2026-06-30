@@ -65,6 +65,7 @@ function PlansTab() {
       provision_volume_gb: number | null;
       provision_duration_days: number | null;
       provision_time_mode: string;
+      subscription_device_limit: number;
       name_prefix: string | null;
     }) => updatePlan(input.id, input),
     onSuccess: invalidate,
@@ -141,6 +142,11 @@ function PlansTab() {
                       if (actualVolumeRaw === null) return;
                       const actualVolume = actualVolumeRaw.trim() ? parseInt(actualVolumeRaw, 10) : null;
                       if (actualVolumeRaw.trim() && (actualVolume == null || Number.isNaN(actualVolume) || actualVolume < 0)) return;
+                      const deviceLimit = parseInt(
+                        prompt("محدودیت کاربر/دستگاه لینک ساب. 0 یعنی نامحدود:", String(p.subscription_device_limit ?? 0)) ?? "",
+                        10
+                      );
+                      if (Number.isNaN(deviceLimit) || deviceLimit < 0) return;
                       provision.mutate({
                         id: p.id,
                         provision_mode: mode,
@@ -151,6 +157,7 @@ function PlansTab() {
                         provision_volume_gb: actualVolume,
                         provision_duration_days: provisionDuration,
                         provision_time_mode: provisionTimeMode,
+                        subscription_device_limit: deviceLimit,
                         name_prefix: prefix || null,
                       });
                     }}>تامین</Button>

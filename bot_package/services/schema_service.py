@@ -105,6 +105,7 @@ class SchemaService:
                         "provision_volume_gb": "INTEGER",
                         "provision_duration_days": "INTEGER",
                         "provision_time_mode": "VARCHAR DEFAULT 'on_hold' NOT NULL",
+                        "subscription_device_limit": "INTEGER DEFAULT 0 NOT NULL",
                         "name_prefix": "VARCHAR",
                         "provision_mode": "VARCHAR DEFAULT 'inventory' NOT NULL",
                         "provision_panel_key": "VARCHAR",

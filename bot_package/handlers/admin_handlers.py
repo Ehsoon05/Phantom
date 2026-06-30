@@ -84,6 +84,7 @@ from ..utils.keyboards import (
     ADMIN_SET_PROVISION_DURATION,
     ADMIN_SET_PROVISION_VOLUME,
     ADMIN_SET_PROVISION_TIME_MODE,
+    ADMIN_SET_SUBSCRIPTION_DEVICE_LIMIT,
     ADMIN_PLAN_BACK_TO_EDIT,
     ADMIN_SET_PANEL_GROUPS,
     ADMIN_SET_PANEL_HWID,
@@ -433,6 +434,10 @@ def _panel_label(panel: ProvisionPanel) -> str:
     return f"#{panel.id} {status} {panel.title} ({panel.key})"
 
 
+def _normalize_button_text(value: str | None) -> str:
+    return " ".join((value or "").strip().split())
+
+
 def _provision_mode_label(value: str | None) -> str:
     return {
         "inventory": "انبار فقط",
@@ -468,6 +473,11 @@ PROVISION_TIME_MODE_VALUES = {
 
 def _provision_time_mode_label(value: str | None) -> str:
     return PROVISION_TIME_MODE_LABELS.get(value or "on_hold", value or "on_hold")
+
+
+def _subscription_device_limit_label(value: int | None) -> str:
+    limit = int(value or 0)
+    return "نامحدود / بدون شمارش" if limit <= 0 else f"{limit} کاربر/دستگاه"
 
 
 def _parse_inbounds_text(raw_value: str) -> dict[str, list[str]] | None:
@@ -3584,6 +3594,7 @@ async def _show_shop_plan_options(update: Update, context: ContextTypes.DEFAULT_
         f"حجم واقعی ساخت/تمدید: **{_volume_label(plan.provision_volume_gb if plan.provision_volume_gb is not None else plan.volume_gb)}**\n"
         f"نوع زمان ساخت: **{_provision_time_mode_label(plan.provision_time_mode)}**\n"
         f"مدت واقعی ساخت/تمدید: **{plan.provision_duration_days if plan.provision_duration_days is not None else plan.duration_days} روز**\n"
+        f"محدودیت کاربر لینک ساب: **{_subscription_device_limit_label(plan.subscription_device_limit)}**\n"
         f"تمدید: **{'روشن' if plan.renew_enabled else 'خاموش'}**\n"
         f"وضعیت: {'فعال' if plan.is_active else 'غیرفعال'}",
         reply_markup=admin_shop_plan_edit_keyboard(),
@@ -3618,6 +3629,7 @@ async def _show_shop_plan_provision_options(update: Update, context: ContextType
         f"حجم واقعی ساخت/تمدید: **{_volume_label(plan.provision_volume_gb if plan.provision_volume_gb is not None else plan.volume_gb)}**\n"
         f"نوع زمان ساخت: **{_provision_time_mode_label(plan.provision_time_mode)}**\n"
         f"مدت واقعی ساخت/تمدید: **{plan.provision_duration_days if plan.provision_duration_days is not None else plan.duration_days} روز**\n"
+        f"محدودیت کاربر لینک ساب: **{_subscription_device_limit_label(plan.subscription_device_limit)}**\n"
         f"تمدید: **{'روشن' if plan.renew_enabled else 'خاموش'}**\n\n"
         "حالت‌ها:\n"
         "`انبار فقط`: فقط از لینک‌های آماده می‌فروشد.\n"
@@ -3699,6 +3711,11 @@ async def shop_plan_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ADMIN_SET_PROVISION_DURATION: (
                 "provision_duration_days",
                 "مدت واقعی ساخت/تمدید در پنل را به روز بفرستید.\nبرای استفاده از مدت سرویس، `-` بفرستید.\nبرای نامحدود کردن زمان، از گزینه «نوع زمان ساخت» مقدار `زمان نامحدود` را انتخاب کنید.",
+                _cancel_back_keyboard(),
+            ),
+            ADMIN_SET_SUBSCRIPTION_DEVICE_LIMIT: (
+                "subscription_device_limit",
+                "محدودیت کاربر/دستگاه لینک ساب برای همین سرویس را عددی بفرستید.\n`0` یعنی نامحدود و بدون شمارش، یعنی هیچ فشاری برای ثبت دستگاه روی پنل ساب ندارد.\nمثال: `2`",
                 _cancel_back_keyboard(),
             ),
         }
@@ -3835,6 +3852,7 @@ async def shop_plan_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
             updates = {"provision_panel_key": None}
         else:
             panel_id = _parse_hash_id(raw_value)
+            panel_text = _normalize_button_text(raw_value)
             async with async_session() as session:
                 await ProvisioningService.ensure_env_panels(session)
                 panels = (await session.execute(select(ProvisionPanel).order_by(ProvisionPanel.id))).scalars().all()
@@ -3843,8 +3861,10 @@ async def shop_plan_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     item
                     for item in panels
                     if (panel_id is not None and item.id == panel_id)
-                    or item.key == raw_value
-                    or _panel_label(item) == raw_value
+                    or item.key == panel_text
+                    or item.title == panel_text
+                    or f"({item.key})" in panel_text
+                    or _normalize_button_text(_panel_label(item)) == panel_text
                 ),
                 None,
             )
@@ -3886,6 +3906,16 @@ async def shop_plan_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("مدت واقعی باید بیشتر از صفر باشد.")
                 return SHOP_PLAN_VALUE
             updates = {"provision_duration_days": value}
+    elif field == "subscription_device_limit":
+        try:
+            value = int(raw_value.replace(",", ""))
+        except ValueError:
+            await update.message.reply_text("محدودیت کاربر/دستگاه باید عدد باشد. برای نامحدود `0` بفرستید.", parse_mode=constants.ParseMode.MARKDOWN)
+            return SHOP_PLAN_VALUE
+        if value < 0:
+            await update.message.reply_text("محدودیت نمی‌تواند منفی باشد.")
+            return SHOP_PLAN_VALUE
+        updates = {"subscription_device_limit": value}
     elif field == "display_order":
         try:
             updates = {"display_order": int(raw_value)}
@@ -4064,6 +4094,7 @@ async def provision_panel_select(update: Update, context: ContextTypes.DEFAULT_T
         context.user_data.pop("provision_panel_key", None)
         return ConversationHandler.END
     panel_id = _parse_hash_id(update.message.text)
+    raw_text = _normalize_button_text(update.message.text)
     async with async_session() as session:
         await ProvisioningService.ensure_env_panels(session)
         panels = (await session.execute(select(ProvisionPanel).order_by(ProvisionPanel.id))).scalars().all()
@@ -4072,8 +4103,10 @@ async def provision_panel_select(update: Update, context: ContextTypes.DEFAULT_T
             item
             for item in panels
             if (panel_id is not None and item.id == panel_id)
-            or item.key == update.message.text.strip()
-            or _panel_label(item) == update.message.text
+            or item.key == raw_text
+            or item.title == raw_text
+            or f"({item.key})" in raw_text
+            or _normalize_button_text(_panel_label(item)) == raw_text
         ),
         None,
     )

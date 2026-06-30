@@ -49,7 +49,12 @@ async def _public_or_raw_link(session: AsyncSession, config: Config, service_nam
     if await SettingsService.branded_links_enabled(session):
         sub_link = await SubscriptionLinkService.public_link_for_config(session, config)
         device_limit = None
-        if config.panel_key:
+        plan = None
+        if config.shop_plan_id:
+            plan = await session.get(ShopPlan, config.shop_plan_id)
+            if plan is not None:
+                device_limit = max(0, int(plan.subscription_device_limit or 0))
+        if device_limit is None and config.panel_key:
             panel = (
                 await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == config.panel_key))
             ).scalar_one_or_none()
