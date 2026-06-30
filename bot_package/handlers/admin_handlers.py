@@ -237,6 +237,17 @@ ADD_CONFIG_PAGE_SIZE = 8
 ADD_CONFIG_CALLBACK_PREFIX = "admin_addcfg"
 SHOP_PLAN_CALLBACK_PREFIX = "admin_planmgr"
 PROVISION_INBOUND_CALLBACK_PREFIX = "admin_inb"
+PROVISION_PROTOCOL_CALLBACK_PREFIX = "admin_proto"
+PROVISION_PROTOCOL_CHOICES = [
+    "vless",
+    "vmess",
+    "trojan",
+    "shadowsocks",
+    "ss",
+    "hysteria2",
+    "tuic",
+    "wireguard",
+]
 
 (
     CHOOSE_VOLUME_ADD,
@@ -597,6 +608,33 @@ def _inbounds_keyboard(
         InlineKeyboardButton("💾 ذخیره", callback_data=f"{PROVISION_INBOUND_CALLBACK_PREFIX}:save"),
     ])
     rows.append([InlineKeyboardButton("⬅️ بازگشت", callback_data=f"{PROVISION_INBOUND_CALLBACK_PREFIX}:back")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _protocols_keyboard(selected: set[str]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    for protocol in PROVISION_PROTOCOL_CHOICES:
+        mark = "✅" if protocol in selected else "⬜️"
+        row.append(
+            InlineKeyboardButton(
+                f"{mark} {protocol}",
+                callback_data=f"{PROVISION_PROTOCOL_CALLBACK_PREFIX}:toggle:{protocol}",
+            )
+        )
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([
+        InlineKeyboardButton("✅ انتخاب همه", callback_data=f"{PROVISION_PROTOCOL_CALLBACK_PREFIX}:all"),
+        InlineKeyboardButton("⬜️ حذف همه", callback_data=f"{PROVISION_PROTOCOL_CALLBACK_PREFIX}:none"),
+    ])
+    rows.append([
+        InlineKeyboardButton("💾 ذخیره", callback_data=f"{PROVISION_PROTOCOL_CALLBACK_PREFIX}:save"),
+        InlineKeyboardButton("⬅️ بازگشت", callback_data=f"{PROVISION_PROTOCOL_CALLBACK_PREFIX}:back"),
+    ])
     return InlineKeyboardMarkup(rows)
 
 
@@ -4230,6 +4268,9 @@ async def provision_panel_option(update: Update, context: ContextTypes.DEFAULT_T
     if option == ADMIN_SET_PANEL_INBOUNDS:
         return await _show_panel_inbound_selector(update, context, refresh=True)
 
+    if option == ADMIN_SET_PANEL_PROTOCOLS:
+        return await _show_panel_protocol_selector(update, context)
+
     fields = {
         ADMIN_SET_PANEL_GROUPS: (
             "group_ids",
@@ -4238,10 +4279,6 @@ async def provision_panel_option(update: Update, context: ContextTypes.DEFAULT_T
         ADMIN_SET_PANEL_HWID: (
             "hwid_limit",
             "عدد محدودیت HWID این پنل را بفرستید.\nبرای حذف مقدار اختصاصی و استفاده از پیش‌فرض پنل، `-` بفرستید.\nمثال: `2`",
-        ),
-        ADMIN_SET_PANEL_PROTOCOLS: (
-            "protocols_json",
-            "پروتکل‌ها را با کاما بفرستید.\nمثال: `vless,trojan,shadowsocks`\nبرای خالی، `-` بفرستید.",
         ),
     }
     selected = fields.get(option)
@@ -4289,18 +4326,14 @@ async def _show_panel_inbound_selector(
             available = await ProvisioningService.fetch_inbounds(panel)
         except Exception as exc:
             if panel.panel_type == "pasarguard":
-                context.user_data["provision_panel_field"] = "inbounds_json"
                 await update.effective_message.reply_text(
                     "دریافت خودکار اینباندها از این پنل انجام نشد.\n"
                     f"خطا: `{exc}`\n\n"
-                    "می‌توانید اینباندها را دستی بفرستید.\n"
-                    "فرمت نمونه:\n"
-                    "`vless:tag1,tag2; trojan:tag3`\n"
-                    "برای خالی کردن، `-` بفرستید.",
-                    reply_markup=_cancel_back_keyboard(),
+                    "چون لیست اینباند دریافت نشد، پروتکل‌های مجاز را با دکمه انتخاب کنید.",
+                    reply_markup=admin_provision_panel_keyboard(panel.panel_type),
                     parse_mode=constants.ParseMode.MARKDOWN,
                 )
-                return PROVISION_PANEL_VALUE
+                return await _show_panel_protocol_selector(update, context)
             await update.effective_message.reply_text(
                 f"دریافت اینباندها از پنل انجام نشد:\n{exc}",
                 reply_markup=admin_provision_panel_keyboard(panel.panel_type),
@@ -4308,17 +4341,13 @@ async def _show_panel_inbound_selector(
             return PROVISION_PANEL_OPTION
         if not available:
             if panel.panel_type == "pasarguard":
-                context.user_data["provision_panel_field"] = "inbounds_json"
                 await update.effective_message.reply_text(
                     "این پنل از API لیست اینباند خالی برگرداند.\n\n"
-                    "اگر می‌خواهید محدود کنید، اینباندها را دستی بفرستید.\n"
-                    "فرمت نمونه:\n"
-                    "`vless:tag1,tag2; trojan:tag3`\n"
-                    "برای خالی کردن، `-` بفرستید.",
-                    reply_markup=_cancel_back_keyboard(),
+                    "پروتکل‌های مجاز را با دکمه انتخاب کنید.",
+                    reply_markup=admin_provision_panel_keyboard(panel.panel_type),
                     parse_mode=constants.ParseMode.MARKDOWN,
                 )
-                return PROVISION_PANEL_VALUE
+                return await _show_panel_protocol_selector(update, context)
             await update.effective_message.reply_text(
                 "هیچ اینباند فعالی از پنل دریافت نشد.",
                 reply_markup=admin_provision_panel_keyboard(panel.panel_type),
@@ -4353,11 +4382,49 @@ async def _show_panel_inbound_selector(
     return PROVISION_PANEL_OPTION
 
 
+async def _show_panel_protocol_selector(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = context.user_data.get("provision_panel_key")
+    async with async_session() as session:
+        panel = (
+            await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == key))
+        ).scalar_one_or_none()
+    if not panel:
+        await update.effective_message.reply_text("پنل پیدا نشد.", reply_markup=admin_shop_settings_keyboard())
+        return ConversationHandler.END
+
+    cached_key = context.user_data.get("provision_protocols_panel_key")
+    selected = context.user_data.get("provision_protocols_selected")
+    if cached_key != panel.key or not isinstance(selected, list):
+        selected = json.loads(panel.protocols_json or "[]")
+        context.user_data["provision_protocols_panel_key"] = panel.key
+        context.user_data["provision_protocols_selected"] = selected
+
+    selected_set = {str(item) for item in selected}
+    text = (
+        "**انتخاب پروتکل‌های پنل**\n\n"
+        f"پنل: **{panel.title}** `{panel.key}`\n"
+        "هر پروتکلی که روشن باشد در ساخت کانفیگ استفاده می‌شود.\n"
+        "اگر اینباندها را جدا انتخاب کرده باشید، همان اینباندها اولویت دارند."
+    )
+    markup = _protocols_keyboard(selected_set)
+    message = update.effective_message
+    if update.callback_query:
+        try:
+            await update.callback_query.edit_message_text(text, reply_markup=markup, parse_mode=constants.ParseMode.MARKDOWN)
+        except Exception:
+            await message.reply_text(text, reply_markup=markup, parse_mode=constants.ParseMode.MARKDOWN)
+    else:
+        await message.reply_text(text, reply_markup=markup, parse_mode=constants.ParseMode.MARKDOWN)
+    return PROVISION_PANEL_OPTION
+
+
 @require_auth(permission="shop")
 async def provision_inbound_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     parts = (query.data or "").split(":")
+    if parts and parts[0] == PROVISION_PROTOCOL_CALLBACK_PREFIX:
+        return await provision_protocol_callback(update, context)
     action = parts[1] if len(parts) > 1 else ""
     key = context.user_data.get("provision_panel_key")
     available = context.user_data.get("provision_inbounds_available")
@@ -4417,6 +4484,64 @@ async def provision_inbound_callback(update: Update, context: ContextTypes.DEFAU
         context.user_data.pop("provision_inbounds_selected", None)
         context.user_data.pop("provision_inbounds_panel_key", None)
         await query.edit_message_text("اینباندهای انتخاب‌شده ذخیره شدند.")
+        return await _show_provision_panel_options(update, context)
+
+    return PROVISION_PANEL_OPTION
+
+
+async def provision_protocol_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    parts = (query.data or "").split(":")
+    action = parts[1] if len(parts) > 1 else ""
+    key = context.user_data.get("provision_panel_key")
+    if not key:
+        await query.message.reply_text("ابتدا پنل را دوباره انتخاب کنید.", reply_markup=admin_provision_panel_keyboard())
+        return PROVISION_PANEL_OPTION
+
+    selected = {
+        str(item)
+        for item in context.user_data.get("provision_protocols_selected", [])
+        if str(item) in PROVISION_PROTOCOL_CHOICES
+    }
+
+    if action == "toggle" and len(parts) > 2:
+        protocol = parts[2]
+        if protocol in PROVISION_PROTOCOL_CHOICES:
+            if protocol in selected:
+                selected.remove(protocol)
+            else:
+                selected.add(protocol)
+            context.user_data["provision_protocols_selected"] = sorted(selected)
+        return await _show_panel_protocol_selector(update, context)
+
+    if action == "all":
+        context.user_data["provision_protocols_selected"] = list(PROVISION_PROTOCOL_CHOICES)
+        return await _show_panel_protocol_selector(update, context)
+
+    if action == "none":
+        context.user_data["provision_protocols_selected"] = []
+        return await _show_panel_protocol_selector(update, context)
+
+    if action == "back":
+        await query.edit_message_text("به تنظیمات پنل برگشتید.")
+        return await _show_provision_panel_options(update, context)
+
+    if action == "save":
+        async with async_session() as session:
+            panel = (
+                await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == key))
+            ).scalar_one_or_none()
+            if not panel:
+                await query.message.reply_text("پنل پیدا نشد.")
+                return ConversationHandler.END
+            panel.protocols_json = json.dumps(sorted(selected), ensure_ascii=False)
+            if not selected:
+                panel.inbounds_json = None
+            panel.updated_at = datetime.now(timezone.utc)
+            await session.commit()
+        context.user_data.pop("provision_protocols_panel_key", None)
+        context.user_data.pop("provision_protocols_selected", None)
+        await query.edit_message_text("پروتکل‌های انتخاب‌شده ذخیره شدند.")
         return await _show_provision_panel_options(update, context)
 
     return PROVISION_PANEL_OPTION
@@ -5343,7 +5468,7 @@ provision_panels_conv = ConversationHandler(
         PROVISION_PANEL_OPTION: [
             CallbackQueryHandler(
                 provision_inbound_callback,
-                pattern=rf"^{PROVISION_INBOUND_CALLBACK_PREFIX}:",
+                pattern=rf"^({PROVISION_INBOUND_CALLBACK_PREFIX}|{PROVISION_PROTOCOL_CALLBACK_PREFIX}):",
             ),
             MessageHandler(_exact_filter(CANCEL), cancel),
             MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
