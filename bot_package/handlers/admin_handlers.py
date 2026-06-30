@@ -434,6 +434,14 @@ def _panel_label(panel: ProvisionPanel) -> str:
     return f"#{panel.id} {status} {panel.title} ({panel.key})"
 
 
+def _panel_type_label(panel_type: str | None) -> str:
+    return {
+        "easy": "Easy",
+        "pasarguard": "Pasarguard",
+        "marzban": "Marzban",
+    }.get(panel_type or "", panel_type or "-")
+
+
 def _normalize_button_text(value: str | None) -> str:
     return " ".join((value or "").strip().split())
 
@@ -4119,7 +4127,7 @@ async def provision_panels_start(update: Update, context: ContextTypes.DEFAULT_T
     await update.message.reply_text(
         "**مدیریت پنل‌های ساخت**\n\n"
         "پنل موردنظر را انتخاب کنید.\n"
-        "برای آسان پنل معمولاً فقط `گروه‌ها` لازم است؛ برای مرزبان/Alien می‌توانید اینباندها را تنظیم کنید.",
+        "برای پنل‌های گروهی می‌توانید گروه و HWID را جداگانه تنظیم کنید. برای Marzban/Alien/Pasarguard هم اینباندها و پروتکل‌ها قابل انتخاب هستند.",
         reply_markup=_rows(labels, width=1),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
@@ -4168,21 +4176,26 @@ async def _show_provision_panel_options(update: Update, context: ContextTypes.DE
     group_ids = json.loads(panel.group_ids or "[]")
     inbounds = json.loads(panel.inbounds_json or "{}")
     protocols = json.loads(panel.protocols_json or "[]")
-    if panel.panel_type == "easy":
+    if panel.panel_type in {"easy", "pasarguard"}:
         panel_specific = (
-            f"گروه‌های آسان پنل: `{group_ids or '-'}`\n"
+            f"گروه‌های پنل: `{group_ids or '-'}`\n"
             f"محدودیت HWID: `{panel.hwid_limit if panel.hwid_limit is not None else '-'}`"
         )
+        if panel.panel_type == "pasarguard":
+            panel_specific += (
+                f"\nاینباندهای پنل: `{inbounds or '-'}`\n"
+                f"پروتکل‌ها: `{protocols or '-'}`"
+            )
     else:
         panel_specific = (
-            f"اینباندهای مرزبان: `{inbounds or '-'}`\n"
+            f"اینباندهای پنل: `{inbounds or '-'}`\n"
             f"پروتکل‌ها: `{protocols or '-'}`"
         )
     await update.effective_message.reply_text(
         "**تنظیمات پنل ساخت**\n\n"
         f"عنوان: **{panel.title}**\n"
         f"کلید: `{panel.key}`\n"
-        f"نوع: `{panel.panel_type}`\n"
+        f"نوع: `{_panel_type_label(panel.panel_type)}`\n"
         f"آدرس: `{panel.base_url}`\n"
         f"وضعیت: **{'فعال' if panel.is_enabled else 'غیرفعال'}**\n"
         f"{panel_specific}",
@@ -4220,7 +4233,7 @@ async def provision_panel_option(update: Update, context: ContextTypes.DEFAULT_T
     fields = {
         ADMIN_SET_PANEL_GROUPS: (
             "group_ids",
-            "شناسه گروه‌های آسان پنل را با کاما بفرستید.\nمثال: `1,2,3`\nبرای پیش‌فرض/خالی، `-` بفرستید.",
+            "شناسه گروه‌های همین پنل را با کاما بفرستید.\nمثال: `1,2,3`\nبرای پیش‌فرض/خالی، `-` بفرستید.",
         ),
         ADMIN_SET_PANEL_HWID: (
             "hwid_limit",
@@ -4264,7 +4277,7 @@ async def _show_panel_inbound_selector(
         return ConversationHandler.END
     if panel.panel_type == "easy":
         await update.effective_message.reply_text(
-            "این پنل از نوع آسان پنل است و اینباند جداگانه ندارد. برای این پنل از گزینه «گروه‌های آسان پنل» استفاده کنید.",
+            "این پنل از نوع Easy است و اینباند جداگانه ندارد. برای این پنل از گزینه «گروه‌های پنل» استفاده کنید.",
             reply_markup=admin_provision_panel_keyboard(panel.panel_type),
         )
         return PROVISION_PANEL_OPTION

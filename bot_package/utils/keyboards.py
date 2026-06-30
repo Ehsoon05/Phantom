@@ -105,9 +105,9 @@ ADMIN_SET_PROVISION_DURATION = "⏱ مدت واقعی ساخت"
 ADMIN_SET_PROVISION_TIME_MODE = "🕒 نوع زمان ساخت"
 ADMIN_SET_SUBSCRIPTION_DEVICE_LIMIT = "👤 محدودیت کاربر ساب"
 ADMIN_PLAN_BACK_TO_EDIT = "⬅️ بازگشت به ویرایش سرویس"
-ADMIN_SET_PANEL_GROUPS = "👥 گروه‌های آسان پنل"
+ADMIN_SET_PANEL_GROUPS = "👥 گروه‌های پنل"
 ADMIN_SET_PANEL_HWID = "🔐 محدودیت HWID"
-ADMIN_SET_PANEL_INBOUNDS = "🔌 اینباندهای مرزبان"
+ADMIN_SET_PANEL_INBOUNDS = "🔌 اینباندهای پنل"
 ADMIN_SET_PANEL_PROTOCOLS = "🧩 پروتکل‌های پنل"
 ADMIN_TOGGLE_PANEL_ENABLED = "⏯ فعال/غیرفعال پنل"
 ADMIN_ADD_PLAN = "➕ افزودن سرویس"
@@ -490,6 +490,13 @@ def admin_provision_panel_keyboard(panel_type: str | None = None) -> ReplyKeyboa
     if panel_type == "easy":
         rows = [
             [_button(ADMIN_SET_PANEL_GROUPS), _button(ADMIN_SET_PANEL_HWID)],
+            [_button(ADMIN_TOGGLE_PANEL_ENABLED)],
+            [_button(CANCEL), _button(ADMIN_BACK)],
+        ]
+    elif panel_type == "pasarguard":
+        rows = [
+            [_button(ADMIN_SET_PANEL_GROUPS), _button(ADMIN_SET_PANEL_HWID)],
+            [_button(ADMIN_SET_PANEL_INBOUNDS), _button(ADMIN_SET_PANEL_PROTOCOLS)],
             [_button(ADMIN_TOGGLE_PANEL_ENABLED)],
             [_button(CANCEL), _button(ADMIN_BACK)],
         ]

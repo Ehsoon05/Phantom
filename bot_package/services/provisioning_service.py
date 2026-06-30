@@ -168,7 +168,7 @@ class ProvisioningService:
             (
                 "mexico_hajmi",
                 "Mexico Hajmi",
-                "easy",
+                "pasarguard",
                 BotConfig.MEXICO_HAJMI_PANEL_URL,
                 BotConfig.MEXICO_HAJMI_PANEL_USERNAME,
                 BotConfig.MEXICO_HAJMI_PANEL_PASSWORD,
@@ -178,7 +178,7 @@ class ProvisioningService:
             (
                 "mexico_namahdod",
                 "Mexico Namahdod",
-                "easy",
+                "pasarguard",
                 BotConfig.MEXICO_NAMAHDOD_PANEL_URL,
                 BotConfig.MEXICO_NAMAHDOD_PANEL_USERNAME,
                 BotConfig.MEXICO_NAMAHDOD_PANEL_PASSWORD,
@@ -302,29 +302,44 @@ class ProvisioningService:
 
     @staticmethod
     async def _access_fields(client: httpx.AsyncClient, panel: ProvisionPanel, headers: dict) -> dict:
-        if panel.panel_type == "easy":
+        grouped_panel = panel.panel_type in {"easy", "pasarguard"}
+        fields: dict[str, Any] = {}
+        if grouped_panel:
             group_ids = [int(item) for item in _json_list(panel.group_ids) if str(item).isdigit()]
             if not group_ids:
                 group_ids = [1]
-            fields: dict[str, Any] = {"group_ids": group_ids}
+            fields["group_ids"] = group_ids
             if panel.hwid_limit is not None:
                 fields["hwid_limit"] = int(panel.hwid_limit)
-            return fields
+            if panel.panel_type == "easy":
+                return fields
 
         configured = _json_dict(panel.inbounds_json)
         if configured:
             protocols = sorted(configured)
-            return {
-                "proxies": {protocol: {} for protocol in protocols},
-                "inbounds": configured,
-            }
+            fields.update(
+                {
+                    "proxies": {protocol: {} for protocol in protocols},
+                    "inbounds": configured,
+                }
+            )
+            return fields
 
-        response = await client.get("/api/inbounds", headers=headers)
-        response.raise_for_status()
+        try:
+            response = await client.get("/api/inbounds", headers=headers)
+            response.raise_for_status()
+        except httpx.HTTPError:
+            if grouped_panel:
+                return fields
+            raise
         payload = response.json()
+        allowed_protocols = set(_json_list(panel.protocols_json))
         inbounds: dict[str, list[str]] = {}
         if isinstance(payload, dict):
             for protocol, items in payload.items():
+                protocol = str(protocol)
+                if allowed_protocols and protocol not in allowed_protocols:
+                    continue
                 if not isinstance(items, list):
                     continue
                 tags = [
@@ -333,10 +348,13 @@ class ProvisioningService:
                     if isinstance(item, dict) and item.get("tag")
                 ]
                 if tags:
-                    inbounds[str(protocol)] = tags
+                    inbounds[protocol] = tags
         if not inbounds:
+            if grouped_panel:
+                return fields
             raise ProvisioningError("هیچ اینباند فعالی از پنل دریافت نشد.")
-        return {"proxies": {protocol: {} for protocol in inbounds}, "inbounds": inbounds}
+        fields.update({"proxies": {protocol: {} for protocol in inbounds}, "inbounds": inbounds})
+        return fields
 
     @staticmethod
     async def fetch_inbounds(panel: ProvisionPanel) -> dict[str, list[str]]:
