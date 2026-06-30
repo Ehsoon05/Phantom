@@ -4288,12 +4288,37 @@ async def _show_panel_inbound_selector(
         try:
             available = await ProvisioningService.fetch_inbounds(panel)
         except Exception as exc:
+            if panel.panel_type == "pasarguard":
+                context.user_data["provision_panel_field"] = "inbounds_json"
+                await update.effective_message.reply_text(
+                    "دریافت خودکار اینباندها از این پنل انجام نشد.\n"
+                    f"خطا: `{exc}`\n\n"
+                    "می‌توانید اینباندها را دستی بفرستید.\n"
+                    "فرمت نمونه:\n"
+                    "`vless:tag1,tag2; trojan:tag3`\n"
+                    "برای خالی کردن، `-` بفرستید.",
+                    reply_markup=_cancel_back_keyboard(),
+                    parse_mode=constants.ParseMode.MARKDOWN,
+                )
+                return PROVISION_PANEL_VALUE
             await update.effective_message.reply_text(
                 f"دریافت اینباندها از پنل انجام نشد:\n{exc}",
                 reply_markup=admin_provision_panel_keyboard(panel.panel_type),
             )
             return PROVISION_PANEL_OPTION
         if not available:
+            if panel.panel_type == "pasarguard":
+                context.user_data["provision_panel_field"] = "inbounds_json"
+                await update.effective_message.reply_text(
+                    "این پنل از API لیست اینباند خالی برگرداند.\n\n"
+                    "اگر می‌خواهید محدود کنید، اینباندها را دستی بفرستید.\n"
+                    "فرمت نمونه:\n"
+                    "`vless:tag1,tag2; trojan:tag3`\n"
+                    "برای خالی کردن، `-` بفرستید.",
+                    reply_markup=_cancel_back_keyboard(),
+                    parse_mode=constants.ParseMode.MARKDOWN,
+                )
+                return PROVISION_PANEL_VALUE
             await update.effective_message.reply_text(
                 "هیچ اینباند فعالی از پنل دریافت نشد.",
                 reply_markup=admin_provision_panel_keyboard(panel.panel_type),

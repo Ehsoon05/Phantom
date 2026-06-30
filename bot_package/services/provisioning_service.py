@@ -314,6 +314,7 @@ class ProvisioningService:
             if panel.panel_type == "easy":
                 return fields
 
+        allowed_protocols = set(_json_list(panel.protocols_json))
         configured = _json_dict(panel.inbounds_json)
         if configured:
             protocols = sorted(configured)
@@ -329,11 +330,12 @@ class ProvisioningService:
             response = await client.get("/api/inbounds", headers=headers)
             response.raise_for_status()
         except httpx.HTTPError:
+            if grouped_panel and allowed_protocols:
+                fields["proxies"] = {protocol: {} for protocol in sorted(allowed_protocols)}
             if grouped_panel:
                 return fields
             raise
         payload = response.json()
-        allowed_protocols = set(_json_list(panel.protocols_json))
         inbounds: dict[str, list[str]] = {}
         if isinstance(payload, dict):
             for protocol, items in payload.items():
@@ -350,6 +352,8 @@ class ProvisioningService:
                 if tags:
                     inbounds[protocol] = tags
         if not inbounds:
+            if grouped_panel and allowed_protocols:
+                fields["proxies"] = {protocol: {} for protocol in sorted(allowed_protocols)}
             if grouped_panel:
                 return fields
             raise ProvisioningError("هیچ اینباند فعالی از پنل دریافت نشد.")
