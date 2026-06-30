@@ -480,6 +480,36 @@ def _subscription_device_limit_label(value: int | None) -> str:
     return "نامحدود / بدون شمارش" if limit <= 0 else f"{limit} کاربر/دستگاه"
 
 
+async def _sync_plan_subscription_device_limit(plan_id: int, device_limit: int) -> int:
+    async with async_session() as session:
+        result = await session.execute(
+            select(Config).where(
+                Config.shop_plan_id == plan_id,
+                Config.public_sub_token.is_not(None),
+            )
+        )
+        configs = result.scalars().all()
+        synced_count = 0
+        for config in configs:
+            purchase = (
+                await session.execute(
+                    select(Purchase)
+                    .where(Purchase.config_id == config.id)
+                    .order_by(Purchase.purchased_at.desc(), Purchase.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if not purchase:
+                continue
+            await SubscriptionLinkService.sync_to_panel(
+                config,
+                purchase.service_name,
+                device_limit=device_limit,
+            )
+            synced_count += 1
+        return synced_count
+
+
 def _parse_inbounds_text(raw_value: str) -> dict[str, list[str]] | None:
     value = raw_value.strip()
     if value in {"-", "خاموش", "همه", "auto", "AUTO"}:
@@ -3963,7 +3993,14 @@ async def shop_plan_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("سرویس ذخیره نشد.", reply_markup=admin_shop_settings_keyboard())
         return ConversationHandler.END
 
-    await update.message.reply_text("سرویس ذخیره شد.")
+    synced_count = 0
+    if field == "subscription_device_limit":
+        synced_count = await _sync_plan_subscription_device_limit(plan_id, updates["subscription_device_limit"])
+
+    message = "سرویس ذخیره شد."
+    if synced_count:
+        message += f"\nمحدودیت کاربر برای {synced_count} لینک قبلی این سرویس هم به‌روزرسانی شد."
+    await update.message.reply_text(message)
     if context.user_data.get("shop_plan_provision_mode"):
         return await _show_shop_plan_provision_options(update, context)
     return await _show_shop_plan_options(update, context)
