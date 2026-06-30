@@ -30,7 +30,8 @@ class ConfigsAddRequest(BaseModel):
 
 
 class ConfigUpdateRequest(BaseModel):
-    sub_link: str = Field(min_length=8)
+    sub_link: str | None = Field(default=None, min_length=8)
+    subscription_device_limit: int | None = Field(default=None, ge=0)
 
 
 def _config_name(sub_link: str) -> str:
@@ -52,8 +53,24 @@ def _config_out(config: Config) -> dict:
         "name": _config_name(config.sub_link),
         "sub_link": config.sub_link,
         "public_sub_token": config.public_sub_token,
+        "subscription_device_limit": config.subscription_device_limit,
         "created_at": config.created_at,
     }
+
+
+async def _config_device_limit(session: AsyncSession, config: Config) -> int | None:
+    if config.subscription_device_limit is not None:
+        return max(0, int(config.subscription_device_limit or 0))
+    if config.shop_plan_id:
+        plan = await session.get(ShopPlan, config.shop_plan_id)
+        if plan is not None:
+            return max(0, int(plan.subscription_device_limit or 0))
+    if config.panel_key:
+        panel = (
+            await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == config.panel_key))
+        ).scalar_one_or_none()
+        return panel.hwid_limit if panel else None
+    return None
 
 
 @router.post("/inventory/configs")
@@ -130,23 +147,27 @@ async def replace_inventory_config(
     if config.is_sold:
         raise HTTPException(status_code=409, detail="Sold configs cannot be replaced")
 
-    sub_link = body.sub_link.strip()
-    parsed = urlparse(sub_link)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise HTTPException(status_code=400, detail="Subscription link must be a valid HTTP(S) URL")
+    if body.sub_link is not None:
+        sub_link = body.sub_link.strip()
+        parsed = urlparse(sub_link)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise HTTPException(status_code=400, detail="Subscription link must be a valid HTTP(S) URL")
 
-    duplicate = (
-        await session.execute(
-            select(Config.id).where(Config.sub_link == sub_link, Config.id != config.id)
-        )
-    ).scalar_one_or_none()
-    if duplicate is not None:
-        raise HTTPException(status_code=409, detail="This subscription link already exists")
+        duplicate = (
+            await session.execute(
+                select(Config.id).where(Config.sub_link == sub_link, Config.id != config.id)
+            )
+        ).scalar_one_or_none()
+        if duplicate is not None:
+            raise HTTPException(status_code=409, detail="This subscription link already exists")
 
-    config.sub_link = sub_link
+        config.sub_link = sub_link
+    if body.subscription_device_limit is not None:
+        config.subscription_device_limit = max(0, int(body.subscription_device_limit))
     await SubscriptionLinkService.ensure_public_token(session, config)
+    device_limit = await _config_device_limit(session, config)
     await session.commit()
-    await SubscriptionLinkService.sync_to_panel(config)
+    await SubscriptionLinkService.sync_to_panel(config, device_limit=device_limit)
     return _config_out(config)
 
 

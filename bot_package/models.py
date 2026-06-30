@@ -37,6 +37,7 @@ class Config(Base):
     category_key = Column(String, nullable=False, default="default")
     sub_link = Column(String, nullable=False, unique=True)
     public_sub_token = Column(String, nullable=True, unique=True)
+    subscription_device_limit = Column(Integer, nullable=True)
     panel_key = Column(String, nullable=True)
     panel_username = Column(String, nullable=True)
     provision_source = Column(String, nullable=False, default="inventory")

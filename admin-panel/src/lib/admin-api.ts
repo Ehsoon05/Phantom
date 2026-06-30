@@ -90,6 +90,7 @@ export interface InventoryConfig {
   name: string;
   sub_link: string;
   public_sub_token: string | null;
+  subscription_device_limit: number | null;
   created_at: string;
 }
 export const listInventoryConfigs = (categoryKey?: string, volumeGb?: number, q?: string) => {
@@ -104,6 +105,11 @@ export const replaceInventoryConfig = (id: number, subLink: string) =>
   api<InventoryConfig>(`/admin/inventory/configs/${id}`, {
     method: "PATCH",
     body: JSON.stringify({ sub_link: subLink }),
+  });
+export const updateInventoryConfigDeviceLimit = (id: number, subscriptionDeviceLimit: number) =>
+  api<InventoryConfig>(`/admin/inventory/configs/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ subscription_device_limit: subscriptionDeviceLimit }),
   });
 export const deleteInventoryConfig = (id: number) =>
   api<{ deleted: boolean }>(`/admin/inventory/configs/${id}`, { method: "DELETE" });

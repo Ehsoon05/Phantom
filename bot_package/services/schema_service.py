@@ -33,6 +33,7 @@ class SchemaService:
                         "shop_plan_id": "INTEGER",
                         "category_key": "VARCHAR DEFAULT 'default' NOT NULL",
                         "public_sub_token": "VARCHAR",
+                        "subscription_device_limit": "INTEGER",
                         "panel_key": "VARCHAR",
                         "panel_username": "VARCHAR",
                         "provision_source": "VARCHAR DEFAULT 'inventory' NOT NULL",

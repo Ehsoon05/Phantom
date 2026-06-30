@@ -15,6 +15,8 @@ class InventoryService:
         category_key: str = "default",
         plan_id: int | None = None,
     ) -> int:
+        plan = await session.get(ShopPlan, plan_id) if plan_id else None
+        device_limit = max(0, int(plan.subscription_device_limit or 0)) if plan else None
         added_count = 0
         for link in links:
             stmt = select(Config).where(Config.sub_link == link)
@@ -29,7 +31,7 @@ class InventoryService:
                 session.add(new_config)
                 await session.flush()
                 await SubscriptionLinkService.ensure_public_token(session, new_config)
-                await SubscriptionLinkService.sync_to_panel(new_config)
+                await SubscriptionLinkService.sync_to_panel(new_config, device_limit=device_limit)
                 added_count += 1
         await session.commit()
         return added_count

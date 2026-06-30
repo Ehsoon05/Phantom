@@ -21,6 +21,7 @@ import {
   replaceInventoryConfig,
   setPlanPrice,
   updatePlan,
+  updateInventoryConfigDeviceLimit,
   upsertCategory,
   upsertPlan,
 } from "@/lib/admin-api";
@@ -216,6 +217,8 @@ function InventoryTab() {
   const [search, setSearch] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [replacementLink, setReplacementLink] = useState("");
+  const [limitEditingId, setLimitEditingId] = useState<number | null>(null);
+  const [deviceLimitValue, setDeviceLimitValue] = useState("");
   const parsedFilterVolume = parseInt(filterVolume, 10);
   const { data: configs, isLoading: configsLoading } = useQuery({
     queryKey: ["admin-inventory-configs", filterCategory, filterVolume, search],
@@ -254,6 +257,17 @@ function InventoryTab() {
       alert("لینک جایگزین و پنل اشتراک دوباره همگام شد.");
     },
     onError: (error) => alert(error instanceof Error ? error.message : "جایگزینی لینک انجام نشد."),
+  });
+  const updateDeviceLimit = useMutation({
+    mutationFn: ({ id, limit }: { id: number; limit: number }) =>
+      updateInventoryConfigDeviceLimit(id, limit),
+    onSuccess: () => {
+      setLimitEditingId(null);
+      setDeviceLimitValue("");
+      qc.invalidateQueries({ queryKey: ["admin-inventory-configs"] });
+      alert("محدودیت کاربر لینک ذخیره و پنل اشتراک همگام شد.");
+    },
+    onError: (error) => alert(error instanceof Error ? error.message : "محدودیت کاربر ذخیره نشد."),
   });
   const removeConfig = useMutation({
     mutationFn: (id: number) => deleteInventoryConfig(id),
@@ -351,13 +365,14 @@ function InventoryTab() {
           </form>
           {configsLoading ? <Skeleton className="h-28 w-full rounded-lg" /> : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] text-sm">
+                <table className="w-full min-w-[900px] text-sm">
                 <thead>
                   <tr className="border-b text-right text-xs text-muted-foreground">
                     <th className="pb-2">شناسه</th>
                     <th className="pb-2">نام ساب</th>
                     <th className="pb-2">دسته</th>
                     <th className="pb-2">حجم</th>
+                    <th className="pb-2">محدودیت کاربر</th>
                     <th className="pb-2">لینک فعلی</th>
                     <th className="pb-2">عملیات</th>
                   </tr>
@@ -369,6 +384,32 @@ function InventoryTab() {
                       <td className="py-3 font-medium">{config.name || "—"}</td>
                       <td className="py-3">{config.category_key}</td>
                       <td className="py-3">{config.volume_gb > 0 ? `${config.volume_gb} GB` : "نامحدود"}</td>
+                      <td className="py-3">
+                        {limitEditingId === config.id ? (
+                          <div className="flex min-w-36 gap-1">
+                            <Input
+                              inputMode="numeric"
+                              className="w-24"
+                              value={deviceLimitValue}
+                              onChange={(e) => setDeviceLimitValue(e.target.value)}
+                              placeholder="0"
+                            />
+                            <Button
+                              size="sm"
+                              disabled={updateDeviceLimit.isPending || Number.isNaN(parseInt(deviceLimitValue, 10)) || parseInt(deviceLimitValue, 10) < 0}
+                              onClick={() => updateDeviceLimit.mutate({ id: config.id, limit: parseInt(deviceLimitValue, 10) })}
+                            >
+                              ثبت
+                            </Button>
+                          </div>
+                        ) : (
+                          config.subscription_device_limit == null
+                            ? "ارث‌بری"
+                            : config.subscription_device_limit === 0
+                              ? "نامحدود"
+                              : `${config.subscription_device_limit} کاربر`
+                        )}
+                      </td>
                       <td className="max-w-80 py-3">
                         {editingId === config.id ? (
                           <Input
@@ -414,6 +455,16 @@ function InventoryTab() {
                               onClick={() => { setEditingId(config.id); setReplacementLink(config.sub_link); }}
                             >
                               جایگزینی لینک
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setLimitEditingId(config.id);
+                                setDeviceLimitValue(String(config.subscription_device_limit ?? 0));
+                              }}
+                            >
+                              محدودیت کاربر
                             </Button>
                             <Button
                               size="sm"

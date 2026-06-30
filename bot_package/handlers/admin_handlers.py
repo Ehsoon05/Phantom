@@ -486,6 +486,7 @@ async def _sync_plan_subscription_device_limit(plan_id: int, device_limit: int) 
             select(Config).where(
                 Config.shop_plan_id == plan_id,
                 Config.public_sub_token.is_not(None),
+                Config.subscription_device_limit.is_(None),
             )
         )
         configs = result.scalars().all()

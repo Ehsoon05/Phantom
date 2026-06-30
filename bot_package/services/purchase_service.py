@@ -50,7 +50,9 @@ async def _public_or_raw_link(session: AsyncSession, config: Config, service_nam
         sub_link = await SubscriptionLinkService.public_link_for_config(session, config)
         device_limit = None
         plan = None
-        if config.shop_plan_id:
+        if config.subscription_device_limit is not None:
+            device_limit = max(0, int(config.subscription_device_limit or 0))
+        elif config.shop_plan_id:
             plan = await session.get(ShopPlan, config.shop_plan_id)
             if plan is not None:
                 device_limit = max(0, int(plan.subscription_device_limit or 0))
