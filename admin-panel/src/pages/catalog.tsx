@@ -67,6 +67,7 @@ function PlansTab() {
       provision_duration_days: number | null;
       provision_time_mode: string;
       subscription_device_limit: number;
+      show_subscription_configs: boolean;
       name_prefix: string | null;
     }) => updatePlan(input.id, input),
     onSuccess: invalidate,
@@ -148,6 +149,7 @@ function PlansTab() {
                         10
                       );
                       if (Number.isNaN(deviceLimit) || deviceLimit < 0) return;
+                      const showConfigs = confirm("کانفیگ‌های اشتراک در صفحه وب این سرویس نمایش داده شود؟");
                       provision.mutate({
                         id: p.id,
                         provision_mode: mode,
@@ -159,6 +161,7 @@ function PlansTab() {
                         provision_duration_days: provisionDuration,
                         provision_time_mode: provisionTimeMode,
                         subscription_device_limit: deviceLimit,
+                        show_subscription_configs: showConfigs,
                         name_prefix: prefix || null,
                       });
                     }}>تامین</Button>

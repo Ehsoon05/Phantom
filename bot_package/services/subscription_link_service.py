@@ -60,6 +60,7 @@ class SubscriptionLinkService:
         config: Config,
         service_name: str | None = None,
         device_limit: int | None = None,
+        show_config_preview: bool | None = None,
     ) -> None:
         if not BotConfig.SUBSCRIPTION_PANEL_SYNC_URL or not BotConfig.SUBSCRIPTION_PANEL_SYNC_TOKEN:
             return
@@ -74,6 +75,7 @@ class SubscriptionLinkService:
             "is_sold": bool(config.is_sold),
             "service_name": service_name,
             "device_limit": max(0, int(device_limit)) if device_limit is not None else None,
+            "show_config_preview": show_config_preview,
         }
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:

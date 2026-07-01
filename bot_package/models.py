@@ -259,6 +259,7 @@ class ShopPlan(Base):
     provision_duration_days = Column(Integer, nullable=True)
     provision_time_mode = Column(String, nullable=False, default="on_hold")
     subscription_device_limit = Column(Integer, nullable=False, default=0)
+    show_subscription_configs = Column(Boolean, nullable=False, default=True)
     name_prefix = Column(String, nullable=True)
     provision_mode = Column(String, nullable=False, default="inventory")
     provision_panel_key = Column(String, nullable=True)

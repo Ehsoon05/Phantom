@@ -206,6 +206,7 @@ def _plan_out(plan: ShopPlan, stock_count: int | None = None) -> dict:
         "provision_duration_days": plan.provision_duration_days,
         "provision_time_mode": plan.provision_time_mode,
         "subscription_device_limit": plan.subscription_device_limit,
+        "show_subscription_configs": plan.show_subscription_configs,
         "name_prefix": plan.name_prefix,
         "provision_mode": plan.provision_mode,
         "provision_panel_key": plan.provision_panel_key,
@@ -228,6 +229,7 @@ class PlanUpsertRequest(BaseModel):
     provision_duration_days: int | None = None
     provision_time_mode: str = "on_hold"
     subscription_device_limit: int = 0
+    show_subscription_configs: bool = True
     name_prefix: str | None = None
     provision_mode: str = "inventory"
     provision_panel_key: str | None = None
@@ -247,6 +249,7 @@ class PlanUpdateRequest(BaseModel):
     provision_duration_days: int | None = None
     provision_time_mode: str | None = None
     subscription_device_limit: int | None = None
+    show_subscription_configs: bool | None = None
     name_prefix: str | None = None
     provision_mode: str | None = None
     provision_panel_key: str | None = None
@@ -286,6 +289,7 @@ async def upsert_plan(
     plan.provision_duration_days = body.provision_duration_days
     plan.provision_time_mode = body.provision_time_mode
     plan.subscription_device_limit = max(0, int(body.subscription_device_limit or 0))
+    plan.show_subscription_configs = bool(body.show_subscription_configs)
     plan.name_prefix = body.name_prefix
     plan.provision_mode = body.provision_mode
     plan.provision_panel_key = body.provision_panel_key

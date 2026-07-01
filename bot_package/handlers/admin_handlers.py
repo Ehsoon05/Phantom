@@ -85,6 +85,7 @@ from ..utils.keyboards import (
     ADMIN_SET_PROVISION_VOLUME,
     ADMIN_SET_PROVISION_TIME_MODE,
     ADMIN_SET_SUBSCRIPTION_DEVICE_LIMIT,
+    ADMIN_TOGGLE_SUBSCRIPTION_CONFIGS,
     ADMIN_PLAN_BACK_TO_EDIT,
     ADMIN_SET_PANEL_GROUPS,
     ADMIN_SET_PANEL_HWID,
@@ -525,6 +526,41 @@ async def _sync_plan_subscription_device_limit(plan_id: int, device_limit: int) 
                 config,
                 purchase.service_name,
                 device_limit=device_limit,
+            )
+            synced_count += 1
+        return synced_count
+
+
+async def _sync_plan_subscription_config_preview(plan_id: int, show_config_preview: bool) -> int:
+    async with async_session() as session:
+        plan = await ShopCustomizationService.get_plan(session, plan_id)
+        result = await session.execute(
+            select(Config).where(
+                Config.shop_plan_id == plan_id,
+                Config.public_sub_token.is_not(None),
+            )
+        )
+        configs = result.scalars().all()
+        synced_count = 0
+        for config in configs:
+            purchase = (
+                await session.execute(
+                    select(Purchase)
+                    .where(Purchase.config_id == config.id)
+                    .order_by(Purchase.purchased_at.desc(), Purchase.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            device_limit = (
+                max(0, int(config.subscription_device_limit or 0))
+                if config.subscription_device_limit is not None
+                else max(0, int(plan.subscription_device_limit or 0)) if plan is not None else None
+            )
+            await SubscriptionLinkService.sync_to_panel(
+                config,
+                purchase.service_name if purchase else None,
+                device_limit=device_limit,
+                show_config_preview=show_config_preview,
             )
             synced_count += 1
         return synced_count
@@ -3672,6 +3708,7 @@ async def _show_shop_plan_options(update: Update, context: ContextTypes.DEFAULT_
         f"نوع زمان ساخت: **{_provision_time_mode_label(plan.provision_time_mode)}**\n"
         f"مدت واقعی ساخت/تمدید: **{plan.provision_duration_days if plan.provision_duration_days is not None else plan.duration_days} روز**\n"
         f"محدودیت کاربر لینک ساب: **{_subscription_device_limit_label(plan.subscription_device_limit)}**\n"
+        f"نمایش کانفیگ‌ها در صفحه ساب: **{'روشن' if plan.show_subscription_configs else 'خاموش'}**\n"
         f"تمدید: **{'روشن' if plan.renew_enabled else 'خاموش'}**\n"
         f"وضعیت: {'فعال' if plan.is_active else 'غیرفعال'}",
         reply_markup=admin_shop_plan_edit_keyboard(),
@@ -3707,6 +3744,7 @@ async def _show_shop_plan_provision_options(update: Update, context: ContextType
         f"نوع زمان ساخت: **{_provision_time_mode_label(plan.provision_time_mode)}**\n"
         f"مدت واقعی ساخت/تمدید: **{plan.provision_duration_days if plan.provision_duration_days is not None else plan.duration_days} روز**\n"
         f"محدودیت کاربر لینک ساب: **{_subscription_device_limit_label(plan.subscription_device_limit)}**\n"
+        f"نمایش کانفیگ‌ها در صفحه ساب: **{'روشن' if plan.show_subscription_configs else 'خاموش'}**\n"
         f"تمدید: **{'روشن' if plan.renew_enabled else 'خاموش'}**\n\n"
         "حالت‌ها:\n"
         "`انبار فقط`: فقط از لینک‌های آماده می‌فروشد.\n"
@@ -3757,6 +3795,24 @@ async def shop_plan_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         renew_enabled=not plan.renew_enabled,
                     )
             await update.message.reply_text("وضعیت تمدید تغییر کرد.")
+            return await _show_shop_plan_provision_options(update, context)
+
+        if option == ADMIN_TOGGLE_SUBSCRIPTION_CONFIGS:
+            synced_count = 0
+            async with async_session() as session:
+                plan = await ShopCustomizationService.get_plan(session, plan_id)
+                if plan:
+                    new_value = not plan.show_subscription_configs
+                    await ShopCustomizationService.update_plan(
+                        session,
+                        plan_id,
+                        show_subscription_configs=new_value,
+                    )
+                    synced_count = await _sync_plan_subscription_config_preview(plan_id, new_value)
+            message = "وضعیت نمایش کانفیگ‌ها در صفحه ساب تغییر کرد."
+            if synced_count:
+                message += f"\n{synced_count} لینک قبلی این سرویس هم به‌روزرسانی شد."
+            await update.message.reply_text(message)
             return await _show_shop_plan_provision_options(update, context)
 
         provision_fields = {

@@ -876,6 +876,7 @@ class ShopCustomizationService:
             "provision_duration_days",
             "provision_time_mode",
             "subscription_device_limit",
+            "show_subscription_configs",
             "name_prefix",
             "provision_mode",
             "provision_panel_key",

@@ -16,6 +16,7 @@ export interface Plan {
   provision_duration_days: number | null;
   provision_time_mode: string;
   subscription_device_limit: number;
+  show_subscription_configs: boolean;
   name_prefix: string | null;
   provision_mode: string;
   provision_panel_key: string | null;

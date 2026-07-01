@@ -61,7 +61,12 @@ async def _public_or_raw_link(session: AsyncSession, config: Config, service_nam
                 await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == config.panel_key))
             ).scalar_one_or_none()
             device_limit = panel.hwid_limit if panel else None
-        await SubscriptionLinkService.sync_to_panel(config, service_name, device_limit=device_limit)
+        await SubscriptionLinkService.sync_to_panel(
+            config,
+            service_name,
+            device_limit=device_limit,
+            show_config_preview=plan.show_subscription_configs if plan is not None else None,
+        )
         return sub_link
     return config.sub_link
 
