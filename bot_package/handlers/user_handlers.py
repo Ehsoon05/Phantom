@@ -587,6 +587,9 @@ async def trial_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
             session.add(config)
             await session.flush()
         else:
+            config.is_sold = True
+            config.sold_to_user_id = config.sold_to_user_id or user.telegram_id
+            config.sold_at = config.sold_at or datetime.now(timezone.utc)
             config.panel_key = config.panel_key or "alien"
             config.panel_username = config.panel_username or trial.username
             config.provision_source = config.provision_source or "panel"
@@ -607,7 +610,11 @@ async def trial_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await session.flush()
         if await SettingsService.branded_links_enabled(session):
             await SubscriptionLinkService.public_link_for_config(session, config)
-            await SubscriptionLinkService.sync_to_panel(config, purchase.service_name)
+            await SubscriptionLinkService.sync_to_panel(
+                config,
+                purchase.service_name,
+                telegram_user_id=user.telegram_id,
+            )
         await session.commit()
 
         text = await ShopCustomizationService.get_message(
