@@ -28,17 +28,17 @@ class ProvisionedSubscription:
 
 
 def _clean_username(value: str) -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9_]+", "_", value.strip())
-    cleaned = re.sub(r"_+", "_", cleaned).strip("_")
+    cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", value.strip())
+    cleaned = re.sub(r"_+", "_", cleaned).strip("_-")
     return cleaned or "PhantomHubs"
 
 
 def _username_base_and_start(value: str) -> tuple[str, int]:
     cleaned = _clean_username(value)
-    match = re.match(r"^(.*?)(?:_([0-9]+))$", cleaned)
+    match = re.fullmatch(r"^(.*?)([0-9]+)$", cleaned)
     if not match:
         return cleaned, 1
-    base = match.group(1).strip("_") or cleaned
+    base = match.group(1) or cleaned
     return base, max(1, int(match.group(2)))
 
 
@@ -264,7 +264,7 @@ class ProvisioningService:
             await session.execute(select(BotSetting).where(BotSetting.key == name_key).with_for_update())
         ).scalar_one_or_none()
         prefix_changed = bool(name_setting and name_setting.value != base_name)
-        if not name_setting and setting and plan.name_prefix and re.search(r"_[0-9]+$", _clean_username(raw_prefix)):
+        if not name_setting and setting and plan.name_prefix and re.search(r"[0-9]+$", _clean_username(raw_prefix)):
             prefix_changed = True
 
         current = (
@@ -286,7 +286,7 @@ class ProvisioningService:
         else:
             session.add(BotSetting(key=name_key, value=base_name))
         await session.flush()
-        return f"{base_name}_{current}"
+        return f"{base_name}{current}"
 
     @staticmethod
     async def _token(client: httpx.AsyncClient, panel: ProvisionPanel) -> str:

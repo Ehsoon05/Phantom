@@ -381,6 +381,20 @@ async def test_easy_provision_panel_sends_hwid_limit():
     assert fields["hwid_limit"] == 2
 
 
+def test_provision_username_increments_trailing_number_without_separator():
+    from bot_package.services.provisioning_service import _username_base_and_start
+
+    base, start = _username_base_and_start("PhantomExpress10GB-VIP1")
+
+    assert base == "PhantomExpress10GB-VIP"
+    assert f"{base}{start}" == "PhantomExpress10GB-VIP1"
+    assert f"{base}{start + 1}" == "PhantomExpress10GB-VIP2"
+
+    base, start = _username_base_and_start("PhantomHubs-Vpn-1")
+    assert f"{base}{start}" == "PhantomHubs-Vpn-1"
+    assert f"{base}{start + 1}" == "PhantomHubs-Vpn-2"
+
+
 def test_provision_timing_payloads_respect_plan_settings():
     from bot_package.models import ShopPlan
     from bot_package.services.provisioning_service import _create_timing_payload, _renew_timing_payload
