@@ -24,8 +24,8 @@ logger = logging.getLogger(__name__)
 # USDC is priced off the USDT market (both peg ~$1), so it needs no separate rate.
 SUPPORTED_COINS: dict[str, dict] = {
     "USDT_TRC20": {"coin": "USDT", "network": "TRC20", "rate_coin": "USDT", "label": "USDT (TRON · TRC20)"},
-    "TON": {"coin": "TON", "network": "TON", "rate_coin": "TON", "label": "TON"},
-    "USDT_TON": {"coin": "USDT", "network": "TON", "rate_coin": "USDT", "label": "USDT (TON)"},
+    "TON": {"coin": "TON", "network": "TON", "rate_coin": "TON", "label": "گرام(تون)"},
+    "USDT_TON": {"coin": "USDT", "network": "TON", "rate_coin": "USDT", "label": "USDT (گرام(تون))"},
     "USDC_BEP20": {"coin": "USDC", "network": "BEP20", "rate_coin": "USDT", "label": "USDC (BNB Smart Chain · BEP20)"},
 }
 

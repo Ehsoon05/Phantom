@@ -4688,17 +4688,23 @@ def _shorten(value: str | None, head: int = 8, tail: int = 6) -> str:
     return f"{value[:head]}…{value[-tail:]}"
 
 
+def _crypto_asset_label(value: str | None) -> str:
+    return "گرام(تون)" if (value or "").upper() == "TON" else (value or "")
+
+
 def _format_invoice(invoice) -> str:
     status = _CRYPTO_STATUS_FA.get(invoice.status, invoice.status)
     when = invoice.created_at.strftime("%Y-%m-%d %H:%M") if invoice.created_at else "-"
+    coin_label = _crypto_asset_label(invoice.coin)
+    network_label = _crypto_asset_label(invoice.network)
     lines = [
         f"#{invoice.id} | {status}",
         f"👤 کاربر: `{invoice.user_id}`",
         f"💰 مبلغ: {invoice.quoted_toman:,} تومان",
-        f"🪙 ارز: {invoice.coin}/{invoice.network} | مقدار: {invoice.expected_crypto}",
+        f"🪙 ارز: {coin_label}/{network_label} | مقدار: {invoice.expected_crypto}",
     ]
     if invoice.received_crypto:
-        lines.append(f"📥 دریافت‌شده: {invoice.received_crypto} {invoice.coin}")
+        lines.append(f"📥 دریافت‌شده: {invoice.received_crypto} {coin_label}")
     lines.append(f"🏦 به آدرس: `{_shorten(invoice.deposit_address)}`")
     if invoice.memo:
         lines.append(f"📝 ممو: `{invoice.memo}`")
@@ -4808,10 +4814,10 @@ async def crypto_rates_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"کارمزد: *{margin}%*\n\n"
         "نرخ‌های دستی (تومان به ازای هر واحد):\n"
         f"• USDT: {manual_usdt:,}\n"
-        f"• TON: {manual_ton:,}\n\n"
+        f"• گرام(تون): {manual_ton:,}\n\n"
         "آخرین نرخ آنلاین کش‌شده:\n"
         f"• USDT: {_fmt(online_usdt)}\n"
-        f"• TON: {_fmt(online_ton)}"
+        f"• گرام(تون): {_fmt(online_ton)}"
     )
     await update.message.reply_text(
         text,
@@ -4888,7 +4894,7 @@ async def crypto_set_usdt_save(update: Update, context: ContextTypes.DEFAULT_TYP
 @require_auth(permission="users")
 async def crypto_set_ton_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "نرخ دستی TON را به تومان وارد کنید (به ازای هر ۱ TON):",
+        "نرخ دستی گرام(تون) را به تومان وارد کنید (به ازای هر ۱ گرام(تون)):",
         reply_markup=_cancel_back_keyboard(),
     )
     return CRYPTO_SET_TON_VALUE
@@ -4902,7 +4908,7 @@ async def crypto_set_ton_save(update: Update, context: ContextTypes.DEFAULT_TYPE
         return CRYPTO_SET_TON_VALUE
     async with async_session() as session:
         await SettingsService.set_manual_rate(session, "TON", amount)
-    await update.message.reply_text(f"نرخ دستی TON روی {amount:,} تومان تنظیم شد.")
+    await update.message.reply_text(f"نرخ دستی گرام(تون) روی {amount:,} تومان تنظیم شد.")
     await crypto_rates_menu(update, context)
     return ConversationHandler.END
 

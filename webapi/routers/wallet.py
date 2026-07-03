@@ -56,6 +56,10 @@ def _invoice_out(invoice) -> CryptoInvoiceOut:
     )
 
 
+def _crypto_label(value: str) -> str:
+    return "گرام(تون)" if value.upper() == "TON" else value
+
+
 @router.get("/methods")
 async def payment_methods(
     session: AsyncSession = Depends(get_session),
@@ -66,7 +70,7 @@ async def payment_methods(
         "crypto_coins": [
             {
                 "key": key,
-                "label": SUPPORTED_COINS[key]["label"],
+                "label": _crypto_label(SUPPORTED_COINS[key]["label"]),
                 "coin": SUPPORTED_COINS[key]["coin"],
                 "network": SUPPORTED_COINS[key]["network"],
             }

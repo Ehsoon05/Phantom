@@ -50,6 +50,10 @@ const STATUS_LABELS: Record<string, { label: string; tone: "default" | "secondar
   error: { label: "خطا", tone: "destructive" },
 };
 
+function cryptoAssetLabel(value?: string | null) {
+  return value?.toUpperCase() === "TON" ? "گرام(تون)" : value ?? "";
+}
+
 function Countdown({ expiresAt }: { expiresAt: string }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -125,7 +129,7 @@ function InvoiceView({ invoice, onClose }: { invoice: CryptoInvoice; onClose: ()
       <CardContent className="space-y-4 p-4">
         <div className="flex items-center justify-between">
           <p className="font-bold">
-            {live.coin} · {live.network}
+            {cryptoAssetLabel(live.coin)} · {cryptoAssetLabel(live.network)}
           </p>
           <Badge variant={status.tone}>{status.label}</Badge>
         </div>
@@ -140,7 +144,7 @@ function InvoiceView({ invoice, onClose }: { invoice: CryptoInvoice; onClose: ()
             <div className="space-y-2">
               <CopyRow label="آدرس واریز" value={live.deposit_address} />
               {live.memo && <CopyRow label="ممو (الزامی!)" value={live.memo} />}
-              <CopyRow label={`مبلغ دقیق (${live.coin})`} value={live.expected_crypto} />
+              <CopyRow label={`مبلغ دقیق (${cryptoAssetLabel(live.coin)})`} value={live.expected_crypto} />
             </div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">معادل</span>
@@ -159,7 +163,7 @@ function InvoiceView({ invoice, onClose }: { invoice: CryptoInvoice; onClose: ()
             )}
             {tonUrl && (
               <Button asChild className="w-full">
-                <a href={tonUrl}>🌐 باز کردن کیف TON (پرکردن خودکار)</a>
+                <a href={tonUrl}>🌐 باز کردن کیف گرام(تون) (پرکردن خودکار)</a>
               </Button>
             )}
           </>
@@ -226,7 +230,7 @@ function CryptoTab() {
                 onClick={() => setActiveInvoice(invoice)}
               >
                 <span>
-                  {invoice.coin} · {formatToman(invoice.quoted_toman)}
+                  {cryptoAssetLabel(invoice.coin)} · {formatToman(invoice.quoted_toman)}
                 </span>
                 <span>ادامه ←</span>
               </Button>
@@ -250,7 +254,7 @@ function CryptoTab() {
                 className="w-full justify-between"
                 onClick={() => setCoinKey(coin.key)}
               >
-                <span>{coin.key === "TON" ? "⭐ " : ""}{coin.label}</span>
+                <span>{coin.key === "TON" ? "⭐ " : ""}{cryptoAssetLabel(coin.label)}</span>
               </Button>
             ))}
           </div>

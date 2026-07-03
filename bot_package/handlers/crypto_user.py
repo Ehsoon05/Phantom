@@ -35,6 +35,10 @@ RECOMMENDED_TAG = "⭐ پیشنهادی"
 CANCEL_PENDING_LABEL = "🗑 لغو پرداخت قبلی و شروع مجدد"
 
 
+def _asset_label(value: str | None) -> str:
+    return "گرام(تون)" if (value or "").upper() == "TON" else (value or "")
+
+
 def _display_label(key: str) -> str:
     """Coin button label, with a recommended marker on the preferred coin."""
     label = SUPPORTED_COINS[key]["label"]
@@ -102,7 +106,7 @@ async def _prompt_pending_decision(update: Update, context: ContextTypes.DEFAULT
     context.user_data.pop(COIN_KEY, None)
     await update.message.reply_text(
         "⚠️ *شما یک پرداخت در انتظار دارید*\n\n"
-        f"مبلغ: *{invoice.quoted_toman:,} تومان* | ارز: *{invoice.coin}*\n\n"
+        f"مبلغ: *{invoice.quoted_toman:,} تومان* | ارز: *{_asset_label(invoice.coin)}*\n\n"
         "اگر هنوز واریز نکرده‌اید، می‌توانید این پرداخت را لغو کنید و از نو شروع کنید. "
         "اگر واریز کرده‌اید، چند لحظه صبر کنید تا به‌صورت خودکار تایید شود.",
         reply_markup=_pending_keyboard(),
@@ -115,7 +119,7 @@ async def _prompt_coin_selection(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data.pop(COIN_KEY, None)
     note = ""
     if RECOMMENDED_COIN_KEY in available_coins():
-        note = "\n\n🌟 *پیشنهاد ما: TON* — سریع‌تر، کم‌هزینه‌تر و مطمئن‌تر."
+        note = "\n\n🌟 *پیشنهاد ما: گرام(تون)* — سریع‌تر، کم‌هزینه‌تر و مطمئن‌تر."
     await update.message.reply_text(
         "💎 *شارژ کیف پول با ارز دیجیتال*\n\nارز مورد نظر خود را انتخاب کنید:" + note,
         reply_markup=_coin_keyboard(),
@@ -232,6 +236,7 @@ async def _send_invoice(update: Update, invoice) -> None:
     from decimal import Decimal
 
     coin = invoice.coin
+    coin_label = _asset_label(coin)
     try:
         unit_rate = int(Decimal(invoice.locked_rate))
     except Exception:  # noqa: BLE001
@@ -244,15 +249,15 @@ async def _send_invoice(update: Update, invoice) -> None:
     )
 
     lines = [
-        f"💎 پرداخت {coin}",
+        f"💎 پرداخت {coin_label}",
         "",
-        f"📊 مبلغ شبکه: {invoice.expected_crypto} {coin}",
+        f"📊 مبلغ شبکه: {invoice.expected_crypto} {coin_label}",
         f"👛 معادل تومانی: {invoice.quoted_toman:,} تومان ({source_label})",
     ]
     if unit_rate:
-        lines.append(f"🔎 تقریباً ۱ {coin} ≈ {unit_rate:,} تومان")
+        lines.append(f"🔎 تقریباً ۱ {coin_label} ≈ {unit_rate:,} تومان")
     if ttl_min:
-        lines += ["", f"🕘 مهلت پرداخت: {ttl_min} دقیقه (قیمت {coin} مدام عوض می‌شود)."]
+        lines += ["", f"🕘 مهلت پرداخت: {ttl_min} دقیقه (قیمت {coin_label} مدام عوض می‌شود)."]
 
     detail_note = "📄 جزئیات برای کپی — مقادیر زیر را می‌توانید از دکمه‌های «کپی» بردارید"
     detail_note += "؛ کامنت باید عیناً در تراکنش باشد." if invoice.memo else "."
@@ -263,7 +268,7 @@ async def _send_invoice(update: Update, invoice) -> None:
         "مقصد (ولت دریافت):",
         f"`{invoice.deposit_address}`",
         "",
-        f"مقدار واریز ({coin}):",
+        f"مقدار واریز ({coin_label}):",
         f"`{invoice.expected_crypto}`",
     ]
     if invoice.memo:
@@ -275,7 +280,7 @@ async def _send_invoice(update: Update, invoice) -> None:
 
     buttons = [
         [_copy_button("📋 کپی آدرس مقصد", invoice.deposit_address)],
-        [_copy_button(f"📋 کپی مقدار ({coin})", str(invoice.expected_crypto))],
+        [_copy_button(f"📋 کپی مقدار ({coin_label})", str(invoice.expected_crypto))],
     ]
     if invoice.memo:
         buttons.append([_copy_button("📋 کپی کامنت/ممو", invoice.memo)])
@@ -286,8 +291,8 @@ async def _send_invoice(update: Update, invoice) -> None:
         ton_url = f"ton://transfer/{invoice.deposit_address}?amount={nano}"
         if invoice.memo:
             ton_url += f"&text={quote(invoice.memo)}"
-        buttons.append([InlineKeyboardButton("🌐 باز کردن کیف TON", url=ton_url)])
-        lines += ["", "🌐 دکمهٔ «باز کردن کیف TON» همان مقدار TON و کامنت را در کیف پر می‌کند."]
+        buttons.append([InlineKeyboardButton("🌐 باز کردن کیف گرام(تون)", url=ton_url)])
+        lines += ["", "🌐 دکمهٔ «باز کردن کیف گرام(تون)» همان مقدار گرام(تون) و کامنت را در کیف پر می‌کند."]
 
     await update.message.reply_text(
         "\n".join(lines),
