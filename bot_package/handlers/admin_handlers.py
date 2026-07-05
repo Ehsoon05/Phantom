@@ -509,15 +509,18 @@ PROVISION_TIME_MODE_LABELS = {
 PROVISION_TIME_MODE_VALUES = {
     "شروع از اولین اتصال": "on_hold",
     "تاریخ‌دار از زمان ساخت": "date",
-    "زمان نامحدود": "unlimited",
     "on_hold": "on_hold",
     "date": "date",
-    "unlimited": "unlimited",
 }
 
 
 def _provision_time_mode_label(value: str | None) -> str:
     return PROVISION_TIME_MODE_LABELS.get(value or "on_hold", value or "on_hold")
+
+
+def _provision_duration_label(plan) -> str:
+    duration = plan.provision_duration_days if plan.provision_duration_days is not None else plan.duration_days
+    return "نامحدود" if int(duration or 0) <= 0 else f"{duration} روز"
 
 
 def _subscription_device_limit_label(value: int | None) -> str:
@@ -3859,7 +3862,7 @@ async def _show_shop_plan_options(update: Update, context: ContextTypes.DEFAULT_
         f"پیشوند نام ساب: `{plan.name_prefix or '-'}`\n"
         f"حجم واقعی ساخت/تمدید: **{_volume_label(plan.provision_volume_gb if plan.provision_volume_gb is not None else plan.volume_gb)}**\n"
         f"نوع زمان ساخت: **{_provision_time_mode_label(plan.provision_time_mode)}**\n"
-        f"مدت واقعی ساخت/تمدید: **{plan.provision_duration_days if plan.provision_duration_days is not None else plan.duration_days} روز**\n"
+        f"مدت واقعی ساخت/تمدید: **{_provision_duration_label(plan)}**\n"
         f"محدودیت کاربر لینک ساب: **{_subscription_device_limit_label(plan.subscription_device_limit)}**\n"
         f"نمایش کانفیگ‌ها در صفحه ساب: **{'روشن' if plan.show_subscription_configs else 'خاموش'}**\n"
         f"تمدید: **{'روشن' if plan.renew_enabled else 'خاموش'}**\n"
@@ -3895,7 +3898,7 @@ async def _show_shop_plan_provision_options(update: Update, context: ContextType
         f"پیشوند نام ساب: `{plan.name_prefix or '-'}`\n"
         f"حجم واقعی ساخت/تمدید: **{_volume_label(plan.provision_volume_gb if plan.provision_volume_gb is not None else plan.volume_gb)}**\n"
         f"نوع زمان ساخت: **{_provision_time_mode_label(plan.provision_time_mode)}**\n"
-        f"مدت واقعی ساخت/تمدید: **{plan.provision_duration_days if plan.provision_duration_days is not None else plan.duration_days} روز**\n"
+        f"مدت واقعی ساخت/تمدید: **{_provision_duration_label(plan)}**\n"
         f"محدودیت کاربر لینک ساب: **{_subscription_device_limit_label(plan.subscription_device_limit)}**\n"
         f"نمایش کانفیگ‌ها در صفحه ساب: **{'روشن' if plan.show_subscription_configs else 'خاموش'}**\n"
         f"تمدید: **{'روشن' if plan.renew_enabled else 'خاموش'}**\n\n"
@@ -3991,12 +3994,12 @@ async def shop_plan_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ),
             ADMIN_SET_PROVISION_TIME_MODE: (
                 "provision_time_mode",
-                "نوع زمان ساخت کانفیگ از پنل را انتخاب کنید.",
+                "نوع زمان ساخت کانفیگ از پنل را انتخاب کنید.\nبرای بدون محدودیت زمانی، مدت سرویس/مدت واقعی را عدد `0` بگذارید.",
                 admin_provision_time_mode_keyboard(),
             ),
             ADMIN_SET_PROVISION_DURATION: (
                 "provision_duration_days",
-                "مدت واقعی ساخت/تمدید در پنل را به روز بفرستید.\nبرای استفاده از مدت سرویس، `-` بفرستید.\nبرای نامحدود کردن زمان، از گزینه «نوع زمان ساخت» مقدار `زمان نامحدود` را انتخاب کنید.",
+                "مدت واقعی ساخت/تمدید در پنل را به روز بفرستید.\nبرای استفاده از مدت سرویس، `-` بفرستید.\nبرای بدون محدودیت زمانی، عدد `0` بفرستید.",
                 _cancel_back_keyboard(),
             ),
             ADMIN_SET_SUBSCRIPTION_DEVICE_LIMIT: (
@@ -4188,8 +4191,8 @@ async def shop_plan_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except ValueError:
                 await update.message.reply_text("مدت واقعی باید عدد روز باشد یا `-` بفرستید.", parse_mode=constants.ParseMode.MARKDOWN)
                 return SHOP_PLAN_VALUE
-            if value <= 0:
-                await update.message.reply_text("مدت واقعی باید بیشتر از صفر باشد.")
+            if value < 0:
+                await update.message.reply_text("مدت واقعی نمی‌تواند منفی باشد. برای نامحدود، `0` بفرستید.", parse_mode=constants.ParseMode.MARKDOWN)
                 return SHOP_PLAN_VALUE
             updates = {"provision_duration_days": value}
     elif field == "subscription_device_limit":

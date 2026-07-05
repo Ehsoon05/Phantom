@@ -47,7 +47,11 @@ def effective_volume_gb(plan: ShopPlan) -> int:
 
 
 def effective_duration_days(plan: ShopPlan) -> int:
-    return int(plan.provision_duration_days if plan.provision_duration_days is not None else (plan.duration_days or 30))
+    return int(
+        plan.provision_duration_days
+        if plan.provision_duration_days is not None
+        else (plan.duration_days if plan.duration_days is not None else 30)
+    )
 
 
 def effective_time_mode(plan: ShopPlan) -> str:
@@ -55,9 +59,13 @@ def effective_time_mode(plan: ShopPlan) -> str:
     return mode if mode in {"on_hold", "date", "unlimited"} else "on_hold"
 
 
+def has_unlimited_time(plan: ShopPlan) -> bool:
+    return effective_duration_days(plan) <= 0 or effective_time_mode(plan) == "unlimited"
+
+
 def _create_timing_payload(plan: ShopPlan) -> dict[str, Any]:
     mode = effective_time_mode(plan)
-    if mode == "unlimited":
+    if has_unlimited_time(plan):
         return {
             "status": "active",
             "expire": 0,
@@ -78,7 +86,7 @@ def _create_timing_payload(plan: ShopPlan) -> dict[str, Any]:
 
 
 def _renew_timing_payload(plan: ShopPlan) -> dict[str, Any]:
-    if effective_time_mode(plan) == "unlimited":
+    if has_unlimited_time(plan):
         return {
             "status": "active",
             "expire": 0,

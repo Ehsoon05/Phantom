@@ -41,13 +41,14 @@ type ProvisionForm = {
 };
 
 function provisionFormFromPlan(plan: Plan): ProvisionForm {
+  const legacyUnlimited = plan.provision_time_mode === "unlimited";
   return {
     provision_mode: plan.provision_mode || "inventory_then_panel",
     provision_panel_key: plan.provision_panel_key ?? "",
     name_prefix: plan.name_prefix ?? `PhantomHubs_${plan.category_key}_${plan.volume_gb}GB`,
-    duration_days: String(plan.duration_days ?? 30),
-    provision_time_mode: plan.provision_time_mode || "on_hold",
-    provision_duration_days: plan.provision_duration_days != null ? String(plan.provision_duration_days) : "",
+    duration_days: legacyUnlimited ? "0" : String(plan.duration_days ?? 30),
+    provision_time_mode: plan.provision_time_mode === "date" ? "date" : "on_hold",
+    provision_duration_days: plan.provision_duration_days != null ? String(plan.provision_duration_days) : legacyUnlimited ? "0" : "",
     provision_volume_gb: plan.provision_volume_gb != null ? String(plan.provision_volume_gb) : "",
     subscription_device_limit: String(plan.subscription_device_limit ?? 0),
     show_subscription_configs: Boolean(plan.show_subscription_configs),
@@ -216,6 +217,7 @@ function PlansTab() {
                           <span className="text-muted-foreground">مدت سرویس به روز</span>
                           <Input
                             inputMode="numeric"
+                            placeholder="0 یعنی نامحدود"
                             value={provisionForm.duration_days}
                             onChange={(e) => setProvisionForm({ ...provisionForm, duration_days: e.target.value })}
                           />
@@ -229,14 +231,13 @@ function PlansTab() {
                           >
                             <option value="on_hold">On Hold</option>
                             <option value="date">تاریخ‌دار</option>
-                            <option value="unlimited">نامحدود</option>
                           </select>
                         </label>
                         <label className="space-y-1 text-xs">
                           <span className="text-muted-foreground">مدت واقعی ساخت/تمدید</span>
                           <Input
                             inputMode="numeric"
-                            placeholder="خالی یعنی مدت سرویس"
+                            placeholder="خالی یعنی مدت سرویس، 0 یعنی نامحدود"
                             value={provisionForm.provision_duration_days}
                             onChange={(e) => setProvisionForm({ ...provisionForm, provision_duration_days: e.target.value })}
                           />
@@ -288,8 +289,8 @@ function PlansTab() {
                               const deviceLimit = parseInt(provisionForm.subscription_device_limit, 10);
                               if (
                                 Number.isNaN(duration) ||
-                                duration <= 0 ||
-                                (provisionDuration != null && (Number.isNaN(provisionDuration) || provisionDuration <= 0)) ||
+                                duration < 0 ||
+                                (provisionDuration != null && (Number.isNaN(provisionDuration) || provisionDuration < 0)) ||
                                 (actualVolume != null && (Number.isNaN(actualVolume) || actualVolume < 0)) ||
                                 Number.isNaN(deviceLimit) ||
                                 deviceLimit < 0

@@ -527,7 +527,6 @@ def admin_provision_time_mode_keyboard() -> ReplyKeyboardMarkup:
         [
             [_button("شروع از اولین اتصال")],
             [_button("تاریخ‌دار از زمان ساخت")],
-            [_button("زمان نامحدود")],
             [_button(CANCEL), _button(ADMIN_BACK)],
         ],
         one_time_keyboard=True,
