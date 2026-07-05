@@ -676,7 +676,7 @@ def _protocols_keyboard(selected: set[str]) -> InlineKeyboardMarkup:
 
 
 def _parse_hash_id(text: str) -> int | None:
-    match = re.match(r"#(\d+)\b", text.strip())
+    match = re.search(r"#(\d+)\b", text.strip())
     return int(match.group(1)) if match else None
 
 
