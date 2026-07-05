@@ -354,14 +354,6 @@ DEFAULT_MESSAGE_PARSE_MODES = {
 DEFAULT_CATEGORIES: tuple[CategoryDefinition, ...] = (
     CategoryDefinition("default", "سرویس‌های VPN", "🛡", STYLE_PRIMARY, 0, SHOP_BUTTON_CUSTOM_EMOJI_ID),
     CategoryDefinition(
-        "___phantom_express_-_فانتوم_اکسپرس",
-        "Phantom Express\nفانتوم اکسپرس",
-        None,
-        STYLE_PRIMARY,
-        1,
-        "5881806211195605908",
-    ),
-    CategoryDefinition(
         "unlimited",
         "Phantom Unlimited- فانتوم آنلیمیتد",
         None,
@@ -379,17 +371,11 @@ DEFAULT_PLANS: tuple[PlanDefinition, ...] = (
     PlanDefinition(5, "5 گیگ", "📦", STYLE_SUCCESS, 3, SHOP_BUTTON_CUSTOM_EMOJI_ID, price=950000),
     PlanDefinition(10, "10 گیگ", "📦", STYLE_SUCCESS, 4, SHOP_BUTTON_CUSTOM_EMOJI_ID, price=1800000),
     PlanDefinition(20, "20 گیگ", "📦", STYLE_SUCCESS, 5, SHOP_BUTTON_CUSTOM_EMOJI_ID, price=3200000),
-    PlanDefinition(
-        10,
-        "10 گیگ اکسپرس",
-        "📦",
-        STYLE_SUCCESS,
-        6,
-        SHOP_BUTTON_CUSTOM_EMOJI_ID,
-        category_key="___phantom_express_-_فانتوم_اکسپرس",
-        price=89000,
-    ),
 )
+
+OBSOLETE_CATEGORY_KEYS = {
+    "___phantom_express_-_فانتوم_اکسپرس",
+}
 
 
 class ShopCustomizationService:
@@ -421,12 +407,25 @@ class ShopCustomizationService:
             message.response_button_url = TARIFFS_MESSAGE_KEY
 
     @staticmethod
+    async def _remove_obsolete_defaults(session: AsyncSession) -> None:
+        for category_key in OBSOLETE_CATEGORY_KEYS:
+            plans = await session.execute(select(ShopPlan).where(ShopPlan.category_key == category_key))
+            for plan in plans.scalars().all():
+                await session.delete(plan)
+            category = (
+                await session.execute(select(ShopPlanCategory).where(ShopPlanCategory.key == category_key))
+            ).scalar_one_or_none()
+            if category:
+                await session.delete(category)
+
+    @staticmethod
     def _deleted_plan_key(volume_gb: int, category_key: str) -> str:
         return f"deleted_shop_plan:{_clean_key(category_key)}:{int(volume_gb)}"
 
     @staticmethod
     async def init_defaults(session: AsyncSession) -> None:
         await ShopCustomizationService._migrate_legacy_tariffs_key(session)
+        await ShopCustomizationService._remove_obsolete_defaults(session)
 
         for key, text in DEFAULT_MESSAGES.items():
             result = await session.execute(select(ShopMessage).where(ShopMessage.key == key))

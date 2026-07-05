@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,11 +20,40 @@ import {
   listPlans,
   replaceInventoryConfig,
   setPlanPrice,
+  type Plan,
   updatePlan,
   updateInventoryConfigDeviceLimit,
   upsertCategory,
   upsertPlan,
 } from "@/lib/admin-api";
+
+type ProvisionForm = {
+  provision_mode: string;
+  provision_panel_key: string;
+  name_prefix: string;
+  duration_days: string;
+  provision_time_mode: string;
+  provision_duration_days: string;
+  provision_volume_gb: string;
+  subscription_device_limit: string;
+  show_subscription_configs: boolean;
+  renew_enabled: boolean;
+};
+
+function provisionFormFromPlan(plan: Plan): ProvisionForm {
+  return {
+    provision_mode: plan.provision_mode || "inventory_then_panel",
+    provision_panel_key: plan.provision_panel_key ?? "",
+    name_prefix: plan.name_prefix ?? `PhantomHubs_${plan.category_key}_${plan.volume_gb}GB`,
+    duration_days: String(plan.duration_days ?? 30),
+    provision_time_mode: plan.provision_time_mode || "on_hold",
+    provision_duration_days: plan.provision_duration_days != null ? String(plan.provision_duration_days) : "",
+    provision_volume_gb: plan.provision_volume_gb != null ? String(plan.provision_volume_gb) : "",
+    subscription_device_limit: String(plan.subscription_device_limit ?? 0),
+    show_subscription_configs: Boolean(plan.show_subscription_configs),
+    renew_enabled: Boolean(plan.renew_enabled),
+  };
+}
 
 function PlansTab() {
   const qc = useQueryClient();
@@ -34,6 +63,8 @@ function PlansTab() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ["admin-plans"] });
 
   const [form, setForm] = useState({ volume_gb: "", title: "", price: "", category_key: "default" });
+  const [provisionPlanId, setProvisionPlanId] = useState<number | null>(null);
+  const [provisionForm, setProvisionForm] = useState<ProvisionForm | null>(null);
   const create = useMutation({
     mutationFn: () =>
       upsertPlan({
@@ -49,7 +80,11 @@ function PlansTab() {
   });
   const price = useMutation({
     mutationFn: ({ id, p }: { id: number; p: number }) => setPlanPrice(id, p),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      setProvisionPlanId(null);
+      setProvisionForm(null);
+      invalidate();
+    },
   });
   const toggle = useMutation({
     mutationFn: (p: { id: number; is_active: boolean }) => updatePlan(p.id, { is_active: !p.is_active }),
@@ -108,7 +143,8 @@ function PlansTab() {
             </thead>
             <tbody>
               {plans?.map((p) => (
-                <tr key={p.id} className="border-b last:border-0">
+                <Fragment key={p.id}>
+                <tr className="border-b last:border-0">
                   <td className="py-2">{p.emoji} {p.title}</td>
                   <td className="py-2 text-muted-foreground">{p.category_key}</td>
                   <td className="py-2">{p.volume_gb > 0 ? `${p.volume_gb} GB` : "نامحدود"}</td>
@@ -120,55 +156,174 @@ function PlansTab() {
                   <td className="py-2">{p.is_active ? "✅" : "⛔"}</td>
                   <td className="flex flex-wrap gap-1 py-2">
                     <Button size="sm" variant="outline" onClick={() => { const v = prompt("قیمت جدید:", String(p.price ?? "")); const n = parseInt(v ?? "", 10); if (!Number.isNaN(n)) price.mutate({ id: p.id, p: n }); }}>قیمت</Button>
-                    <Button size="sm" variant="outline" onClick={() => {
-                      const panelKey = prompt(`کلید پنل (${panels?.map((panel) => panel.key).join(", ") || "easy/alien"}):`, p.provision_panel_key ?? "easy");
-                      if (panelKey === null) return;
-                      const mode = prompt("حالت تامین: inventory | inventory_then_panel | panel_only", p.provision_mode || "inventory_then_panel");
-                      if (!mode) return;
-                      const prefix = prompt("پیشوند نام ساب:", p.name_prefix ?? `PhantomHubs_${p.category_key}_${p.volume_gb}GB`);
-                      if (prefix === null) return;
-                      const duration = parseInt(prompt("مدت سرویس به روز:", String(p.duration_days ?? 30)) ?? "", 10);
-                      if (Number.isNaN(duration) || duration <= 0) return;
-                      const provisionTimeMode = prompt("نوع زمان ساخت: on_hold | date | unlimited", p.provision_time_mode || "on_hold") || "on_hold";
-                      const provisionDurationRaw = prompt(
-                        "مدت واقعی ساخت/تمدید به روز. برای استفاده از مدت سرویس خالی بگذارید:",
-                        p.provision_duration_days != null ? String(p.provision_duration_days) : ""
-                      );
-                      if (provisionDurationRaw === null) return;
-                      const provisionDuration = provisionDurationRaw.trim() ? parseInt(provisionDurationRaw, 10) : null;
-                      if (provisionDurationRaw.trim() && (provisionDuration == null || Number.isNaN(provisionDuration) || provisionDuration <= 0)) return;
-                      const actualVolumeRaw = prompt(
-                        "حجم واقعی ساخت/تمدید در پنل (GB). برای استفاده از حجم نمایشی خالی بگذارید:",
-                        p.provision_volume_gb != null ? String(p.provision_volume_gb) : ""
-                      );
-                      if (actualVolumeRaw === null) return;
-                      const actualVolume = actualVolumeRaw.trim() ? parseInt(actualVolumeRaw, 10) : null;
-                      if (actualVolumeRaw.trim() && (actualVolume == null || Number.isNaN(actualVolume) || actualVolume < 0)) return;
-                      const deviceLimit = parseInt(
-                        prompt("محدودیت کاربر/دستگاه لینک ساب. 0 یعنی نامحدود:", String(p.subscription_device_limit ?? 0)) ?? "",
-                        10
-                      );
-                      if (Number.isNaN(deviceLimit) || deviceLimit < 0) return;
-                      const showConfigs = confirm("کانفیگ‌های اشتراک در صفحه وب این سرویس نمایش داده شود؟");
-                      provision.mutate({
-                        id: p.id,
-                        provision_mode: mode,
-                        provision_panel_key: panelKey || null,
-                        provision_enabled: mode !== "inventory",
-                        renew_enabled: true,
-                        duration_days: duration,
-                        provision_volume_gb: actualVolume,
-                        provision_duration_days: provisionDuration,
-                        provision_time_mode: provisionTimeMode,
-                        subscription_device_limit: deviceLimit,
-                        show_subscription_configs: showConfigs,
-                        name_prefix: prefix || null,
-                      });
-                    }}>تامین</Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        if (provisionPlanId === p.id) {
+                          setProvisionPlanId(null);
+                          setProvisionForm(null);
+                        } else {
+                          setProvisionPlanId(p.id);
+                          setProvisionForm(provisionFormFromPlan(p));
+                        }
+                      }}
+                    >
+                      تامین
+                    </Button>
                     <Button size="sm" variant="secondary" onClick={() => toggle.mutate({ id: p.id, is_active: p.is_active })}>{p.is_active ? "غیرفعال" : "فعال"}</Button>
                     <Button size="sm" variant="destructive" onClick={() => { if (confirm("حذف پلن؟")) remove.mutate(p.id); }}>حذف</Button>
                   </td>
                 </tr>
+                {provisionPlanId === p.id && provisionForm && (
+                  <tr className="border-b bg-muted/30">
+                    <td colSpan={8} className="py-3">
+                      <div className="grid gap-3 rounded-lg border bg-background p-3 md:grid-cols-4">
+                        <label className="space-y-1 text-xs">
+                          <span className="text-muted-foreground">حالت تامین</span>
+                          <select
+                            className="min-h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+                            value={provisionForm.provision_mode}
+                            onChange={(e) => setProvisionForm({ ...provisionForm, provision_mode: e.target.value })}
+                          >
+                            <option value="inventory">فقط انبار</option>
+                            <option value="inventory_then_panel">اول انبار، بعد پنل</option>
+                            <option value="panel_only">فقط پنل</option>
+                          </select>
+                        </label>
+                        <label className="space-y-1 text-xs">
+                          <span className="text-muted-foreground">پنل ساخت</span>
+                          <select
+                            className="min-h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+                            value={provisionForm.provision_panel_key}
+                            onChange={(e) => setProvisionForm({ ...provisionForm, provision_panel_key: e.target.value })}
+                          >
+                            <option value="">پنل دسته/پیش‌فرض</option>
+                            {panels?.map((panel) => (
+                              <option key={panel.key} value={panel.key}>{panel.title} ({panel.key})</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="space-y-1 text-xs md:col-span-2">
+                          <span className="text-muted-foreground">پیشوند نام ساب</span>
+                          <Input
+                            dir="ltr"
+                            value={provisionForm.name_prefix}
+                            onChange={(e) => setProvisionForm({ ...provisionForm, name_prefix: e.target.value })}
+                          />
+                        </label>
+                        <label className="space-y-1 text-xs">
+                          <span className="text-muted-foreground">مدت سرویس به روز</span>
+                          <Input
+                            inputMode="numeric"
+                            value={provisionForm.duration_days}
+                            onChange={(e) => setProvisionForm({ ...provisionForm, duration_days: e.target.value })}
+                          />
+                        </label>
+                        <label className="space-y-1 text-xs">
+                          <span className="text-muted-foreground">نوع زمان ساخت</span>
+                          <select
+                            className="min-h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+                            value={provisionForm.provision_time_mode}
+                            onChange={(e) => setProvisionForm({ ...provisionForm, provision_time_mode: e.target.value })}
+                          >
+                            <option value="on_hold">On Hold</option>
+                            <option value="date">تاریخ‌دار</option>
+                            <option value="unlimited">نامحدود</option>
+                          </select>
+                        </label>
+                        <label className="space-y-1 text-xs">
+                          <span className="text-muted-foreground">مدت واقعی ساخت/تمدید</span>
+                          <Input
+                            inputMode="numeric"
+                            placeholder="خالی یعنی مدت سرویس"
+                            value={provisionForm.provision_duration_days}
+                            onChange={(e) => setProvisionForm({ ...provisionForm, provision_duration_days: e.target.value })}
+                          />
+                        </label>
+                        <label className="space-y-1 text-xs">
+                          <span className="text-muted-foreground">حجم واقعی در پنل (GB)</span>
+                          <Input
+                            inputMode="numeric"
+                            placeholder="خالی یعنی حجم نمایشی"
+                            value={provisionForm.provision_volume_gb}
+                            onChange={(e) => setProvisionForm({ ...provisionForm, provision_volume_gb: e.target.value })}
+                          />
+                        </label>
+                        <label className="space-y-1 text-xs">
+                          <span className="text-muted-foreground">محدودیت کاربر/دستگاه</span>
+                          <Input
+                            inputMode="numeric"
+                            value={provisionForm.subscription_device_limit}
+                            onChange={(e) => setProvisionForm({ ...provisionForm, subscription_device_limit: e.target.value })}
+                          />
+                        </label>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={provisionForm.show_subscription_configs}
+                            onChange={(e) => setProvisionForm({ ...provisionForm, show_subscription_configs: e.target.checked })}
+                          />
+                          نمایش کانفیگ‌ها در صفحه وب
+                        </label>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={provisionForm.renew_enabled}
+                            onChange={(e) => setProvisionForm({ ...provisionForm, renew_enabled: e.target.checked })}
+                          />
+                          تمدید فعال باشد
+                        </label>
+                        <div className="flex items-end gap-2 md:col-span-2">
+                          <Button
+                            disabled={provision.isPending}
+                            onClick={() => {
+                              const duration = parseInt(provisionForm.duration_days, 10);
+                              const provisionDuration = provisionForm.provision_duration_days.trim()
+                                ? parseInt(provisionForm.provision_duration_days, 10)
+                                : null;
+                              const actualVolume = provisionForm.provision_volume_gb.trim()
+                                ? parseInt(provisionForm.provision_volume_gb, 10)
+                                : null;
+                              const deviceLimit = parseInt(provisionForm.subscription_device_limit, 10);
+                              if (
+                                Number.isNaN(duration) ||
+                                duration <= 0 ||
+                                (provisionDuration != null && (Number.isNaN(provisionDuration) || provisionDuration <= 0)) ||
+                                (actualVolume != null && (Number.isNaN(actualVolume) || actualVolume < 0)) ||
+                                Number.isNaN(deviceLimit) ||
+                                deviceLimit < 0
+                              ) {
+                                alert("مقادیر عددی را درست وارد کنید.");
+                                return;
+                              }
+                              provision.mutate({
+                                id: p.id,
+                                provision_mode: provisionForm.provision_mode,
+                                provision_panel_key: provisionForm.provision_panel_key || null,
+                                provision_enabled: provisionForm.provision_mode !== "inventory",
+                                renew_enabled: provisionForm.renew_enabled,
+                                duration_days: duration,
+                                provision_volume_gb: actualVolume,
+                                provision_duration_days: provisionDuration,
+                                provision_time_mode: provisionForm.provision_time_mode,
+                                subscription_device_limit: deviceLimit,
+                                show_subscription_configs: provisionForm.show_subscription_configs,
+                                name_prefix: provisionForm.name_prefix.trim() || null,
+                              });
+                            }}
+                          >
+                            ذخیره تنظیمات تامین
+                          </Button>
+                          <Button type="button" variant="ghost" onClick={() => { setProvisionPlanId(null); setProvisionForm(null); }}>
+                            بستن
+                          </Button>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>
