@@ -21,6 +21,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+from telegram.error import BadRequest
 from telegram.helpers import escape_markdown
 
 from ..auth import AuthManager
@@ -394,6 +395,16 @@ def _cancel_back_keyboard() -> ReplyKeyboardMarkup:
 
 def _message_label(message) -> str:
     return f"📝 #{message.id} {message.key}"
+
+
+def _message_preview(text: str | None, *, limit: int = 1800) -> str:
+    value = text or "-"
+    if len(value) <= limit:
+        return value
+    return (
+        value[:limit]
+        + "\n\n... متن فعلی طولانی است و برای جلوگیری از خطای تلگرام کوتاه نمایش داده شد."
+    )
 
 
 async def _message_key_from_admin_label(text: str) -> str | None:
@@ -3001,13 +3012,35 @@ async def _show_shop_message_editor(update: Update, context: ContextTypes.DEFAUL
         "برای حذف لینک/متن کپی بنویسید: لینک دکمه: -"
     )
     placeholder_note = MESSAGE_PLACEHOLDER_HINTS.get(key, "")
-    await update.message.reply_text(
+    editor_text = (
         f"ویرایش پیام {key}\n\n"
         f"عکس پیام: {photo_status}\n\n"
-        f"متن فعلی:\n\n{message.text}{placeholder_note}{extra_note}\n\n"
-        "متن جدید را ارسال کنید؛ اگر می‌خواهید پاسخ عکس‌دار باشد، عکس را همراه کپشن بفرستید.",
-        reply_markup=admin_response_button_keyboard(),
+        f"متن فعلی:\n\n{_message_preview(message.text)}{placeholder_note}{extra_note}\n\n"
+        "متن جدید را ارسال کنید؛ اگر می‌خواهید پاسخ عکس‌دار باشد، عکس را همراه کپشن بفرستید."
     )
+    if len(editor_text) > 3900:
+        editor_text = (
+            f"ویرایش پیام {key}\n\n"
+            f"عکس پیام: {photo_status}\n\n"
+            f"متن فعلی:\n\n{_message_preview(message.text, limit=900)}{placeholder_note}{extra_note}\n\n"
+            "متن جدید را ارسال کنید؛ اگر می‌خواهید پاسخ عکس‌دار باشد، عکس را همراه کپشن بفرستید."
+        )
+    fallback_text = (
+        f"ویرایش پیام {key}\n\n"
+        "متن فعلی این پیام طولانی یا دارای قالب‌بندی خاص است، برای همین فقط حالت ویرایش باز شد.\n"
+        f"عکس پیام: {photo_status}\n\n"
+        "متن جدید را ارسال کنید؛ اگر می‌خواهید پاسخ عکس‌دار باشد، عکس را همراه کپشن بفرستید."
+    )
+    try:
+        await update.message.reply_text(
+            editor_text,
+            reply_markup=admin_response_button_keyboard(),
+        )
+    except BadRequest:
+        await update.message.reply_text(
+            fallback_text,
+            reply_markup=admin_response_button_keyboard(),
+        )
     return SHOP_MESSAGE_TEXT
 
 
