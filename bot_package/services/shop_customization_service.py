@@ -32,6 +32,8 @@ from ..utils.keyboards import (
 
 
 PARSE_MODE_MARKDOWN = "Markdown"
+TARIFFS_MESSAGE_KEY = "custom_message:shop_main:tariffs"
+LEGACY_TARIFFS_MESSAGE_KEY = "custom_message:shop_main:1780731124"
 
 
 class RenderedMessage(str):
@@ -118,6 +120,15 @@ def _split_label(label: str) -> tuple[str | None, str]:
     return None, label
 
 
+def clean_custom_variable_name(value: str) -> str:
+    key = re.sub(r"[^A-Za-z0-9_:-]+", "_", (value or "").strip().lower()).strip("_:-")
+    return key[:64]
+
+
+def custom_message_action(menu: str, variable_name: str) -> str:
+    return f"custom_message:{menu}:{clean_custom_variable_name(variable_name)}"
+
+
 def _button_default(action: str, menu: str, label: str, style: str, row: int, col: int) -> ButtonDefinition:
     emoji, text = _split_label(label)
     return ButtonDefinition(
@@ -133,7 +144,7 @@ def _button_default(action: str, menu: str, label: str, style: str, row: int, co
 
 
 DEFAULT_BUTTONS: tuple[ButtonDefinition, ...] = (
-    ButtonDefinition("custom_message:shop_main:1780731124", "shop_main", "تعرفه ها", None, None, 0, 0, "5884491244360438851"),
+    ButtonDefinition(TARIFFS_MESSAGE_KEY, "shop_main", "تعرفه ها", None, None, 0, 0, "5884491244360438851"),
     ButtonDefinition("buy_subscription", "shop_main", "خرید سرویس", None, STYLE_PRIMARY, 0, 1, "5922272602784534896"),
     ButtonDefinition("trial_config", "shop_main", "دریافت کانفیگ تست", "🧪", STYLE_SUCCESS, 1, 0, "5373141891321699086"),
     ButtonDefinition("wallet", "shop_main", "کیف پول", None, None, 2, 0, "5769126056262898415"),
@@ -260,7 +271,7 @@ DEFAULT_MESSAGES: dict[str, str] = {
         "⚠️ لطفاً متن فوق را بدون هیچ تغییری به آیدی ذکرشده ارسال کنید.\n"
         "🚀 پس از تأیید پرداخت، کیف پول شما به‌صورت خودکار شارژ می‌شود."
     ),
-    "custom_message:shop_main:1780731124": (
+    TARIFFS_MESSAGE_KEY: (
         '<tg-emoji emoji-id="4990387969408893849">⚡️</tg-emoji> <b>Phantom Express - فانتوم اکسپرس</b>\n'
         'لوکیشن آلمان <tg-emoji emoji-id="5420468891870571663">🇩🇪</tg-emoji>\n'
         'بدون محدودیت کاربر <tg-emoji emoji-id="5379694495291940508">✨</tg-emoji>\n'
@@ -336,7 +347,7 @@ DEFAULT_MESSAGES: dict[str, str] = {
 }
 
 DEFAULT_MESSAGE_PARSE_MODES = {
-    "custom_message:shop_main:1780731124": "HTML",
+    TARIFFS_MESSAGE_KEY: "HTML",
 }
 
 
@@ -383,11 +394,40 @@ DEFAULT_PLANS: tuple[PlanDefinition, ...] = (
 
 class ShopCustomizationService:
     @staticmethod
+    async def _migrate_legacy_tariffs_key(session: AsyncSession) -> None:
+        legacy_message = (
+            await session.execute(select(ShopMessage).where(ShopMessage.key == LEGACY_TARIFFS_MESSAGE_KEY))
+        ).scalar_one_or_none()
+        tariffs_message = (
+            await session.execute(select(ShopMessage).where(ShopMessage.key == TARIFFS_MESSAGE_KEY))
+        ).scalar_one_or_none()
+        if legacy_message and not tariffs_message:
+            legacy_message.key = TARIFFS_MESSAGE_KEY
+        elif legacy_message and tariffs_message:
+            await session.delete(legacy_message)
+
+        legacy_buttons = (
+            await session.execute(select(ShopButton).where(ShopButton.action == LEGACY_TARIFFS_MESSAGE_KEY))
+        ).scalars().all()
+        for button in legacy_buttons:
+            button.action = TARIFFS_MESSAGE_KEY
+
+        linked_messages = (
+            await session.execute(
+                select(ShopMessage).where(ShopMessage.response_button_url == LEGACY_TARIFFS_MESSAGE_KEY)
+            )
+        ).scalars().all()
+        for message in linked_messages:
+            message.response_button_url = TARIFFS_MESSAGE_KEY
+
+    @staticmethod
     def _deleted_plan_key(volume_gb: int, category_key: str) -> str:
         return f"deleted_shop_plan:{_clean_key(category_key)}:{int(volume_gb)}"
 
     @staticmethod
     async def init_defaults(session: AsyncSession) -> None:
+        await ShopCustomizationService._migrate_legacy_tariffs_key(session)
+
         for key, text in DEFAULT_MESSAGES.items():
             result = await session.execute(select(ShopMessage).where(ShopMessage.key == key))
             message = result.scalar_one_or_none()
@@ -457,7 +497,7 @@ class ShopCustomizationService:
         ).scalar_one_or_none()
         if layout_migrated is None:
             main_positions = {
-                "custom_message:shop_main:1780731124": (0, 0),
+                TARIFFS_MESSAGE_KEY: (0, 0),
                 "buy_subscription": (0, 1),
                 "trial_config": (1, 0),
                 "wallet": (2, 0),
@@ -576,6 +616,11 @@ class ShopCustomizationService:
         return result.scalar_one_or_none()
 
     @staticmethod
+    async def get_message_by_id(session: AsyncSession, message_id: int) -> ShopMessage | None:
+        result = await session.execute(select(ShopMessage).where(ShopMessage.id == message_id))
+        return result.scalar_one_or_none()
+
+    @staticmethod
     async def update_message(
         session: AsyncSession,
         key: str,
@@ -657,10 +702,25 @@ class ShopCustomizationService:
         return True
 
     @staticmethod
-    async def create_custom_button(session: AsyncSession, menu: str, text: str, message_text: str) -> ShopButton:
+    async def create_custom_button(
+        session: AsyncSession,
+        menu: str,
+        variable_name: str,
+        text: str,
+        message_text: str,
+    ) -> ShopButton:
+        variable_name = clean_custom_variable_name(variable_name)
+        if not variable_name:
+            raise ValueError("invalid_variable_name")
         buttons = await ShopCustomizationService.list_buttons(session, menu)
         row = max((button.row for button in buttons), default=-1) + 1
-        action = f"custom_message:{menu}:{int(datetime.now(timezone.utc).timestamp())}"
+        action = custom_message_action(menu, variable_name)
+        existing_message = await ShopCustomizationService.get_message_row(session, action)
+        existing_button = (
+            await session.execute(select(ShopButton.id).where(ShopButton.action == action, ShopButton.menu == menu))
+        ).scalar_one_or_none()
+        if existing_message or existing_button:
+            raise ValueError("duplicate_variable_name")
         message = ShopMessage(key=action, text=message_text, parse_mode=PARSE_MODE_MARKDOWN)
         button = ShopButton(
             action=action,

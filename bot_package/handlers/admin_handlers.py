@@ -40,7 +40,7 @@ from ..services.price_service import PriceService
 from ..services.provisioning_service import ProvisioningError, ProvisioningService
 from ..services.referral_service import ReferralService
 from ..services.required_channel_service import RequiredChannelService
-from ..services.shop_customization_service import ShopCustomizationService
+from ..services.shop_customization_service import ShopCustomizationService, clean_custom_variable_name
 from ..services.subscription_link_service import SubscriptionLinkService
 from ..services.user_service import UserService
 from ..utils.keyboards import (
@@ -280,6 +280,7 @@ PROVISION_PROTOCOL_CHOICES = [
     SHOP_BUTTON_SELECT,
     SHOP_BUTTON_OPTION,
     SHOP_BUTTON_VALUE,
+    SHOP_BUTTON_ADD_KEY,
     SHOP_BUTTON_ADD_TEXT,
     SHOP_BUTTON_ADD_MESSAGE,
     SHOP_PLAN_SELECT,
@@ -327,7 +328,7 @@ PROVISION_PROTOCOL_CHOICES = [
     SERVICE_REMINDER_VOLUME_VALUE,
     SERVICE_REMINDER_DAYS_VALUE,
     SERVICE_REMINDER_HOURS_VALUE,
-) = range(76)
+) = range(77)
 
 
 SHOP_MENU_LABELS = {
@@ -391,8 +392,8 @@ def _cancel_back_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup([[CANCEL, ADMIN_BACK]], resize_keyboard=True, one_time_keyboard=True)
 
 
-def _message_label(key: str) -> str:
-    return f"📝 {key}"
+def _message_label(message) -> str:
+    return f"📝 #{message.id} {message.key}"
 
 
 MESSAGE_PLACEHOLDER_HINTS = {
@@ -2932,7 +2933,7 @@ async def shop_messages_start(update: Update, context: ContextTypes.DEFAULT_TYPE
         messages = await ShopCustomizationService.list_messages(session)
     await update.message.reply_text(
         "**مدیریت پیام‌ها**\n\nپیامی را که می‌خواهید تغییر دهید انتخاب کنید.",
-        reply_markup=_rows([_message_label(message.key) for message in messages], width=2),
+        reply_markup=_rows([_message_label(message) for message in messages], width=2),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     return SHOP_MESSAGE_SELECT
@@ -2942,7 +2943,16 @@ async def shop_messages_start(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def shop_message_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await _leave_shop_flow_if_navigation(update, context):
         return ConversationHandler.END
-    key = update.message.text.removeprefix("📝").strip()
+    message_id = _parse_hash_id(update.message.text)
+    if message_id:
+        async with async_session() as session:
+            message = await ShopCustomizationService.get_message_by_id(session, message_id)
+        if not message:
+            await update.message.reply_text("این پیام پیدا نشد.")
+            return SHOP_MESSAGE_SELECT
+        key = message.key
+    else:
+        key = update.message.text.removeprefix("📝").strip()
     return await _show_shop_message_editor(update, context, key)
 
 
@@ -3238,8 +3248,13 @@ async def shop_button_select(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data.pop("shop_button_id", None)
         return ConversationHandler.END
     if update.message.text == ADMIN_ADD_BUTTON:
-        await update.message.reply_text("متن دکمه سفارشی جدید را ارسال کنید.")
-        return SHOP_BUTTON_ADD_TEXT
+        await update.message.reply_text(
+            "نام متغیر دکمه سفارشی را ارسال کنید.\n\n"
+            "مثال: `tariffs` یا `special_offer`\n"
+            "فقط حروف انگلیسی، عدد، `_`، `-` و `:` استفاده کنید.",
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
+        return SHOP_BUTTON_ADD_KEY
 
     button_id = _parse_hash_id(update.message.text)
     if button_id is None:
@@ -3258,8 +3273,34 @@ async def shop_button_select(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 @require_auth(permission="shop")
+async def shop_button_add_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("shop_custom_button_key", None)
+        context.user_data.pop("shop_custom_button_text", None)
+        return ConversationHandler.END
+    variable_name = clean_custom_variable_name(update.message.text or "")
+    if not variable_name:
+        await update.message.reply_text("نام متغیر معتبر نیست. مثال درست: `tariffs`", parse_mode=constants.ParseMode.MARKDOWN)
+        return SHOP_BUTTON_ADD_KEY
+    menu = context.user_data.get("shop_button_menu")
+    action = f"custom_message:{menu}:{variable_name}"
+    async with async_session() as session:
+        existing = await ShopCustomizationService.get_message_row(session, action)
+    if existing:
+        await update.message.reply_text(
+            f"این نام متغیر قبلاً استفاده شده است: `{variable_name}`\nیک نام دیگر بفرستید.",
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
+        return SHOP_BUTTON_ADD_KEY
+    context.user_data["shop_custom_button_key"] = variable_name
+    await update.message.reply_text("حالا متن دکمه سفارشی جدید را ارسال کنید.")
+    return SHOP_BUTTON_ADD_TEXT
+
+
+@require_auth(permission="shop")
 async def shop_button_add_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("shop_custom_button_key", None)
         context.user_data.pop("shop_custom_button_text", None)
         return ConversationHandler.END
     text = update.message.text.strip()
@@ -3274,17 +3315,35 @@ async def shop_button_add_text(update: Update, context: ContextTypes.DEFAULT_TYP
 @require_auth(permission="shop")
 async def shop_button_add_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("shop_custom_button_key", None)
         context.user_data.pop("shop_custom_button_text", None)
         return ConversationHandler.END
     menu = context.user_data.get("shop_button_menu")
+    variable_name = context.user_data.get("shop_custom_button_key")
     text = context.user_data.get("shop_custom_button_text")
-    if not menu or not text:
+    if not menu or not variable_name or not text:
         await update.message.reply_text("اطلاعات دکمه کامل نیست.", reply_markup=admin_shop_settings_keyboard())
         return ConversationHandler.END
 
     async with async_session() as session:
-        button = await ShopCustomizationService.create_custom_button(session, menu, text, update.message.text)
+        try:
+            button = await ShopCustomizationService.create_custom_button(
+                session,
+                menu,
+                variable_name,
+                text,
+                update.message.text,
+            )
+        except ValueError as exc:
+            if str(exc) == "duplicate_variable_name":
+                await update.message.reply_text("این نام متغیر قبلاً استفاده شده است. دوباره از افزودن دکمه شروع کنید.")
+            else:
+                await update.message.reply_text("نام متغیر معتبر نیست. دوباره از افزودن دکمه شروع کنید.")
+            context.user_data.pop("shop_custom_button_key", None)
+            context.user_data.pop("shop_custom_button_text", None)
+            return ConversationHandler.END
 
+    context.user_data.pop("shop_custom_button_key", None)
     context.user_data.pop("shop_custom_button_text", None)
     await update.message.reply_text(
         f"دکمه سفارشی **{button.text}** ساخته شد.",
@@ -5459,9 +5518,14 @@ shop_buttons_conv = ConversationHandler(
             MessageHandler(_exact_filter(ADMIN_BACK), shop_button_value_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_value),
         ],
+        SHOP_BUTTON_ADD_KEY: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_button_list_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_add_key),
+        ],
         SHOP_BUTTON_ADD_TEXT: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), shop_button_options_back),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_button_list_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_add_text),
         ],
         SHOP_BUTTON_ADD_MESSAGE: [
