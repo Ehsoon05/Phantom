@@ -607,7 +607,7 @@ class ShopCustomizationService:
 
     @staticmethod
     async def list_messages(session: AsyncSession) -> list[ShopMessage]:
-        result = await session.execute(select(ShopMessage).order_by(ShopMessage.key))
+        result = await session.execute(select(ShopMessage).order_by(ShopMessage.id))
         return list(result.scalars().all())
 
     @staticmethod
