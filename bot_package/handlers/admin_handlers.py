@@ -240,6 +240,7 @@ ADD_CONFIG_CALLBACK_PREFIX = "admin_addcfg"
 SHOP_PLAN_CALLBACK_PREFIX = "admin_planmgr"
 PROVISION_INBOUND_CALLBACK_PREFIX = "admin_inb"
 PROVISION_PROTOCOL_CALLBACK_PREFIX = "admin_proto"
+RIAL_REQUEST_CALLBACK_PREFIX = "admin_rial"
 PROVISION_PROTOCOL_CHOICES = [
     "vless",
     "vmess",
@@ -942,6 +943,38 @@ def _admin_user_preview(user) -> str:
     )
 
 
+def _rial_request_decision_keyboard(request_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "✅ تایید و شارژ",
+                    callback_data=f"{RIAL_REQUEST_CALLBACK_PREFIX}:approve:{request_id}",
+                ),
+                InlineKeyboardButton(
+                    "❌ رد درخواست",
+                    callback_data=f"{RIAL_REQUEST_CALLBACK_PREFIX}:reject:{request_id}",
+                ),
+            ]
+        ]
+    )
+
+
+def _format_admin_rial_request(request) -> str:
+    when = request.created_at.strftime("%Y-%m-%d %H:%M") if request.created_at else "-"
+    phone = request.phone_number or "دریافت نشده"
+    return (
+        f"درخواست واریز ریالی #{request.id}\n\n"
+        f"👤 کاربر: `{request.user_id}`\n"
+        f"💰 مبلغ: **{request.amount_toman:,} تومان**\n"
+        f"📱 تماس: `{phone}`\n"
+        f"💳 کارت مبدا: `{request.source_card}`\n"
+        f"🧾 کد پیگیری: `{request.tracking_code}`\n"
+        f"🕒 {when}\n\n"
+        "برای شارژ سریع، دکمه تایید و شارژ را بزنید."
+    )
+
+
 def require_auth(func=None, *, permission: str | None = None, owner_only: bool = False):
     def decorator(handler_func):
         async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1375,6 +1408,11 @@ async def charge_wallet_user(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     async with async_session() as session:
         user = await UserService.search_user(session, query_text)
+        pending_rial_requests = (
+            await RialPaymentService.list_pending_for_user(session, user.telegram_id)
+            if user
+            else []
+        )
 
     if not user:
         await update.message.reply_text("کاربری با این آیدی یا یوزرنیم پیدا نشد. دوباره ارسال کنید.")
@@ -1386,6 +1424,17 @@ async def charge_wallet_user(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup=admin_user_confirm_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
+    if pending_rial_requests:
+        await update.message.reply_text(
+            f"{len(pending_rial_requests)} درخواست واریز ریالی در انتظار برای این کاربر پیدا شد:",
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
+        for request in pending_rial_requests:
+            await update.message.reply_text(
+                _format_admin_rial_request(request),
+                reply_markup=_rial_request_decision_keyboard(request.id),
+                parse_mode=constants.ParseMode.MARKDOWN,
+            )
     return CHARGE_CONFIRM_USER
 
 
@@ -5050,6 +5099,68 @@ async def rial_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @require_auth(permission="users")
+async def rial_request_decision_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = (query.data or "").split(":")
+    if len(parts) != 3 or parts[0] != RIAL_REQUEST_CALLBACK_PREFIX:
+        await query.edit_message_text("درخواست معتبر نیست.")
+        return
+    action = parts[1]
+    try:
+        request_id = int(parts[2])
+    except ValueError:
+        await query.edit_message_text("شناسه درخواست معتبر نیست.")
+        return
+
+    approve = action == "approve"
+    if action not in {"approve", "reject"}:
+        await query.edit_message_text("عملیات معتبر نیست.")
+        return
+
+    async with async_session() as session:
+        request, wallet_balance = await RialPaymentService.decide_request(
+            session,
+            request_id=request_id,
+            approve=approve,
+            admin_id=update.effective_user.id,
+        )
+
+    if request is None:
+        await query.edit_message_text("درخواست یا کاربر پیدا نشد.")
+        return
+    if wallet_balance is None and request.status != ("rejected" if not approve else "approved"):
+        await query.edit_message_text(f"این درخواست قبلا از حالت انتظار خارج شده است: {request.status}")
+        return
+
+    notification_status = ""
+    if approve and wallet_balance is not None:
+        async with async_session() as session:
+            notified = await WalletNotificationService.send_charge_notification(
+                session,
+                telegram_id=request.user_id,
+                amount=request.amount_toman,
+                wallet_balance=wallet_balance,
+            )
+        notification_status = (
+            "\nپیام شارژ برای کاربر ارسال شد."
+            if notified
+            else "\nشارژ انجام شد، اما ارسال پیام به کاربر ممکن نبود."
+        )
+        result_text = (
+            f"✅ درخواست #{request.id} تایید شد و کیف پول کاربر `{request.user_id}` "
+            f"به مبلغ **{request.amount_toman:,} تومان** شارژ شد."
+            f"{notification_status}"
+        )
+    elif not approve:
+        result_text = f"❌ درخواست #{request.id} رد شد."
+    else:
+        result_text = f"این درخواست قبلا تعیین تکلیف شده است: {request.status}"
+
+    await query.edit_message_text(result_text, parse_mode=constants.ParseMode.MARKDOWN)
+
+
+@require_auth(permission="users")
 async def rial_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with async_session() as session:
         minimum = await SettingsService.get_rial_min_amount(session)
@@ -5911,6 +6022,10 @@ admin_handlers = [
     shop_reset_defaults_conv,
     referral_rewards_conv,
     broadcast_conv,
+    CallbackQueryHandler(
+        rial_request_decision_callback,
+        pattern=rf"^{RIAL_REQUEST_CALLBACK_PREFIX}:",
+    ),
     MessageHandler(_exact_filter(ADMIN_CRYPTO), crypto_menu),
     MessageHandler(_exact_filter(ADMIN_CRYPTO_HISTORY), crypto_history),
     MessageHandler(_exact_filter(ADMIN_CRYPTO_RATES), crypto_rates_menu),

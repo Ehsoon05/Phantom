@@ -1,12 +1,11 @@
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot_package.models import Admin, RialPaymentRequest
 from bot_package.services.crypto_payment_service import CryptoPaymentService
-from bot_package.services.user_service import UserService
+from bot_package.services.rial_payment_service import RialPaymentService
+from bot_package.services.wallet_notification_service import WalletNotificationService
 
 from ..deps import get_session, require_permission
 from ..schemas import RialDecisionRequest
@@ -49,27 +48,21 @@ async def decide_rial_request(
     session: AsyncSession = Depends(get_session),
     admin: Admin = Depends(require_permission("users")),
 ):
-    request = (
-        await session.execute(
-            select(RialPaymentRequest).where(RialPaymentRequest.id == request_id).with_for_update()
-        )
-    ).scalar_one_or_none()
+    request, wallet_balance = await RialPaymentService.decide_request(
+        session,
+        request_id=request_id,
+        approve=body.approve,
+        admin_id=admin.telegram_id,
+    )
     if request is None:
         raise HTTPException(status_code=404, detail="Request not found")
-    if request.status != "pending":
-        raise HTTPException(status_code=409, detail=f"Request already {request.status}")
-
-    if body.approve:
-        ok = await UserService.charge_wallet(
-            session, request.user_id, request.amount_toman, admin.telegram_id
+    if body.approve and request.status == "approved" and wallet_balance is not None:
+        await WalletNotificationService.send_charge_notification(
+            session,
+            telegram_id=request.user_id,
+            amount=request.amount_toman,
+            wallet_balance=wallet_balance,
         )
-        if not ok:
-            raise HTTPException(status_code=404, detail="User not found")
-        request.status = "approved"
-    else:
-        request.status = "rejected"
-    request.updated_at = datetime.now(timezone.utc)
-    await session.commit()
     return _rial_out(request)
 
 

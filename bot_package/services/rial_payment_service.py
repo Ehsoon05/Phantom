@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import RialPaymentRequest
+from ..models import RialPaymentRequest, Transaction, User
 
 
 class RialPaymentService:
@@ -62,3 +62,83 @@ class RialPaymentService:
             .limit(limit)
         )
         return list(result.scalars().all())
+
+    @staticmethod
+    async def list_pending_for_user(
+        session: AsyncSession,
+        user_id: int,
+        *,
+        limit: int = 10,
+    ) -> list[RialPaymentRequest]:
+        result = await session.execute(
+            select(RialPaymentRequest)
+            .where(
+                RialPaymentRequest.user_id == user_id,
+                RialPaymentRequest.status == "pending",
+            )
+            .order_by(RialPaymentRequest.created_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def decide_request(
+        session: AsyncSession,
+        *,
+        request_id: int,
+        approve: bool,
+        admin_id: int,
+    ) -> tuple[RialPaymentRequest | None, int | None]:
+        request = (
+            await session.execute(
+                select(RialPaymentRequest)
+                .where(RialPaymentRequest.id == request_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if request is None:
+            return None, None
+        if request.status != "pending":
+            return request, None
+
+        wallet_balance: int | None = None
+        if approve:
+            user = (
+                await session.execute(
+                    select(User)
+                    .where(User.telegram_id == request.user_id)
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if user is None:
+                return None, None
+            user.wallet_balance = (user.wallet_balance or 0) + request.amount_toman
+            wallet_balance = user.wallet_balance
+            session.add(
+                Transaction(
+                    user_id=request.user_id,
+                    amount=request.amount_toman,
+                    type="rial_charge",
+                    description=(
+                        f"تایید درخواست کارت‌به‌کارت #{request.id} "
+                        f"توسط ادمین {admin_id}"
+                    ),
+                )
+            )
+            request.status = "approved"
+        else:
+            request.status = "rejected"
+
+        request.updated_at = datetime.now(timezone.utc)
+        await session.flush()
+        from .referral_service import ReferralService
+        from .subscription_link_service import SubscriptionLinkService
+
+        rewards = []
+        if approve:
+            rewards = await ReferralService.evaluate_referred_user(session, request.user_id)
+        await session.commit()
+        for reward in rewards:
+            if reward["config"] is not None:
+                await SubscriptionLinkService.sync_to_panel(reward["config"], reward["service_name"])
+        return request, wallet_balance
