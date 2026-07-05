@@ -396,6 +396,18 @@ def _message_label(message) -> str:
     return f"📝 #{message.id} {message.key}"
 
 
+async def _message_key_from_admin_label(text: str) -> str | None:
+    raw = (text or "").strip()
+    message_id = _parse_hash_id(raw)
+    if message_id:
+        async with async_session() as session:
+            message = await ShopCustomizationService.get_message_by_id(session, message_id)
+        return message.key if message else None
+    key = raw.removeprefix("📝").strip()
+    key = re.sub(r"^#\d+\s+", "", key).strip()
+    return key or None
+
+
 MESSAGE_PLACEHOLDER_HINTS = {
     "service_details": (
         "\n\nکلیدهای قابل استفاده:\n"
@@ -2943,16 +2955,10 @@ async def shop_messages_start(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def shop_message_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await _leave_shop_flow_if_navigation(update, context):
         return ConversationHandler.END
-    message_id = _parse_hash_id(update.message.text)
-    if message_id:
-        async with async_session() as session:
-            message = await ShopCustomizationService.get_message_by_id(session, message_id)
-        if not message:
-            await update.message.reply_text("این پیام پیدا نشد.")
-            return SHOP_MESSAGE_SELECT
-        key = message.key
-    else:
-        key = update.message.text.removeprefix("📝").strip()
+    key = await _message_key_from_admin_label(update.message.text or "")
+    if not key:
+        await update.message.reply_text("این پیام پیدا نشد.")
+        return SHOP_MESSAGE_SELECT
     return await _show_shop_message_editor(update, context, key)
 
 
@@ -3013,6 +3019,12 @@ async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = context.user_data.get("shop_message_key")
     raw_value = (update.message.text or update.message.caption or "").strip()
     pending_field = context.user_data.get("shop_message_field")
+    if raw_value.startswith("📝"):
+        selected_key = await _message_key_from_admin_label(raw_value)
+        if selected_key:
+            return await _show_shop_message_editor(update, context, selected_key)
+        await update.message.reply_text("این پیام پیدا نشد.")
+        return SHOP_MESSAGE_TEXT
     if pending_field == "premium_emoji_id":
         premium_emoji_id = _read_custom_emoji_id(update.message, raw_value)
         if premium_emoji_id == "":
