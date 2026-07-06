@@ -56,6 +56,57 @@ class SubscriptionLinkService:
         return SubscriptionLinkService.public_link(token)
 
     @staticmethod
+    async def revoke_public_token(session: AsyncSession, config: Config) -> tuple[str, str]:
+        old_token = await SubscriptionLinkService.ensure_public_token(session, config)
+        while True:
+            new_token = secrets.token_urlsafe(24)
+            result = await session.execute(select(Config).where(Config.public_sub_token == new_token))
+            if result.scalar_one_or_none() is None:
+                break
+        config.public_sub_token = new_token
+        await session.flush()
+        if BotConfig.SUBSCRIPTION_PANEL_SYNC_URL and BotConfig.SUBSCRIPTION_PANEL_SYNC_TOKEN:
+            revoked = await SubscriptionLinkService.revoke_panel_token(old_token, new_token)
+            if not revoked:
+                raise RuntimeError("Subscription panel did not accept revoke request")
+        return old_token, new_token
+
+    @staticmethod
+    async def reset_panel_devices(token: str) -> bool:
+        url = SubscriptionLinkService._internal_config_url(token, "devices/reset")
+        if not url:
+            return False
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    url,
+                    headers={"Authorization": f"Bearer {BotConfig.SUBSCRIPTION_PANEL_SYNC_TOKEN}"},
+                )
+                response.raise_for_status()
+                return True
+        except httpx.HTTPError:
+            logger.warning("Failed to reset subscription devices for %s", token, exc_info=True)
+            return False
+
+    @staticmethod
+    async def revoke_panel_token(old_token: str, new_token: str) -> bool:
+        url = SubscriptionLinkService._internal_config_url(old_token, "revoke")
+        if not url:
+            return False
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    url,
+                    json={"new_token": new_token},
+                    headers={"Authorization": f"Bearer {BotConfig.SUBSCRIPTION_PANEL_SYNC_TOKEN}"},
+                )
+                response.raise_for_status()
+                return True
+        except httpx.HTTPError:
+            logger.warning("Failed to revoke subscription token %s", old_token, exc_info=True)
+            return False
+
+    @staticmethod
     async def sync_to_panel(
         config: Config,
         service_name: str | None = None,
@@ -127,6 +178,17 @@ class SubscriptionLinkService:
         if not parsed.scheme or not parsed.netloc:
             return ""
         return f"{sync_url}/settings" if sync_url.endswith("/internal") else f"{sync_url}/internal/settings"
+
+    @staticmethod
+    def _internal_config_url(token: str, action: str) -> str:
+        if not BotConfig.SUBSCRIPTION_PANEL_SYNC_URL or not BotConfig.SUBSCRIPTION_PANEL_SYNC_TOKEN:
+            return ""
+        sync_url = BotConfig.SUBSCRIPTION_PANEL_SYNC_URL.rstrip("/")
+        base = sync_url.rsplit("/internal/configs", 1)[0] if sync_url.endswith("/internal/configs") else sync_url
+        parsed = urlparse(base)
+        if not parsed.scheme or not parsed.netloc:
+            return ""
+        return f"{base}/internal/configs/{quote(token, safe='')}/{action.strip('/')}"
 
     @staticmethod
     async def fetch_metadata(token: str) -> dict | None:

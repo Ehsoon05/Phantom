@@ -342,6 +342,8 @@ export interface UserPurchaseSummary {
     panel_username: string | null;
     panel_deleted_at: string | null;
     sub_link: string | null;
+    public_sub_token: string | null;
+    public_url: string | null;
   }[];
 }
 export const countUsers = (q?: string) =>
@@ -358,3 +360,12 @@ export const renewUserPurchase = (telegram_id: number, purchase_id: number) =>
   api<{ renewed: boolean; purchase_id: number }>(`/admin/users/${telegram_id}/purchases/${purchase_id}/renew`, {
     method: "POST",
   });
+export const resetUserSubscriptionDevices = (telegram_id: number, config_id: number) =>
+  api<{ reset: boolean }>(`/admin/users/${telegram_id}/configs/${config_id}/devices/reset`, {
+    method: "POST",
+  });
+export const revokeUserSubscriptionLink = (telegram_id: number, config_id: number) =>
+  api<{ revoked: boolean; old_token: string; token: string; public_url: string }>(
+    `/admin/users/${telegram_id}/configs/${config_id}/revoke-subscription`,
+    { method: "POST" },
+  );

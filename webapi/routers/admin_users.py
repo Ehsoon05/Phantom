@@ -6,6 +6,7 @@ from sqlalchemy.orm import selectinload
 from bot_package.models import Admin, Config, Purchase, User
 from bot_package.services.provisioning_service import ProvisioningError, ProvisioningService, username_from_subscription_url
 from bot_package.services.purchase_service import InsufficientBalance, PurchaseError, renew_purchase
+from bot_package.services.subscription_link_service import SubscriptionLinkService
 from bot_package.services.user_service import UserService
 from bot_package.services.wallet_notification_service import WalletNotificationService
 
@@ -25,6 +26,25 @@ def _user_out(user: User) -> AdminUserOut:
         referral_code=user.referral_code,
         created_at=user.created_at,
     )
+
+
+async def _config_device_limit(session: AsyncSession, config: Config) -> int | None:
+    if config.subscription_device_limit is not None:
+        return max(0, int(config.subscription_device_limit or 0))
+    if config.shop_plan_id:
+        from bot_package.models import ShopPlan
+
+        plan = await session.get(ShopPlan, config.shop_plan_id)
+        if plan is not None:
+            return max(0, int(plan.subscription_device_limit or 0))
+    if config.panel_key:
+        from bot_package.models import ProvisionPanel
+
+        panel = (
+            await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == config.panel_key))
+        ).scalar_one_or_none()
+        return panel.hwid_limit if panel else None
+    return None
 
 
 @router.get("", response_model=list[AdminUserOut])
@@ -109,6 +129,12 @@ async def user_purchases(
                 ),
                 "panel_deleted_at": p.config.panel_deleted_at if p.config else None,
                 "sub_link": p.config.sub_link if p.config else None,
+                "public_sub_token": p.config.public_sub_token if p.config else None,
+                "public_url": (
+                    SubscriptionLinkService.public_link(p.config.public_sub_token)
+                    if p.config and p.config.public_sub_token
+                    else None
+                ),
             }
             for p in summary["purchases"]
         ],
@@ -144,6 +170,68 @@ async def delete_purchase_history(
     await session.delete(purchase)
     await session.commit()
     return {"deleted": True}
+
+
+@router.post("/{telegram_id}/configs/{config_id}/devices/reset")
+async def reset_user_subscription_devices(
+    telegram_id: int,
+    config_id: int,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("users")),
+):
+    config = (
+        await session.execute(
+            select(Config).where(Config.id == config_id, Config.sold_to_user_id == telegram_id)
+        )
+    ).scalar_one_or_none()
+    if config is None:
+        raise HTTPException(status_code=404, detail="Config not found")
+    token = await SubscriptionLinkService.ensure_public_token(session, config)
+    await session.commit()
+    ok = await SubscriptionLinkService.reset_panel_devices(token)
+    if not ok:
+        raise HTTPException(status_code=502, detail="Reset request was not accepted by subscription panel")
+    return {"reset": True}
+
+
+@router.post("/{telegram_id}/configs/{config_id}/revoke-subscription")
+async def revoke_user_subscription_link(
+    telegram_id: int,
+    config_id: int,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("users")),
+):
+    config = (
+        await session.execute(
+            select(Config).where(Config.id == config_id, Config.sold_to_user_id == telegram_id)
+        )
+    ).scalar_one_or_none()
+    if config is None:
+        raise HTTPException(status_code=404, detail="Config not found")
+    service_result = await session.execute(
+        select(Purchase.service_name)
+        .where(Purchase.config_id == config.id, Purchase.user_id == telegram_id)
+        .order_by(Purchase.purchased_at.desc())
+    )
+    service_name = service_result.scalars().first()
+    try:
+        old_token, new_token = await SubscriptionLinkService.revoke_public_token(session, config)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    device_limit = await _config_device_limit(session, config)
+    await session.commit()
+    await SubscriptionLinkService.sync_to_panel(
+        config,
+        service_name=service_name,
+        device_limit=device_limit,
+        telegram_user_id=telegram_id,
+    )
+    return {
+        "revoked": True,
+        "old_token": old_token,
+        "token": new_token,
+        "public_url": SubscriptionLinkService.public_link(new_token),
+    }
 
 
 @router.delete("/{telegram_id}/configs/{config_id}/panel")

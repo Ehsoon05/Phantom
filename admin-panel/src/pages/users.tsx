@@ -20,6 +20,8 @@ import {
   deleteUserPanelConfig,
   deleteUserPurchase,
   getUserPurchases,
+  resetUserSubscriptionDevices,
+  revokeUserSubscriptionLink,
   renewUserPurchase,
 } from "@/lib/admin-api";
 
@@ -67,6 +69,14 @@ function UserDetail({ telegramId }: { telegramId: number }) {
     mutationFn: (purchaseId: number) => renewUserPurchase(telegramId, purchaseId),
     onSuccess: invalidate,
   });
+  const resetDevices = useMutation({
+    mutationFn: (configId: number) => resetUserSubscriptionDevices(telegramId, configId),
+    onSuccess: invalidate,
+  });
+  const revokeLink = useMutation({
+    mutationFn: (configId: number) => revokeUserSubscriptionLink(telegramId, configId),
+    onSuccess: invalidate,
+  });
   if (isLoading) return <Skeleton className="h-24 w-full" />;
   if (!data) return null;
   return (
@@ -87,6 +97,11 @@ function UserDetail({ telegramId }: { telegramId: number }) {
                 <td className="py-2">
                   <div className="font-medium">{p.service_name ?? volumeLabel(p.volume_gb)}</div>
                   <div className="text-muted-foreground" dir="ltr">#{p.id} · {p.category_key}</div>
+                  {p.public_url && (
+                    <a className="block max-w-56 truncate text-[11px]" href={p.public_url} target="_blank" rel="noreferrer" dir="ltr">
+                      {p.public_url}
+                    </a>
+                  )}
                 </td>
                 <td className="py-2" dir="ltr">{p.panel_username ?? "—"}</td>
                 <td className="py-2">{volumeLabel(p.volume_gb)}</td>
@@ -122,6 +137,28 @@ function UserDetail({ telegramId }: { telegramId: number }) {
                       }}
                     >
                       <Trash2 className="size-3.5" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      title="ریست شمارش دستگاه لینک ساب"
+                      disabled={resetDevices.isPending || !p.public_sub_token}
+                      onClick={() => {
+                        if (confirm("شمارش دستگاه‌های این لینک ریست شود؟")) resetDevices.mutate(p.config_id);
+                      }}
+                    >
+                      ریست دستگاه
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      title="باطل کردن لینک ساب و ساخت لینک جدید"
+                      disabled={revokeLink.isPending || !p.public_sub_token}
+                      onClick={() => {
+                        if (confirm("لینک قبلی باطل و لینک جدید ساخته شود؟")) revokeLink.mutate(p.config_id);
+                      }}
+                    >
+                      Revoke
                     </Button>
                     <Button
                       size="icon-xs"
