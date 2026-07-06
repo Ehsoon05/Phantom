@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarClock, ChevronDown, ChevronUp, Search, Send } from "lucide-react";
+import { CalendarClock, ChevronDown, ChevronUp, RefreshCw, Search, Send, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +15,13 @@ import {
   toggleBlockUser,
   type AdminUser,
 } from "@/lib/api";
-import { countUsers, getUserPurchases } from "@/lib/admin-api";
+import {
+  countUsers,
+  deleteUserPanelConfig,
+  deleteUserPurchase,
+  getUserPurchases,
+  renewUserPurchase,
+} from "@/lib/admin-api";
 
 const PAGE_SIZE = 25;
 
@@ -35,10 +41,31 @@ function telegramProfileUrl(username: string) {
   return `https://t.me/${username.replace(/^@+/, "")}`;
 }
 
+function volumeLabel(volumeGb: number) {
+  return volumeGb > 0 ? `${volumeGb.toLocaleString("fa-IR")} گیگ` : "نامحدود";
+}
+
 function UserDetail({ telegramId }: { telegramId: number }) {
+  const qc = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ["user-purchases", telegramId],
     queryFn: () => getUserPurchases(telegramId),
+  });
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["user-purchases", telegramId] });
+    qc.invalidateQueries({ queryKey: ["users"] });
+  };
+  const deletePurchase = useMutation({
+    mutationFn: (purchaseId: number) => deleteUserPurchase(telegramId, purchaseId),
+    onSuccess: invalidate,
+  });
+  const deletePanel = useMutation({
+    mutationFn: (configId: number) => deleteUserPanelConfig(telegramId, configId),
+    onSuccess: invalidate,
+  });
+  const renew = useMutation({
+    mutationFn: (purchaseId: number) => renewUserPurchase(telegramId, purchaseId),
+    onSuccess: invalidate,
   });
   if (isLoading) return <Skeleton className="h-24 w-full" />;
   if (!data) return null;
@@ -52,16 +79,63 @@ function UserDetail({ telegramId }: { telegramId: number }) {
       {data.purchases.length > 0 ? (
         <table className="w-full text-xs">
           <thead><tr className="border-b text-right text-muted-foreground">
-            <th className="pb-1">سرویس</th><th className="pb-1">حجم</th><th className="pb-1">قیمت</th><th className="pb-1">کوپن</th><th className="pb-1">تاریخ</th>
+            <th className="pb-1">سرویس</th><th className="pb-1">نام پنل</th><th className="pb-1">حجم</th><th className="pb-1">قیمت</th><th className="pb-1">منبع</th><th className="pb-1">وضعیت</th><th className="pb-1">تاریخ</th><th className="pb-1">عملیات</th>
           </tr></thead>
           <tbody>
             {data.purchases.map((p) => (
               <tr key={p.id} className="border-b last:border-0">
-                <td className="py-1">{p.service_name ?? `${p.volume_gb} گیگ`}</td>
-                <td className="py-1">{p.volume_gb} GB</td>
+                <td className="py-2">
+                  <div className="font-medium">{p.service_name ?? volumeLabel(p.volume_gb)}</div>
+                  <div className="text-muted-foreground" dir="ltr">#{p.id} · {p.category_key}</div>
+                </td>
+                <td className="py-2" dir="ltr">{p.panel_username ?? "—"}</td>
+                <td className="py-2">{volumeLabel(p.volume_gb)}</td>
                 <td className="py-1">{formatToman(p.price)}</td>
-                <td className="py-1" dir="ltr">{p.coupon_code ?? "—"}</td>
-                <td className="py-1 text-muted-foreground">{new Date(p.purchased_at + "Z").toLocaleDateString("fa-IR")}</td>
+                <td className="py-2">
+                  <div dir="ltr">{p.panel_key ?? p.provision_source ?? "—"}</div>
+                  {p.kind === "renewal" && <Badge variant="secondary">تمدید</Badge>}
+                </td>
+                <td className="py-2">
+                  {p.panel_deleted_at ? <Badge variant="destructive">حذف از پنل</Badge> : <Badge variant="secondary">فعال</Badge>}
+                </td>
+                <td className="py-2 text-muted-foreground">{new Date(p.purchased_at + "Z").toLocaleDateString("fa-IR")}</td>
+                <td className="py-2">
+                  <div className="flex flex-wrap gap-1">
+                    <Button
+                      size="icon-xs"
+                      variant="outline"
+                      title="تمدید از کیف پول کاربر"
+                      disabled={renew.isPending || p.kind === "renewal" || !!p.panel_deleted_at}
+                      onClick={() => {
+                        if (confirm("تمدید انجام شود؟ مبلغ تمدید از کیف پول کاربر کم می‌شود.")) renew.mutate(p.id);
+                      }}
+                    >
+                      <RefreshCw className="size-3.5" />
+                    </Button>
+                    <Button
+                      size="icon-xs"
+                      variant="outline"
+                      title="حذف کانفیگ از پنل"
+                      disabled={deletePanel.isPending || !!p.panel_deleted_at}
+                      onClick={() => {
+                        if (confirm("فقط کانفیگ این سرویس از پنل حذف شود؟")) deletePanel.mutate(p.config_id);
+                      }}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                    <Button
+                      size="icon-xs"
+                      variant="destructive"
+                      title="حذف خرید از سابقه"
+                      disabled={deletePurchase.isPending}
+                      onClick={() => {
+                        if (confirm("این خرید فقط از سابقه کاربر حذف شود؟")) deletePurchase.mutate(p.id);
+                      }}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>

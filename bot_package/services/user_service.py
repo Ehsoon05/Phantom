@@ -1,11 +1,13 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 from ..models import User, Transaction, Purchase
 from typing import Optional
 
 class UserService:
     @staticmethod
     async def search_user(session: AsyncSession, query: str) -> Optional[User]:
+        query = (query or "").strip()
         if query.isdigit():
             stmt = select(User).where(User.telegram_id == int(query))
             result = await session.execute(stmt)
@@ -13,8 +15,10 @@ class UserService:
             if user:
                 return user
         
-        username = query.lstrip('@')
-        stmt = select(User).where(User.username == username)
+        username = query.lstrip('@').strip()
+        if not username:
+            return None
+        stmt = select(User).where(func.lower(User.username) == username.lower())
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
     
@@ -121,6 +125,7 @@ class UserService:
 
         result = await session.execute(
             select(Purchase)
+            .options(selectinload(Purchase.config))
             .where(Purchase.user_id == telegram_id)
             .order_by(Purchase.purchased_at.desc())
             .limit(limit)

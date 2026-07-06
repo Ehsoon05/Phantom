@@ -1,8 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from bot_package.models import Admin, User
+from bot_package.models import Admin, Config, Purchase, User
+from bot_package.services.provisioning_service import ProvisioningError, ProvisioningService, username_from_subscription_url
+from bot_package.services.purchase_service import InsufficientBalance, PurchaseError, renew_purchase
 from bot_package.services.user_service import UserService
 from bot_package.services.wallet_notification_service import WalletNotificationService
 
@@ -88,16 +91,104 @@ async def user_purchases(
         "purchases": [
             {
                 "id": p.id,
+                "config_id": p.config_id,
                 "volume_gb": p.volume_gb,
                 "category_key": p.category_key,
                 "price": p.price,
                 "service_name": p.service_name,
+                "kind": p.kind,
+                "provision_source": p.provision_source,
                 "coupon_code": p.coupon_code,
                 "purchased_at": p.purchased_at,
+                "renewed_at": p.renewed_at,
+                "panel_key": p.config.panel_key if p.config else None,
+                "panel_username": (
+                    p.config.panel_username or username_from_subscription_url(p.config.sub_link)
+                    if p.config
+                    else None
+                ),
+                "panel_deleted_at": p.config.panel_deleted_at if p.config else None,
+                "sub_link": p.config.sub_link if p.config else None,
             }
             for p in summary["purchases"]
         ],
     }
+
+
+async def _owned_purchase(session: AsyncSession, telegram_id: int, purchase_id: int) -> Purchase:
+    purchase = (
+        await session.execute(
+            select(Purchase)
+            .options(selectinload(Purchase.config))
+            .where(Purchase.id == purchase_id, Purchase.user_id == telegram_id)
+        )
+    ).scalar_one_or_none()
+    if purchase is None:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    return purchase
+
+
+@router.delete("/{telegram_id}/purchases/{purchase_id}")
+async def delete_purchase_history(
+    telegram_id: int,
+    purchase_id: int,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("users")),
+):
+    purchase = await _owned_purchase(session, telegram_id, purchase_id)
+    await session.execute(
+        update(Purchase)
+        .where(Purchase.renews_purchase_id == purchase.id)
+        .values(renews_purchase_id=None)
+    )
+    await session.delete(purchase)
+    await session.commit()
+    return {"deleted": True}
+
+
+@router.delete("/{telegram_id}/configs/{config_id}/panel")
+async def delete_user_panel_config(
+    telegram_id: int,
+    config_id: int,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("users")),
+):
+    config = (
+        await session.execute(
+            select(Config).where(Config.id == config_id, Config.sold_to_user_id == telegram_id)
+        )
+    ).scalar_one_or_none()
+    if config is None:
+        raise HTTPException(status_code=404, detail="Config not found")
+    if config.panel_deleted_at:
+        return {"deleted": True, "already_deleted": True}
+    try:
+        await ProvisioningService.delete_config(session, config)
+    except ProvisioningError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await session.commit()
+    return {"deleted": True}
+
+
+@router.post("/{telegram_id}/purchases/{purchase_id}/renew")
+async def renew_user_purchase(
+    telegram_id: int,
+    purchase_id: int,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("users")),
+):
+    try:
+        result = await renew_purchase(
+            session,
+            telegram_id=telegram_id,
+            purchase_id=purchase_id,
+            source_label="admin-panel",
+        )
+    except InsufficientBalance as exc:
+        raise HTTPException(status_code=exc.status_code, detail="موجودی کیف پول کاربر کافی نیست") from exc
+    except PurchaseError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return {"renewed": True, "purchase_id": result.purchase.id}
 
 
 @router.post("/{telegram_id}/charge", response_model=AdminUserOut)

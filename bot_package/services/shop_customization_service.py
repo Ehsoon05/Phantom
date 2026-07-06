@@ -218,7 +218,7 @@ DEFAULT_MESSAGES: dict[str, str] = {
     "purchase_success": (
         "**خرید با موفقیت انجام شد**\n\n"
         "نام سرویس: **{service_name}**\n"
-        "حجم سرویس: **{volume} گیگ**\n"
+        "حجم سرویس: **{volume}**\n"
         "مبلغ پرداختی: **{price} تومان**\n\n"
         "لینک اشتراک شما:\n"
         "`{sub_link}`\n\n"
@@ -438,8 +438,11 @@ class ShopCustomizationService:
                         parse_mode=DEFAULT_MESSAGE_PARSE_MODES.get(key, PARSE_MODE_MARKDOWN),
                     )
                 )
-            elif key == "purchase_success" and "{service_name}" not in message.text:
-                message.text = _insert_after_heading(message.text, "نام سرویس: **{service_name}**\n")
+                continue
+            if key == "purchase_success":
+                if "{service_name}" not in message.text:
+                    message.text = _insert_after_heading(message.text, "نام سرویس: **{service_name}**\n")
+                message.text = message.text.replace("{volume} گیگ", "{volume}")
             elif key == "purchase_history_item" and "{service_name}" not in message.text:
                 message.text = "نام سرویس: **{service_name}**\n" + message.text
 

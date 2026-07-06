@@ -328,15 +328,33 @@ export interface UserPurchaseSummary {
   total_spent: number;
   purchases: {
     id: number;
+    config_id: number;
     volume_gb: number;
     category_key: string;
     price: number;
     service_name: string | null;
+    kind: string;
+    provision_source: string;
     coupon_code: string | null;
     purchased_at: string;
+    renewed_at: string | null;
+    panel_key: string | null;
+    panel_username: string | null;
+    panel_deleted_at: string | null;
+    sub_link: string | null;
   }[];
 }
 export const countUsers = (q?: string) =>
   api<{ total: number }>(`/admin/users/count${q ? `?q=${encodeURIComponent(q)}` : ""}`);
 export const getUserPurchases = (telegram_id: number) =>
   api<UserPurchaseSummary>(`/admin/users/${telegram_id}/purchases`);
+export const deleteUserPurchase = (telegram_id: number, purchase_id: number) =>
+  api<{ deleted: boolean }>(`/admin/users/${telegram_id}/purchases/${purchase_id}`, { method: "DELETE" });
+export const deleteUserPanelConfig = (telegram_id: number, config_id: number) =>
+  api<{ deleted: boolean; already_deleted?: boolean }>(`/admin/users/${telegram_id}/configs/${config_id}/panel`, {
+    method: "DELETE",
+  });
+export const renewUserPurchase = (telegram_id: number, purchase_id: number) =>
+  api<{ renewed: boolean; purchase_id: number }>(`/admin/users/${telegram_id}/purchases/${purchase_id}/renew`, {
+    method: "POST",
+  });

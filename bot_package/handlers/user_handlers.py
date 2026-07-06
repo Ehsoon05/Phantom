@@ -467,8 +467,8 @@ async def process_purchase(
         text = await ShopCustomizationService.get_message(
             session,
             "purchase_success",
-            service_name=escape_markdown(result.purchase.service_name or f"{result.purchase.volume_gb} گیگ", version=1),
-            volume=result.purchase.volume_gb,
+            service_name=escape_markdown(result.purchase.service_name or _format_plan_volume(result.purchase.volume_gb), version=1),
+            volume=_format_plan_volume(result.purchase.volume_gb),
             price=f"{result.purchase.price:,}",
             sub_link=result.sub_link,
         )
@@ -641,6 +641,12 @@ def _format_service_bytes(value: int | None) -> str:
     return f"{size:.1f} {units[index]}"
 
 
+def _format_plan_volume(volume_gb: int | None) -> str:
+    if volume_gb is None or int(volume_gb) <= 0:
+        return "نامحدود"
+    return f"{int(volume_gb):,} گیگ"
+
+
 def _format_expiry(expire: int | None) -> tuple[str, str]:
     if not expire:
         return "نامحدود", "نامحدود"
@@ -724,12 +730,14 @@ async def service_details_callback(update: Update, context: ContextTypes.DEFAULT
     metadata = await SubscriptionLinkService.fetch_metadata(token) if token else None
     expiry_text, remaining_time = _format_expiry(metadata.get("expire") if metadata else None)
     original_title = metadata.get("title") if metadata else "نامشخص"
-    remaining_volume = _format_service_bytes(metadata.get("remaining")) if metadata else "نامشخص"
+    total_bytes = metadata.get("total") if metadata else None
+    unlimited_volume = purchase.volume_gb <= 0 or total_bytes == 0
+    remaining_volume = "نامحدود" if unlimited_volume else (_format_service_bytes(metadata.get("remaining")) if metadata else "نامشخص")
     used_volume = _format_service_bytes(metadata.get("used")) if metadata else "نامشخص"
     total_volume = (
-        _format_service_bytes(metadata.get("total"))
-        if metadata
-        else ("نامحدود" if purchase.volume_gb <= 0 else f"{purchase.volume_gb} گیگابایت")
+        "نامحدود"
+        if unlimited_volume
+        else (_format_service_bytes(total_bytes) if metadata else _format_plan_volume(purchase.volume_gb))
     )
     config_count = metadata.get("config_count", "نامشخص") if metadata else "نامشخص"
     async with async_session() as session:
@@ -737,7 +745,7 @@ async def service_details_callback(update: Update, context: ContextTypes.DEFAULT
             session,
             "service_details",
             escape_markdown_values=True,
-            service_name=purchase.service_name or f"{purchase.volume_gb} گیگ",
+            service_name=purchase.service_name or _format_plan_volume(purchase.volume_gb),
             original_title=original_title,
             category_key=purchase.category_key or "default",
             total_volume=total_volume,
