@@ -120,6 +120,13 @@ def _json_dict(value: str | None) -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
+def _panel_error(response: httpx.Response, action: str) -> ProvisioningError:
+    detail = response.text.strip()
+    if len(detail) > 500:
+        detail = f"{detail[:500]}..."
+    return ProvisioningError(f"{action} انجام نشد: HTTP {response.status_code} - {detail}")
+
+
 def _subscription_url(base_url: str, payload: dict[str, Any]) -> str:
     subscription_url = str(payload.get("subscription_url") or "").strip()
     if not subscription_url:
@@ -317,7 +324,7 @@ class ProvisioningService:
             if not group_ids:
                 group_ids = [1]
             fields["group_ids"] = group_ids
-            if panel.hwid_limit is not None:
+            if panel.hwid_limit is not None and int(panel.hwid_limit) > 0:
                 fields["hwid_limit"] = int(panel.hwid_limit)
             if panel.panel_type == "easy":
                 return fields
@@ -428,7 +435,8 @@ class ProvisioningService:
                     **access_fields,
                 },
             )
-            response.raise_for_status()
+            if response.is_error:
+                raise _panel_error(response, "ساخت سرویس از پنل")
             payload = response.json()
         return ProvisionedSubscription(
             panel_key=panel.key,
@@ -462,10 +470,11 @@ class ProvisioningService:
                     **_renew_timing_payload(plan),
                 },
             )
-            response.raise_for_status()
+            if response.is_error:
+                raise _panel_error(response, "تمدید سرویس در پنل")
             reset = await client.post(f"/api/user/{username}/reset", headers=headers)
             if reset.status_code not in {200, 204, 404, 405}:
-                reset.raise_for_status()
+                raise _panel_error(reset, "ریست حجم سرویس در پنل")
 
         config.panel_key = panel.key
         config.panel_username = username
@@ -491,7 +500,7 @@ class ProvisioningService:
                 headers={"Authorization": f"Bearer {token}"},
             )
             if response.status_code not in {200, 204, 404}:
-                response.raise_for_status()
+                raise _panel_error(response, "حذف سرویس از پنل")
 
         now = datetime.now(timezone.utc)
         config.panel_key = panel.key
