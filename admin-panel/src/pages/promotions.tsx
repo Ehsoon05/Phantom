@@ -165,7 +165,6 @@ function RulesTab() {
   if (isLoading) return <Skeleton className="h-40 w-full rounded-xl" />;
   return (
     <div className="space-y-4">
-      <CommissionCard />
       <Card><CardContent className="space-y-2 p-4">
         <p className="text-sm font-semibold">قانون جدید پاداش دعوت</p>
         <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
@@ -212,6 +211,7 @@ export function PromotionsPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-bold">تخفیف‌ها و دعوت</h1>
+      <CommissionCard />
       <Tabs defaultValue="coupons">
         <TabsList>
           <TabsTrigger value="coupons">کوپن‌ها</TabsTrigger>
