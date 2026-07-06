@@ -224,6 +224,22 @@ class ShopMessage(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class ShopMessageButton(Base):
+    __tablename__ = "shop_message_buttons"
+    id = Column(Integer, primary_key=True)
+    message_key = Column(String, nullable=False, index=True)
+    button_type = Column(String, nullable=False, default="inline_url")
+    text = Column(String, nullable=False)
+    payload = Column(String, nullable=True)
+    style = Column(String, nullable=True)
+    premium_emoji_id = Column(String, nullable=True)
+    source_button_id = Column(Integer, nullable=True)
+    row = Column(Integer, nullable=False, default=0)
+    col = Column(Integer, nullable=False, default=0)
+    is_enabled = Column(Boolean, default=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class ShopButton(Base):
     __tablename__ = "shop_buttons"
     id = Column(Integer, primary_key=True)

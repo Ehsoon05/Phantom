@@ -7,15 +7,126 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  createMessageButton,
+  deleteMessageButton,
+  listMessageButtons,
   listButtons,
   listMessages,
   resetShop,
   updateButton,
   updateMessage,
+  type ShopButton,
   type ShopMessage,
+  type ShopMessageButton,
 } from "@/lib/admin-api";
 
-function MessageCard({ message }: { message: ShopMessage }) {
+const MESSAGE_BUTTON_TYPES: Record<string, string> = {
+  inline_url: "لینک شیشه‌ای",
+  inline_copy: "کپی شیشه‌ای",
+  inline_action: "اتصال به دکمه موجود",
+};
+
+function MessageButtonsEditor({
+  message,
+  buttons,
+  shopButtons,
+}: {
+  message: ShopMessage;
+  buttons: ShopMessageButton[];
+  shopButtons: ShopButton[];
+}) {
+  const qc = useQueryClient();
+  const [form, setForm] = useState({
+    button_type: "inline_url",
+    text: "",
+    payload: "",
+    source_button_id: "",
+    row: "0",
+    col: "0",
+  });
+  const inv = () => qc.invalidateQueries({ queryKey: ["admin-message-buttons"] });
+  const create = useMutation({
+    mutationFn: () =>
+      createMessageButton({
+        message_key: message.key,
+        button_type: form.button_type,
+        text: form.text,
+        payload: form.payload || null,
+        source_button_id: form.button_type === "inline_action" && form.source_button_id ? Number(form.source_button_id) : null,
+        row: parseInt(form.row || "0", 10),
+        col: parseInt(form.col || "0", 10),
+      }),
+    onSuccess: () => {
+      setForm({ button_type: "inline_url", text: "", payload: "", source_button_id: "", row: "0", col: "0" });
+      inv();
+    },
+  });
+  const remove = useMutation({ mutationFn: (id: number) => deleteMessageButton(id), onSuccess: inv });
+
+  return (
+    <div className="space-y-2 rounded-md border p-2">
+      <p className="text-xs font-semibold">دکمه‌های شیشه‌ای این پیام</p>
+      <div className="space-y-1">
+        {buttons.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            دکمه چندتایی ندارد. {message.response_button_type !== "text" ? `تنظیم قدیمی: ${message.response_button_type}` : ""}
+          </p>
+        )}
+        {buttons.map((button) => {
+          const linked = shopButtons.find((item) => item.id === button.source_button_id);
+          return (
+            <div key={button.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted/50 px-2 py-1 text-xs">
+              <span>
+                <b>{button.text}</b>{" "}
+                <span className="text-muted-foreground">
+                  · {MESSAGE_BUTTON_TYPES[button.button_type] ?? button.button_type}
+                  · ردیف {button.row} / ستون {button.col}
+                  {button.payload ? ` · ${button.payload}` : ""}
+                  {linked ? ` · اکشن: ${linked.text} (${linked.action})` : ""}
+                </span>
+              </span>
+              <Button size="sm" variant="destructive" onClick={() => { if (confirm("حذف دکمه شیشه‌ای؟")) remove.mutate(button.id); }}>
+                حذف
+              </Button>
+            </div>
+          );
+        })}
+      </div>
+      <div className="grid gap-2 md:grid-cols-6">
+        <select className="rounded-md border bg-transparent px-2 text-xs" value={form.button_type} onChange={(e) => setForm({ ...form, button_type: e.target.value })}>
+          <option value="inline_url">لینک</option>
+          <option value="inline_copy">کپی</option>
+          <option value="inline_action">اکشن دکمه موجود</option>
+        </select>
+        <input className="rounded-md border bg-transparent px-2 text-xs" placeholder="متن دکمه" value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} />
+        <input className="rounded-md border bg-transparent px-2 text-xs md:col-span-2" placeholder="لینک/متن کپی مثل {link} یا {share_url}" value={form.payload} onChange={(e) => setForm({ ...form, payload: e.target.value })} />
+        <input className="rounded-md border bg-transparent px-2 text-xs" placeholder="ردیف" inputMode="numeric" value={form.row} onChange={(e) => setForm({ ...form, row: e.target.value })} />
+        <input className="rounded-md border bg-transparent px-2 text-xs" placeholder="ستون" inputMode="numeric" value={form.col} onChange={(e) => setForm({ ...form, col: e.target.value })} />
+        {form.button_type === "inline_action" && (
+          <select className="rounded-md border bg-transparent px-2 text-xs md:col-span-5" value={form.source_button_id} onChange={(e) => setForm({ ...form, source_button_id: e.target.value })}>
+            <option value="">دکمه متصل را انتخاب کنید</option>
+            {shopButtons.map((button) => (
+              <option key={button.id} value={button.id}>{button.text} · {button.menu} · {button.action}</option>
+            ))}
+          </select>
+        )}
+        <Button size="sm" disabled={!form.text || create.isPending} onClick={() => create.mutate()}>
+          افزودن دکمه
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function MessageCard({
+  message,
+  messageButtons,
+  shopButtons,
+}: {
+  message: ShopMessage;
+  messageButtons: ShopMessageButton[];
+  shopButtons: ShopButton[];
+}) {
   const qc = useQueryClient();
   const [text, setText] = useState(message.text);
   const [mode, setMode] = useState(message.parse_mode);
@@ -38,6 +149,7 @@ function MessageCard({ message }: { message: ShopMessage }) {
         <Button size="sm" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>
           {save.isPending ? "…" : "ذخیره"}
         </Button>
+        <MessageButtonsEditor message={message} buttons={messageButtons} shopButtons={shopButtons} />
       </CardContent>
     </Card>
   );
@@ -45,10 +157,19 @@ function MessageCard({ message }: { message: ShopMessage }) {
 
 function MessagesTab() {
   const { data, isLoading } = useQuery({ queryKey: ["admin-messages"], queryFn: listMessages });
-  if (isLoading) return <Skeleton className="h-40 w-full rounded-xl" />;
+  const { data: messageButtons, isLoading: isLoadingButtons } = useQuery({ queryKey: ["admin-message-buttons"], queryFn: () => listMessageButtons() });
+  const { data: shopButtons, isLoading: isLoadingShopButtons } = useQuery({ queryKey: ["admin-buttons"], queryFn: listButtons });
+  if (isLoading || isLoadingButtons || isLoadingShopButtons) return <Skeleton className="h-40 w-full rounded-xl" />;
   return (
     <div className="space-y-3">
-      {data?.map((m) => <MessageCard key={m.key} message={m} />)}
+      {data?.map((m) => (
+        <MessageCard
+          key={m.key}
+          message={m}
+          messageButtons={(messageButtons ?? []).filter((button) => button.message_key === m.key)}
+          shopButtons={shopButtons ?? []}
+        />
+      ))}
     </div>
   );
 }

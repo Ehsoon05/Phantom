@@ -226,9 +226,12 @@ def wallet_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
-def referral_share_keyboard(share_url: str) -> InlineKeyboardMarkup:
+def referral_share_keyboard(share_url: str, referral_link: str | None = None) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton("👥 دعوت دوستان", url=share_url)]]
+    if referral_link:
+        rows.append([InlineKeyboardButton("📋 کپی لینک دعوت", api_kwargs={"copy_text": {"text": referral_link}})])
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("👥 دعوت دوستان", url=share_url)]]
+        rows
     )
 
 

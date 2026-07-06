@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot_package.models import Admin, Config, ProvisionPanel, ShopButton, ShopMessage, ShopPlan, ShopPlanCategory
+from bot_package.models import Admin, Config, ProvisionPanel, ShopButton, ShopMessage, ShopMessageButton, ShopPlan, ShopPlanCategory
 from bot_package.services.inventory_service import InventoryService
 from bot_package.services.price_service import PriceService
 from bot_package.services.provisioning_service import ProvisioningService
@@ -493,12 +493,51 @@ async def set_plan_price(
 # --- Shop messages -----------------------------------------------------------
 
 def _message_out(m: ShopMessage) -> dict:
-    return {"key": m.key, "text": m.text, "parse_mode": m.parse_mode, "is_active": m.is_active}
+    return {
+        "key": m.key,
+        "text": m.text,
+        "parse_mode": m.parse_mode,
+        "is_active": m.is_active,
+        "response_button_type": m.response_button_type,
+        "response_button_text": m.response_button_text,
+        "response_button_url": m.response_button_url,
+        "response_button_style": m.response_button_style,
+        "response_button_premium_emoji_id": m.response_button_premium_emoji_id,
+        "response_button_source_id": m.response_button_source_id,
+    }
 
 
 class MessageUpdateRequest(BaseModel):
     text: str
     parse_mode: str = "Markdown"
+
+
+class MessageButtonCreateRequest(BaseModel):
+    message_key: str = Field(min_length=1)
+    button_type: str = "inline_url"
+    text: str = Field(min_length=1)
+    payload: str | None = None
+    style: str | None = None
+    premium_emoji_id: str | None = None
+    source_button_id: int | None = None
+    row: int = Field(default=0, ge=0)
+    col: int = Field(default=0, ge=0)
+
+
+def _message_button_out(button: ShopMessageButton) -> dict:
+    return {
+        "id": button.id,
+        "message_key": button.message_key,
+        "button_type": button.button_type,
+        "text": button.text,
+        "payload": button.payload,
+        "style": button.style,
+        "premium_emoji_id": button.premium_emoji_id,
+        "source_button_id": button.source_button_id,
+        "row": button.row,
+        "col": button.col,
+        "is_enabled": button.is_enabled,
+    }
 
 
 @router.get("/shop/messages")
@@ -520,6 +559,55 @@ async def update_message(
     if message is None:
         raise HTTPException(status_code=404, detail="Message not found")
     return _message_out(message)
+
+
+@router.get("/shop/message-buttons")
+async def list_message_buttons(
+    message_key: str | None = None,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("shop")),
+):
+    return [
+        _message_button_out(button)
+        for button in await ShopCustomizationService.list_message_buttons(session, message_key)
+    ]
+
+
+@router.post("/shop/message-buttons")
+async def create_message_button(
+    body: MessageButtonCreateRequest,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("shop")),
+):
+    if body.button_type not in {"inline_url", "inline_copy", "inline_action"}:
+        raise HTTPException(status_code=400, detail="Invalid button type")
+    button = await ShopCustomizationService.create_message_button(
+        session,
+        message_key=body.message_key,
+        button_type=body.button_type,
+        text=body.text,
+        payload=body.payload,
+        style=body.style,
+        premium_emoji_id=body.premium_emoji_id,
+        source_button_id=body.source_button_id,
+        row=body.row,
+        col=body.col,
+    )
+    if button is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return _message_button_out(button)
+
+
+@router.delete("/shop/message-buttons/{button_id}")
+async def delete_message_button(
+    button_id: int,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("shop")),
+):
+    ok = await ShopCustomizationService.delete_message_button(session, button_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Button not found")
+    return {"deleted": True}
 
 
 # --- Shop buttons ------------------------------------------------------------

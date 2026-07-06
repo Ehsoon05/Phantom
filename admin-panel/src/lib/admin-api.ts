@@ -206,6 +206,25 @@ export interface ShopMessage {
   text: string;
   parse_mode: string;
   is_active: boolean;
+  response_button_type: string;
+  response_button_text: string | null;
+  response_button_url: string | null;
+  response_button_style: string | null;
+  response_button_premium_emoji_id: string | null;
+  response_button_source_id: number | null;
+}
+export interface ShopMessageButton {
+  id: number;
+  message_key: string;
+  button_type: string;
+  text: string;
+  payload: string | null;
+  style: string | null;
+  premium_emoji_id: string | null;
+  source_button_id: number | null;
+  row: number;
+  col: number;
+  is_enabled: boolean;
 }
 export interface ShopButton {
   id: number;
@@ -224,6 +243,21 @@ export const updateMessage = (key: string, text: string, parse_mode: string) =>
     method: "PUT",
     body: JSON.stringify({ text, parse_mode }),
   });
+export const listMessageButtons = (messageKey?: string) =>
+  api<ShopMessageButton[]>(`/admin/shop/message-buttons${messageKey ? `?message_key=${encodeURIComponent(messageKey)}` : ""}`);
+export const createMessageButton = (body: {
+  message_key: string;
+  button_type: string;
+  text: string;
+  payload?: string | null;
+  style?: string | null;
+  premium_emoji_id?: string | null;
+  source_button_id?: number | null;
+  row?: number;
+  col?: number;
+}) => api<ShopMessageButton>("/admin/shop/message-buttons", { method: "POST", body: JSON.stringify(body) });
+export const deleteMessageButton = (id: number) =>
+  api<{ deleted: boolean }>(`/admin/shop/message-buttons/${id}`, { method: "DELETE" });
 export const listButtons = () => api<ShopButton[]>("/admin/shop/buttons");
 export const updateButton = (id: number, body: Record<string, unknown>) =>
   api<ShopButton>(`/admin/shop/buttons/${id}`, { method: "PATCH", body: JSON.stringify(body) });

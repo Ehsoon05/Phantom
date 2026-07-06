@@ -10,7 +10,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
-from ..models import BotSetting, Config, Price, ReferralRewardRule, ShopButton, ShopMessage, ShopPlan, ShopPlanCategory
+from ..models import BotSetting, Config, Price, ReferralRewardRule, ShopButton, ShopMessage, ShopMessageButton, ShopPlan, ShopPlanCategory
 from ..utils import messages as default_messages
 from ..utils.keyboards import (
     ACCOUNT_INFO,
@@ -347,6 +347,26 @@ DEFAULT_MESSAGES: dict[str, str] = {
     ),
 }
 
+
+DEFAULT_MESSAGE_BUTTONS: tuple[dict, ...] = (
+    {
+        "message_key": "referral",
+        "button_type": "inline_url",
+        "text": "👥 دعوت دوستان",
+        "payload": "{share_url}",
+        "row": 0,
+        "col": 0,
+    },
+    {
+        "message_key": "referral",
+        "button_type": "inline_copy",
+        "text": "📋 کپی لینک دعوت",
+        "payload": "{link}",
+        "row": 1,
+        "col": 0,
+    },
+)
+
 DEFAULT_MESSAGE_PARSE_MODES = {
     TARIFFS_MESSAGE_KEY: "HTML",
 }
@@ -454,6 +474,19 @@ class ShopCustomizationService:
                     message.text = message.text.replace(old_commission_line, "{commission_text}")
                 elif "{commission_text}" not in message.text:
                     message.text = message.text.replace("لینک قابل کلیک:", "{commission_text}\n\nلینک قابل کلیک:")
+
+        for definition in DEFAULT_MESSAGE_BUTTONS:
+            existing = (
+                await session.execute(
+                    select(ShopMessageButton).where(
+                        ShopMessageButton.message_key == definition["message_key"],
+                        ShopMessageButton.text == definition["text"],
+                        ShopMessageButton.button_type == definition["button_type"],
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is None:
+                session.add(ShopMessageButton(**definition))
 
         trial_result = await session.execute(
             select(ShopButton).where(ShopButton.action == "trial_config", ShopButton.menu == "shop_main")
@@ -595,6 +628,10 @@ class ShopCustomizationService:
         for message in messages.scalars().all():
             await session.delete(message)
 
+        message_buttons = await session.execute(select(ShopMessageButton))
+        for button in message_buttons.scalars().all():
+            await session.delete(button)
+
         buttons = await session.execute(select(ShopButton))
         for button in buttons.scalars().all():
             await session.delete(button)
@@ -620,6 +657,60 @@ class ShopCustomizationService:
     async def list_messages(session: AsyncSession) -> list[ShopMessage]:
         result = await session.execute(select(ShopMessage).order_by(ShopMessage.id))
         return list(result.scalars().all())
+
+    @staticmethod
+    async def list_message_buttons(session: AsyncSession, message_key: str | None = None) -> list[ShopMessageButton]:
+        stmt = select(ShopMessageButton)
+        if message_key:
+            stmt = stmt.where(ShopMessageButton.message_key == message_key)
+        result = await session.execute(
+            stmt.order_by(ShopMessageButton.message_key, ShopMessageButton.row, ShopMessageButton.col, ShopMessageButton.id)
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def create_message_button(
+        session: AsyncSession,
+        *,
+        message_key: str,
+        button_type: str,
+        text: str,
+        payload: str | None = None,
+        style: str | None = None,
+        premium_emoji_id: str | None = None,
+        source_button_id: int | None = None,
+        row: int = 0,
+        col: int = 0,
+    ) -> ShopMessageButton | None:
+        if not await ShopCustomizationService.get_message_row(session, message_key):
+            return None
+        button = ShopMessageButton(
+            message_key=message_key,
+            button_type=button_type,
+            text=text,
+            payload=payload,
+            style=style,
+            premium_emoji_id=premium_emoji_id,
+            source_button_id=source_button_id,
+            row=max(0, int(row)),
+            col=max(0, int(col)),
+        )
+        session.add(button)
+        await session.commit()
+        return button
+
+    @staticmethod
+    async def delete_message_button(session: AsyncSession, button_id: int) -> bool:
+        button = await session.get(ShopMessageButton, button_id)
+        if button is None:
+            return False
+        await session.delete(button)
+        await session.commit()
+        return True
+
+    @staticmethod
+    async def get_message_button(session: AsyncSession, button_id: int) -> ShopMessageButton | None:
+        return await session.get(ShopMessageButton, button_id)
 
     @staticmethod
     async def get_message_row(session: AsyncSession, key: str) -> ShopMessage | None:
@@ -1304,7 +1395,33 @@ class ShopCustomizationService:
         fallback_markup=None,
         default_url: str | None = None,
         copy_text: str | None = None,
+        context: dict[str, object] | None = None,
     ):
+        context = context or {}
+        custom_buttons = [
+            button for button in await ShopCustomizationService.list_message_buttons(session, key)
+            if button.is_enabled
+        ]
+        if custom_buttons:
+            rows: dict[int, list[tuple[int, InlineKeyboardButton]]] = {}
+            for button in custom_buttons:
+                rendered = await ShopCustomizationService._render_message_button(
+                    session,
+                    button,
+                    default_url=default_url,
+                    copy_text=copy_text,
+                    context=context,
+                )
+                if rendered is None:
+                    continue
+                rows.setdefault(button.row, []).append((button.col, rendered))
+            keyboard_rows = [
+                [item for _, item in sorted(items, key=lambda value: value[0])]
+                for _, items in sorted(rows.items(), key=lambda value: value[0])
+            ]
+            if keyboard_rows:
+                return InlineKeyboardMarkup(keyboard_rows)
+
         message = await ShopCustomizationService.get_message_row(session, key)
         button_type = (message.response_button_type if message else "text") or "text"
         source_button = None
@@ -1351,12 +1468,71 @@ class ShopCustomizationService:
         return fallback_markup
 
     @staticmethod
+    def _render_template(value: str | None, context: dict[str, object]) -> str | None:
+        if value is None:
+            return None
+        result = str(value)
+        for key, replacement in context.items():
+            result = result.replace("{" + key + "}", str(replacement))
+        return result
+
+    @staticmethod
+    async def _render_message_button(
+        session: AsyncSession,
+        button: ShopMessageButton,
+        *,
+        default_url: str | None = None,
+        copy_text: str | None = None,
+        context: dict[str, object] | None = None,
+    ) -> InlineKeyboardButton | None:
+        context = context or {}
+        source_button = None
+        if button.source_button_id:
+            source_button = await ShopCustomizationService.get_button(session, button.source_button_id)
+        button_text = ShopCustomizationService._render_template(button.text, context) or "ادامه"
+        payload = ShopCustomizationService._render_template(button.payload, context) or default_url
+        style = button.style or (source_button.style if source_button else None)
+        premium_emoji_id = button.premium_emoji_id or (source_button.premium_emoji_id if source_button else None)
+        api_kwargs = {}
+        if style:
+            api_kwargs["style"] = style
+        if _is_valid_custom_emoji_id(premium_emoji_id):
+            api_kwargs["icon_custom_emoji_id"] = str(premium_emoji_id).strip()
+        if button.button_type == "inline_copy":
+            copy_payload = payload or copy_text
+            if not copy_payload:
+                return None
+            api_kwargs["copy_text"] = {"text": copy_payload}
+            return InlineKeyboardButton(button_text, api_kwargs=api_kwargs)
+        if button.button_type == "inline_url":
+            if payload and payload.startswith(("http://", "https://", "tg://")):
+                return InlineKeyboardButton(button_text, url=payload, api_kwargs=api_kwargs or None)
+            return None
+        if button.button_type == "inline_action" and source_button:
+            return InlineKeyboardButton(
+                button_text,
+                callback_data=f"shop_response_button:{button.id}",
+                api_kwargs=api_kwargs or None,
+            )
+        return None
+
+    @staticmethod
     async def response_button_action(session: AsyncSession, message_id: int) -> str | None:
         result = await session.execute(select(ShopMessage).where(ShopMessage.id == message_id))
         message = result.scalar_one_or_none()
         if not message or not message.response_button_source_id:
             return None
         button = await ShopCustomizationService.get_button(session, message.response_button_source_id)
+        if not button or not button.is_enabled:
+            return None
+        return button.action
+
+    @staticmethod
+    async def message_button_action(session: AsyncSession, button_id: int) -> str | None:
+        message_button = await ShopCustomizationService.get_message_button(session, button_id)
+        if not message_button or not message_button.is_enabled or not message_button.source_button_id:
+            return None
+        button = await ShopCustomizationService.get_button(session, message_button.source_button_id)
         if not button or not button.is_enabled:
             return None
         return button.action

@@ -343,7 +343,16 @@ async def referral_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = await ShopCustomizationService.main_menu_keyboard(session)
 
     share_url = f"https://t.me/share/url?url={quote(link)}&text={quote(str(share_text))}"
-    await _reply_shop_message(update.message, text, reply_markup=referral_share_keyboard(share_url))
+    async with async_session() as session:
+        referral_keyboard = await _message_markup(
+            session,
+            "referral",
+            referral_share_keyboard(share_url, link),
+            default_url=share_url,
+            copy_text=link,
+            context={"link": link, "share_url": share_url},
+        )
+    await _reply_shop_message(update.message, text, reply_markup=referral_keyboard)
     await _reply_shop_message(update.message, followup, reply_markup=keyboard)
 
 
@@ -1061,14 +1070,18 @@ async def _dispatch_shop_action(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def response_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    data = query.data or ""
     try:
-        message_id = int(query.data.split(":", 1)[1])
+        item_id = int(data.split(":", 1)[1])
     except (AttributeError, IndexError, ValueError):
         await query.answer("دکمه معتبر نیست.", show_alert=True)
         return
 
     async with async_session() as session:
-        action = await ShopCustomizationService.response_button_action(session, message_id)
+        if data.startswith("shop_response_button:"):
+            action = await ShopCustomizationService.message_button_action(session, item_id)
+        else:
+            action = await ShopCustomizationService.response_button_action(session, item_id)
     if not action:
         await query.answer("این دکمه غیرفعال یا حذف شده است.", show_alert=True)
         return
@@ -1096,7 +1109,7 @@ user_handlers = [
     CommandHandler("help", help_menu),
     CommandHandler("support", support_menu),
     CommandHandler("cancel", cancel_coupon),
-    CallbackQueryHandler(response_button_callback, pattern=r"^shop_response:\d+$"),
+    CallbackQueryHandler(response_button_callback, pattern=r"^shop_response(_button)?:\d+$"),
     CallbackQueryHandler(service_details_callback, pattern=r"^(service:\d+|service_qr:\d+|services:list)$"),
     CallbackQueryHandler(renew_service_callback, pattern=r"^renew_(confirm|do):\d+$"),
     MessageHandler(filters.CONTACT, rial_user.handle_contact),
