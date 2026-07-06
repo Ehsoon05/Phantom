@@ -46,10 +46,12 @@ class UserService:
         from .subscription_link_service import SubscriptionLinkService
 
         rewards = await ReferralService.evaluate_referred_user(session, telegram_id)
+        commission = await ReferralService.grant_topup_commission(session, transaction)
         await session.commit()
         for reward in rewards:
             if reward["config"] is not None:
                 await SubscriptionLinkService.sync_to_panel(reward["config"], reward["service_name"])
+        await ReferralService.notify_commission(commission)
         return True
 
     @staticmethod

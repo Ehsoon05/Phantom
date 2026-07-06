@@ -114,17 +114,16 @@ class RialPaymentService:
                 return None, None
             user.wallet_balance = (user.wallet_balance or 0) + request.amount_toman
             wallet_balance = user.wallet_balance
-            session.add(
-                Transaction(
-                    user_id=request.user_id,
-                    amount=request.amount_toman,
-                    type="rial_charge",
-                    description=(
-                        f"تایید درخواست کارت‌به‌کارت #{request.id} "
-                        f"توسط ادمین {admin_id}"
-                    ),
-                )
+            topup_transaction = Transaction(
+                user_id=request.user_id,
+                amount=request.amount_toman,
+                type="rial_charge",
+                description=(
+                    f"تایید درخواست کارت‌به‌کارت #{request.id} "
+                    f"توسط ادمین {admin_id}"
+                ),
             )
+            session.add(topup_transaction)
             request.status = "approved"
         else:
             request.status = "rejected"
@@ -135,10 +134,13 @@ class RialPaymentService:
         from .subscription_link_service import SubscriptionLinkService
 
         rewards = []
+        commission = None
         if approve:
             rewards = await ReferralService.evaluate_referred_user(session, request.user_id)
+            commission = await ReferralService.grant_topup_commission(session, topup_transaction)
         await session.commit()
         for reward in rewards:
             if reward["config"] is not None:
                 await SubscriptionLinkService.sync_to_panel(reward["config"], reward["service_name"])
+        await ReferralService.notify_commission(commission)
         return request, wallet_balance

@@ -210,22 +210,22 @@ class CryptoPaymentService:
         invoice.status = "credited" if received >= threshold else "underpaid"
 
         user.wallet_balance = (user.wallet_balance or 0) + credited_toman
-        session.add(
-            Transaction(
-                user_id=invoice.user_id,
-                amount=credited_toman,
-                type="crypto_charge",
-                description=(
-                    f"شارژ کریپتو {invoice.coin}/{invoice.network} "
-                    f"({received} {invoice.coin}) tx:{invoice.tx_hash}"
-                ),
-            )
+        topup_transaction = Transaction(
+            user_id=invoice.user_id,
+            amount=credited_toman,
+            type="crypto_charge",
+            description=(
+                f"شارژ کریپتو {invoice.coin}/{invoice.network} "
+                f"({received} {invoice.coin}) tx:{invoice.tx_hash}"
+            ),
         )
+        session.add(topup_transaction)
         await session.flush()
         from .referral_service import ReferralService
         from .subscription_link_service import SubscriptionLinkService
 
         rewards = await ReferralService.evaluate_referred_user(session, invoice.user_id)
+        commission = await ReferralService.grant_topup_commission(session, topup_transaction)
         try:
             await session.commit()
         except IntegrityError:
@@ -236,6 +236,7 @@ class CryptoPaymentService:
         for reward in rewards:
             if reward["config"] is not None:
                 await SubscriptionLinkService.sync_to_panel(reward["config"], reward["service_name"])
+        await ReferralService.notify_commission(commission)
         return credited_toman
 
     @staticmethod

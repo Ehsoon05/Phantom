@@ -28,6 +28,7 @@ def _base36(value: int) -> str:
 
 
 class ReferralService:
+    COMMISSION_PERCENT = 15
     QUALIFICATION_LABELS = {
         "joined": "عضویت و پذیرش قوانین",
         "wallet_charged": "حداقل یک شارژ کیف پول",
@@ -39,6 +40,15 @@ class ReferralService:
         "service": "سرویس رایگان",
     }
     TOPUP_TRANSACTION_TYPES = ("charge", "crypto_charge", "rial_charge")
+
+    @staticmethod
+    def user_identity_text(user: User) -> str:
+        username = user.username or ""
+        return (
+            f"نام: {user.first_name or ''}\n"
+            f"یوزرنیم: {('@' + username.lstrip('@')) if username else ''}\n"
+            f"آیدی عددی: {user.telegram_id}"
+        )
 
     @staticmethod
     def build_referral_code(telegram_id: int) -> str:
@@ -71,6 +81,142 @@ class ReferralService:
         user.referred_at = datetime.now(timezone.utc)
         await session.flush()
         return True
+
+    @staticmethod
+    async def notify_referral_join(referrer_user_id: int | None, referred_user: User) -> None:
+        if not referrer_user_id:
+            return
+        text = (
+            "👥 یک کاربر جدید با لینک دعوت شما به جمع کاربران فانتوم هابز پیوست.\n\n"
+            f"{ReferralService.user_identity_text(referred_user)}"
+        )
+        await ReferralService._send_message(referrer_user_id, text)
+
+    @staticmethod
+    async def notify_commission(notification: dict | None) -> None:
+        if not notification:
+            return
+        referred = notification["referred"]
+        source_label = "خرید سرویس" if notification["source"] == "purchase" else "شارژ کیف پول"
+        text = (
+            "🎁 پورسانت دعوت دوستان به کیف پول شما اضافه شد.\n\n"
+            f"نوع فعالیت زیرمجموعه: {source_label}\n"
+            f"مبلغ فعالیت: {notification['base_amount']:,} تومان\n"
+            f"پورسانت {ReferralService.COMMISSION_PERCENT}٪: {notification['commission']:,} تومان\n"
+            f"موجودی جدید شما: {notification['wallet_balance']:,} تومان\n\n"
+            "مشخصات زیرمجموعه:\n"
+            f"{ReferralService.user_identity_text(referred)}"
+        )
+        await ReferralService._send_message(notification["referrer_id"], text)
+
+    @staticmethod
+    async def _send_message(chat_id: int, text: str) -> None:
+        try:
+            from telegram import Bot
+            from ..config_loader import BotConfig
+
+            async with Bot(BotConfig.MAIN_BOT_TOKEN) as bot:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    disable_web_page_preview=True,
+                )
+        except Exception:
+            return
+
+    @staticmethod
+    async def grant_purchase_commission(session: AsyncSession, purchase: Purchase) -> dict | None:
+        if purchase.price <= 0 or purchase.category_key == "trial":
+            return None
+        marker = f"[purchase:{purchase.id}]"
+        existing = (
+            await session.execute(
+                select(Transaction.id).where(
+                    Transaction.type == "referral_commission_purchase",
+                    Transaction.description.ilike(f"%{marker}%"),
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return None
+        return await ReferralService._grant_commission(
+            session,
+            referred_user_id=purchase.user_id,
+            base_amount=purchase.price,
+            source="purchase",
+            marker=marker,
+        )
+
+    @staticmethod
+    async def grant_topup_commission(session: AsyncSession, transaction: Transaction) -> dict | None:
+        if transaction.amount <= 0 or transaction.type not in ReferralService.TOPUP_TRANSACTION_TYPES:
+            return None
+        marker = f"[transaction:{transaction.id}]"
+        existing = (
+            await session.execute(
+                select(Transaction.id).where(
+                    Transaction.type == "referral_commission_topup",
+                    Transaction.description.ilike(f"%{marker}%"),
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return None
+        return await ReferralService._grant_commission(
+            session,
+            referred_user_id=transaction.user_id,
+            base_amount=transaction.amount,
+            source="topup",
+            marker=marker,
+        )
+
+    @staticmethod
+    async def _grant_commission(
+        session: AsyncSession,
+        *,
+        referred_user_id: int,
+        base_amount: int,
+        source: str,
+        marker: str,
+    ) -> dict | None:
+        referred = (
+            await session.execute(select(User).where(User.telegram_id == referred_user_id))
+        ).scalar_one_or_none()
+        if referred is None or not referred.referred_by_user_id:
+            return None
+        referrer = (
+            await session.execute(
+                select(User).where(User.telegram_id == referred.referred_by_user_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if referrer is None:
+            return None
+        commission = int(base_amount * ReferralService.COMMISSION_PERCENT / 100)
+        if commission <= 0:
+            return None
+        referrer.wallet_balance = (referrer.wallet_balance or 0) + commission
+        tx_type = "referral_commission_purchase" if source == "purchase" else "referral_commission_topup"
+        source_label = "خرید" if source == "purchase" else "شارژ"
+        session.add(
+            Transaction(
+                user_id=referrer.telegram_id,
+                amount=commission,
+                type=tx_type,
+                description=(
+                    f"پورسانت {ReferralService.COMMISSION_PERCENT}٪ رفرال بابت {source_label} "
+                    f"کاربر {referred.telegram_id} - {marker}"
+                ),
+            )
+        )
+        await session.flush()
+        return {
+            "referrer_id": referrer.telegram_id,
+            "referred": referred,
+            "source": source,
+            "base_amount": base_amount,
+            "commission": commission,
+            "wallet_balance": referrer.wallet_balance or 0,
+        }
 
     @staticmethod
     async def count_referrals(session: AsyncSession, telegram_id: int) -> int:

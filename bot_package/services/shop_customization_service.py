@@ -323,6 +323,7 @@ DEFAULT_MESSAGES: dict[str, str] = {
     "referral": (
         "**دعوت دوستان**\n\n"
         "لینک اختصاصی شما آماده است. هر کسی با این لینک وارد ربات شود به عنوان دعوت‌شده شما ثبت می‌شود.\n\n"
+        "از هر خرید دوستانتان، **۱۵ درصد پورسانت** مستقیم به کیف پول شما اضافه می‌شود.\n\n"
         "لینک قابل کلیک:\n[دعوت به فانتوم VPN]({link})\n\n"
         "لینک مستقیم:\n`{link}`\n\n"
         "تعداد ثبت‌نام با لینک شما: **{count} نفر**"
@@ -445,6 +446,12 @@ class ShopCustomizationService:
                 message.text = message.text.replace("{volume} گیگ", "{volume}")
             elif key == "purchase_history_item" and "{service_name}" not in message.text:
                 message.text = "نام سرویس: **{service_name}**\n" + message.text
+            elif key == "referral" and "۱۵ درصد پورسانت" not in message.text:
+                message.text = message.text.replace(
+                    "لینک قابل کلیک:",
+                    "از هر خرید دوستانتان، **۱۵ درصد پورسانت** مستقیم به کیف پول شما اضافه می‌شود.\n\n"
+                    "لینک قابل کلیک:",
+                )
 
         trial_result = await session.execute(
             select(ShopButton).where(ShopButton.action == "trial_config", ShopButton.menu == "shop_main")

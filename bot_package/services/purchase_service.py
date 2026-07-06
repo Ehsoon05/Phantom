@@ -194,7 +194,11 @@ async def purchase_plan(
             description=f"Purchase {plan.volume_gb}GB - {service_name or plan.title} ({source_label})",
         )
     )
+    from .referral_service import ReferralService
+
+    commission = await ReferralService.grant_purchase_commission(session, purchase)
     await session.commit()
+    await ReferralService.notify_commission(commission)
 
     sub_link = await _public_or_raw_link(session, config, purchase.service_name)
     await session.commit()
@@ -273,7 +277,12 @@ async def renew_purchase(
             description=f"Renew {plan.volume_gb}GB - {purchase.service_name or plan.title} ({source_label})",
         )
     )
+    await session.flush()
+    from .referral_service import ReferralService
+
+    commission = await ReferralService.grant_purchase_commission(session, renewal)
     await session.commit()
+    await ReferralService.notify_commission(commission)
     sub_link = await _public_or_raw_link(session, purchase.config, purchase.service_name)
     await session.commit()
     return PurchaseResult(

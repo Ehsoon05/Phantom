@@ -84,8 +84,11 @@ async def get_or_create_user(telegram_id: int, name: str, username: str | None, 
         user.first_name = name or user.first_name
         user.username = username
         await ReferralService.ensure_referral_code(session, user)
-        await ReferralService.apply_start_payload(session, user, payload)
+        referral_applied = await ReferralService.apply_start_payload(session, user, payload)
+        referrer_id = user.referred_by_user_id if referral_applied else None
         await session.commit()
+        if referral_applied:
+            await ReferralService.notify_referral_join(referrer_id, user)
         return user
 
 
