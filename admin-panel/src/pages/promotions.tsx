@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,9 +14,11 @@ import {
   deactivateCoupon,
   deleteCoupon,
   deleteRule,
+  getReferralCommission,
   listCoupons,
   listRules,
   recalcReferrals,
+  setReferralCommission,
   toggleRule,
 } from "@/lib/admin-api";
 
@@ -26,6 +28,69 @@ const QUAL_LABELS: Record<string, string> = {
   purchased: "خرید کرد",
   purchased_and_charged: "خرید + شارژ",
 };
+
+function CommissionCard() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({ queryKey: ["referral-commission"], queryFn: getReferralCommission });
+  const [form, setForm] = useState({ enabled: true, percent: "15" });
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!data) return;
+    setForm({ enabled: data.enabled, percent: String(data.percent) });
+  }, [data]);
+
+  const save = useMutation({
+    mutationFn: () =>
+      setReferralCommission({
+        enabled: form.enabled,
+        percent: Math.max(0, Math.min(100, parseInt(form.percent || "0", 10))),
+      }),
+    onSuccess: () => {
+      setErr(null);
+      qc.invalidateQueries({ queryKey: ["referral-commission"] });
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : "خطا"),
+  });
+
+  if (isLoading) return <Skeleton className="h-28 w-full rounded-xl" />;
+
+  return (
+    <Card>
+      <CardContent className="space-y-3 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="text-sm font-semibold">پورسانت مستقیم خرید زیرمجموعه</p>
+            <p className="text-xs text-muted-foreground">
+              این مقدار روی محاسبه واقعی کیف پول و متن دعوت دوستان اعمال می‌شود.
+            </p>
+          </div>
+          <Badge variant={form.enabled ? "default" : "secondary"}>{form.enabled ? "فعال" : "غیرفعال"}</Badge>
+        </div>
+        <div className="grid gap-2 md:grid-cols-[1fr_160px_auto]">
+          <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+            <input
+              type="checkbox"
+              checked={form.enabled}
+              onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
+            />
+            پرداخت پورسانت فعال باشد
+          </label>
+          <Input
+            placeholder="درصد پورسانت"
+            inputMode="numeric"
+            value={form.percent}
+            onChange={(e) => setForm({ ...form, percent: e.target.value })}
+          />
+          <Button disabled={save.isPending || Number.isNaN(parseInt(form.percent, 10))} onClick={() => save.mutate()}>
+            ذخیره پورسانت
+          </Button>
+        </div>
+        {err && <p className="text-sm text-destructive">{err}</p>}
+      </CardContent>
+    </Card>
+  );
+}
 
 function CouponsTab() {
   const qc = useQueryClient();
@@ -100,6 +165,7 @@ function RulesTab() {
   if (isLoading) return <Skeleton className="h-40 w-full rounded-xl" />;
   return (
     <div className="space-y-4">
+      <CommissionCard />
       <Card><CardContent className="space-y-2 p-4">
         <p className="text-sm font-semibold">قانون جدید پاداش دعوت</p>
         <div className="grid grid-cols-2 gap-2 md:grid-cols-3">

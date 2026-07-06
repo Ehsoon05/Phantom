@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot_package.models import Admin, Coupon, CouponTarget, ReferralRewardRule, User
 from bot_package.services.coupon_service import CouponError, CouponService
 from bot_package.services.referral_service import ReferralService
+from bot_package.services.settings_service import SettingsService
 
 from ..deps import get_session, require_permission
 
@@ -126,6 +127,30 @@ async def delete_coupon(
 
 
 # --- Referral reward rules ---------------------------------------------------
+
+class ReferralCommissionRequest(BaseModel):
+    enabled: bool
+    percent: int = Field(ge=0, le=100)
+
+
+@router.get("/referrals/commission")
+async def get_referral_commission(
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("users")),
+):
+    return await ReferralService.commission_settings(session)
+
+
+@router.put("/referrals/commission")
+async def update_referral_commission(
+    body: ReferralCommissionRequest,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("users")),
+):
+    await SettingsService.set_referral_commission_enabled(session, body.enabled)
+    await SettingsService.set_referral_commission_percent(session, body.percent)
+    return await ReferralService.commission_settings(session)
+
 
 def _rule_out(r: ReferralRewardRule) -> dict:
     return {

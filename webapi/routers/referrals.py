@@ -22,11 +22,13 @@ async def referrals(
     total = await ReferralService.count_referrals(session, user.telegram_id)
     rules = await ReferralService.list_rules(session, active_only=True)
     referral_link = f"https://t.me/{BotConfig.MAIN_BOT_USERNAME}?start=ref_{code}"
+    commission_text = await ReferralService.commission_text(session)
     message_text = await ShopCustomizationService.get_message(
         session,
         "referral",
         link=referral_link,
         count=total,
+        commission_text=commission_text,
     )
     share_text = await ShopCustomizationService.get_message(
         session,

@@ -13,6 +13,7 @@ from ..models import (
     User,
 )
 from .inventory_service import InventoryService
+from .settings_service import SettingsService
 from .subscription_link_service import SubscriptionLinkService
 
 
@@ -28,7 +29,6 @@ def _base36(value: int) -> str:
 
 
 class ReferralService:
-    COMMISSION_PERCENT = 15
     QUALIFICATION_LABELS = {
         "joined": "عضویت و پذیرش قوانین",
         "wallet_charged": "حداقل یک شارژ کیف پول",
@@ -40,6 +40,23 @@ class ReferralService:
         "service": "سرویس رایگان",
     }
     TOPUP_TRANSACTION_TYPES = ("charge", "crypto_charge", "rial_charge")
+
+    @staticmethod
+    async def commission_settings(session: AsyncSession) -> dict:
+        return {
+            "enabled": await SettingsService.referral_commission_enabled(session),
+            "percent": await SettingsService.get_referral_commission_percent(session),
+        }
+
+    @staticmethod
+    async def commission_text(session: AsyncSession) -> str:
+        settings = await ReferralService.commission_settings(session)
+        if not settings["enabled"] or settings["percent"] <= 0:
+            return ""
+        return (
+            f"از هر خرید دوستانتان، **{settings['percent']} درصد پورسانت** "
+            "مستقیم به کیف پول شما اضافه می‌شود."
+        )
 
     @staticmethod
     def user_identity_text(user: User) -> str:
@@ -102,7 +119,7 @@ class ReferralService:
             "🎁 پورسانت دعوت دوستان به کیف پول شما اضافه شد.\n\n"
             f"نوع فعالیت زیرمجموعه: {source_label}\n"
             f"مبلغ فعالیت: {notification['base_amount']:,} تومان\n"
-            f"پورسانت {ReferralService.COMMISSION_PERCENT}٪: {notification['commission']:,} تومان\n"
+            f"پورسانت {notification['percent']}٪: {notification['commission']:,} تومان\n"
             f"موجودی جدید شما: {notification['wallet_balance']:,} تومان\n\n"
             "مشخصات زیرمجموعه:\n"
             f"{ReferralService.user_identity_text(referred)}"
@@ -191,8 +208,11 @@ class ReferralService:
         ).scalar_one_or_none()
         if referrer is None:
             return None
-        commission = int(base_amount * ReferralService.COMMISSION_PERCENT / 100)
-        if commission <= 0:
+        if not await SettingsService.referral_commission_enabled(session):
+            return None
+        percent = await SettingsService.get_referral_commission_percent(session)
+        commission = int(base_amount * percent / 100)
+        if percent <= 0 or commission <= 0:
             return None
         referrer.wallet_balance = (referrer.wallet_balance or 0) + commission
         tx_type = "referral_commission_purchase" if source == "purchase" else "referral_commission_topup"
@@ -203,7 +223,7 @@ class ReferralService:
                 amount=commission,
                 type=tx_type,
                 description=(
-                    f"پورسانت {ReferralService.COMMISSION_PERCENT}٪ رفرال بابت {source_label} "
+                    f"پورسانت {percent}٪ رفرال بابت {source_label} "
                     f"کاربر {referred.telegram_id} - {marker}"
                 ),
             )
@@ -213,6 +233,7 @@ class ReferralService:
             "referrer_id": referrer.telegram_id,
             "referred": referred,
             "source": source,
+            "percent": percent,
             "base_amount": base_amount,
             "commission": commission,
             "wallet_balance": referrer.wallet_balance or 0,

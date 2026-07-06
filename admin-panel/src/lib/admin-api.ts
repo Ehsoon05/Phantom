@@ -171,6 +171,17 @@ export interface Rule {
   is_active: boolean;
 }
 
+export interface ReferralCommissionSettings {
+  enabled: boolean;
+  percent: number;
+}
+
+export const getReferralCommission = () => api<ReferralCommissionSettings>("/admin/referrals/commission");
+export const setReferralCommission = (body: ReferralCommissionSettings) =>
+  api<ReferralCommissionSettings>("/admin/referrals/commission", {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
 export const listRules = () => api<Rule[]>("/admin/referrals/rules");
 export const createRule = (body: {
   title: string;

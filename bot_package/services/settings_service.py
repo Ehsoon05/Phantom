@@ -25,6 +25,8 @@ SERVICE_REMINDER_VOLUME_PERCENTS = "service_reminder_volume_percents"
 SERVICE_REMINDER_TIME_DAYS = "service_reminder_time_days"
 SERVICE_REMINDER_TIME_HOURS = "service_reminder_time_hours"
 SERVICE_REMINDER_JOB_INTERVAL_SECONDS = "service_reminder_job_interval_seconds"
+REFERRAL_COMMISSION_ENABLED = "referral_commission_enabled"
+REFERRAL_COMMISSION_PERCENT = "referral_commission_percent"
 
 DEFAULTS = {
     RATE_MODE: "online",
@@ -45,6 +47,8 @@ DEFAULTS = {
     SERVICE_REMINDER_TIME_DAYS: "3,1",
     SERVICE_REMINDER_TIME_HOURS: "2,1",
     SERVICE_REMINDER_JOB_INTERVAL_SECONDS: "3600",
+    REFERRAL_COMMISSION_ENABLED: "true",
+    REFERRAL_COMMISSION_PERCENT: "15",
 }
 
 
@@ -176,6 +180,26 @@ class SettingsService:
     async def trial_enabled(session: AsyncSession) -> bool:
         value = await SettingsService.get(session, TRIAL_ENABLED, "true")
         return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    async def referral_commission_enabled(session: AsyncSession) -> bool:
+        value = await SettingsService.get(session, REFERRAL_COMMISSION_ENABLED, "true")
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    async def set_referral_commission_enabled(session: AsyncSession, enabled: bool) -> None:
+        await SettingsService.set(session, REFERRAL_COMMISSION_ENABLED, "true" if enabled else "false")
+
+    @staticmethod
+    async def get_referral_commission_percent(session: AsyncSession) -> int:
+        try:
+            return max(0, min(100, int(await SettingsService.get(session, REFERRAL_COMMISSION_PERCENT, "15") or 15)))
+        except (TypeError, ValueError):
+            return 15
+
+    @staticmethod
+    async def set_referral_commission_percent(session: AsyncSession, percent: int) -> None:
+        await SettingsService.set(session, REFERRAL_COMMISSION_PERCENT, str(max(0, min(100, int(percent)))))
 
     @staticmethod
     async def set_trial_enabled(session: AsyncSession, enabled: bool) -> None:

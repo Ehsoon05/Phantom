@@ -304,7 +304,14 @@ async def referral_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     link = f"https://t.me/{bot_username}?start=ref_{user.referral_code}"
     async with async_session() as session:
         count = await ReferralService.count_referrals(session, user.telegram_id)
-        text = await ShopCustomizationService.get_message(session, "referral", link=link, count=count)
+        commission_text = await ReferralService.commission_text(session)
+        text = await ShopCustomizationService.get_message(
+            session,
+            "referral",
+            link=link,
+            count=count,
+            commission_text=commission_text,
+        )
         rules = await ReferralService.list_rules(session, active_only=True)
         if rules:
             progress_lines = ["", "", "🎁 **جایزه‌های فعال و پیشرفت شما**"]
