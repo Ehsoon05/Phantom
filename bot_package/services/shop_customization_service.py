@@ -327,6 +327,19 @@ DEFAULT_MESSAGES: dict[str, str] = {
         "از هر خرید دوستانتان، **{commission_percent} درصد پورسانت** "
         "مستقیم به کیف پول شما اضافه می‌شود."
     ),
+    "referral_join_notification": (
+        "👥 یک کاربر جدید با لینک دعوت شما به جمع کاربران فانتوم هابز پیوست.\n\n"
+        "{referred_identity}"
+    ),
+    "referral_commission_notification": (
+        "🎁 پورسانت دعوت دوستان به کیف پول شما اضافه شد.\n\n"
+        "نوع فعالیت زیرمجموعه: {source_label}\n"
+        "مبلغ فعالیت: {base_amount} تومان\n"
+        "پورسانت {percent}٪: {commission} تومان\n"
+        "موجودی جدید شما: {wallet_balance} تومان\n\n"
+        "مشخصات زیرمجموعه:\n"
+        "{referred_identity}"
+    ),
     "referral": (
         "**دعوت دوستان**\n\n"
         "لینک اختصاصی شما آماده است. هر کسی با این لینک وارد ربات شود به عنوان دعوت‌شده شما ثبت می‌شود.\n\n"

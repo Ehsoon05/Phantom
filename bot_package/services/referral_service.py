@@ -12,9 +12,11 @@ from ..models import (
     Transaction,
     User,
 )
+from ..database import async_session
 from .inventory_service import InventoryService
 from .settings_service import SettingsService
 from .subscription_link_service import SubscriptionLinkService
+from .shop_customization_service import ShopCustomizationService
 
 
 def _base36(value: int) -> str:
@@ -71,6 +73,17 @@ class ReferralService:
         )
 
     @staticmethod
+    def user_template_values(user: User, prefix: str) -> dict[str, str]:
+        username = user.username or ""
+        username_text = f"@{username.lstrip('@')}" if username else ""
+        return {
+            f"{prefix}_identity": ReferralService.user_identity_text(user),
+            f"{prefix}_name": user.first_name or "",
+            f"{prefix}_username": username_text,
+            f"{prefix}_id": str(user.telegram_id),
+        }
+
+    @staticmethod
     def build_referral_code(telegram_id: int) -> str:
         return f"p{_base36(abs(telegram_id))}"
 
@@ -106,11 +119,21 @@ class ReferralService:
     async def notify_referral_join(referrer_user_id: int | None, referred_user: User) -> None:
         if not referrer_user_id:
             return
-        text = (
-            "👥 یک کاربر جدید با لینک دعوت شما به جمع کاربران فانتوم هابز پیوست.\n\n"
-            f"{ReferralService.user_identity_text(referred_user)}"
-        )
-        await ReferralService._send_message(referrer_user_id, text)
+        values = ReferralService.user_template_values(referred_user, "referred")
+        async with async_session() as session:
+            text = await ShopCustomizationService.get_message(
+                session,
+                "referral_join_notification",
+                escape_markdown_values=True,
+                **values,
+            )
+            reply_markup = await ShopCustomizationService.message_reply_markup(
+                session,
+                "referral_join_notification",
+                copy_text=str(text),
+                context=values,
+            )
+        await ReferralService._send_message(referrer_user_id, text, reply_markup=reply_markup)
 
     @staticmethod
     async def notify_commission(notification: dict | None) -> None:
@@ -118,19 +141,31 @@ class ReferralService:
             return
         referred = notification["referred"]
         source_label = "خرید سرویس" if notification["source"] == "purchase" else "شارژ کیف پول"
-        text = (
-            "🎁 پورسانت دعوت دوستان به کیف پول شما اضافه شد.\n\n"
-            f"نوع فعالیت زیرمجموعه: {source_label}\n"
-            f"مبلغ فعالیت: {notification['base_amount']:,} تومان\n"
-            f"پورسانت {notification['percent']}٪: {notification['commission']:,} تومان\n"
-            f"موجودی جدید شما: {notification['wallet_balance']:,} تومان\n\n"
-            "مشخصات زیرمجموعه:\n"
-            f"{ReferralService.user_identity_text(referred)}"
-        )
-        await ReferralService._send_message(notification["referrer_id"], text)
+        values = {
+            "source_label": source_label,
+            "base_amount": f"{notification['base_amount']:,}",
+            "percent": f"{notification['percent']:d}",
+            "commission": f"{notification['commission']:,}",
+            "wallet_balance": f"{notification['wallet_balance']:,}",
+            **ReferralService.user_template_values(referred, "referred"),
+        }
+        async with async_session() as session:
+            text = await ShopCustomizationService.get_message(
+                session,
+                "referral_commission_notification",
+                escape_markdown_values=True,
+                **values,
+            )
+            reply_markup = await ShopCustomizationService.message_reply_markup(
+                session,
+                "referral_commission_notification",
+                copy_text=str(text),
+                context=values,
+            )
+        await ReferralService._send_message(notification["referrer_id"], text, reply_markup=reply_markup)
 
     @staticmethod
-    async def _send_message(chat_id: int, text: str) -> None:
+    async def _send_message(chat_id: int, text: str, *, reply_markup=None) -> None:
         try:
             from telegram import Bot
             from ..config_loader import BotConfig
@@ -139,6 +174,8 @@ class ReferralService:
                 await bot.send_message(
                     chat_id=chat_id,
                     text=text,
+                    parse_mode=getattr(text, "parse_mode", None),
+                    reply_markup=reply_markup,
                     disable_web_page_preview=True,
                 )
         except Exception:

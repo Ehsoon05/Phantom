@@ -505,6 +505,17 @@ MESSAGE_PLACEHOLDER_HINTS = {
         "`{commission_percent}`\n"
         "عدد درصد به صورت لاتین جایگزین می‌شود."
     ),
+    "referral_join_notification": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{referred_identity}` `{referred_name}` `{referred_username}` `{referred_id}`\n"
+        "این پیام برای معرف ارسال می‌شود، وقتی کاربر جدید با لینک دعوت او وارد ربات شود."
+    ),
+    "referral_commission_notification": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{source_label}` `{base_amount}` `{percent}` `{commission}` `{wallet_balance}`\n"
+        "`{referred_identity}` `{referred_name}` `{referred_username}` `{referred_id}`\n"
+        "این پیام برای معرف ارسال می‌شود، وقتی پورسانت خرید یا شارژ زیرمجموعه به کیف پولش اضافه شود."
+    ),
     "service_details": (
         "\n\nکلیدهای قابل استفاده:\n"
         "`{service_name}` `{original_title}` `{category_key}`\n"
