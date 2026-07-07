@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import html
 import re
-from string import Formatter
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1599,20 +1598,16 @@ def _insert_after_heading(text: str, line: str) -> str:
 
 
 def _safe_format(template: str, values: dict, *, escape_values: bool = False) -> str:
-    allowed_keys = {field_name for _, field_name, _, _ in Formatter().parse(template) if field_name}
-    safe_values = {}
-    for key in allowed_keys:
-        value = values.get(key, "{" + key + "}")
+    rendered = template
+    for key, value in values.items():
         if escape_values:
             value = re.sub(r"([_*`\[])", r"\\\1", str(value))
-        safe_values[key] = value
-    return template.format(**safe_values)
+        rendered = rendered.replace("{" + str(key) + "}", str(value))
+    return rendered
 
 
 def _safe_format_html(template: str, values: dict) -> str:
-    allowed_keys = {field_name for _, field_name, _, _ in Formatter().parse(template) if field_name}
-    safe_values = {
-        key: html.escape(str(values.get(key, "{" + key + "}")), quote=False)
-        for key in allowed_keys
-    }
-    return template.format(**safe_values)
+    rendered = template
+    for key, value in values.items():
+        rendered = rendered.replace("{" + str(key) + "}", html.escape(str(value), quote=False))
+    return rendered
