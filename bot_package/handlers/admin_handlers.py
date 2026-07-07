@@ -421,6 +421,16 @@ async def _message_key_from_admin_label(text: str) -> str | None:
 
 
 MESSAGE_PLACEHOLDER_HINTS = {
+    "referral": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{link}` `{count}` `{commission_text}`\n"
+        "متن `{commission_text}` از پیام جداگانه `referral_commission_text` خوانده می‌شود."
+    ),
+    "referral_commission_text": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{commission_percent}`\n"
+        "عدد درصد به صورت لاتین جایگزین می‌شود."
+    ),
     "service_details": (
         "\n\nکلیدهای قابل استفاده:\n"
         "`{service_name}` `{original_title}` `{category_key}`\n"
@@ -3266,7 +3276,8 @@ async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"پیام `{key}` ذخیره شد.",
     )
-    return await shop_messages_start(update, context)
+    context.user_data["shop_message_key"] = key
+    return await _show_shop_message_editor(update, context, key)
 
 
 @require_auth(permission="shop")

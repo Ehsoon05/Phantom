@@ -53,9 +53,14 @@ class ReferralService:
         settings = await ReferralService.commission_settings(session)
         if not settings["enabled"] or settings["percent"] <= 0:
             return ""
-        return (
-            f"از هر خرید دوستانتان، **{settings['percent']} درصد پورسانت** "
-            "مستقیم به کیف پول شما اضافه می‌شود."
+        from .shop_customization_service import ShopCustomizationService
+
+        return str(
+            await ShopCustomizationService.get_message(
+                session,
+                "referral_commission_text",
+                commission_percent=f"{settings['percent']:d}",
+            )
         )
 
     @staticmethod
