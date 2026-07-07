@@ -524,6 +524,18 @@ class MessageButtonCreateRequest(BaseModel):
     col: int = Field(default=0, ge=0)
 
 
+class MessageButtonUpdateRequest(BaseModel):
+    button_type: str | None = None
+    text: str | None = None
+    payload: str | None = None
+    style: str | None = None
+    premium_emoji_id: str | None = None
+    source_button_id: int | None = None
+    row: int | None = Field(default=None, ge=0)
+    col: int | None = Field(default=None, ge=0)
+    is_enabled: bool | None = None
+
+
 def _message_button_out(button: ShopMessageButton) -> dict:
     return {
         "id": button.id,
@@ -595,6 +607,24 @@ async def create_message_button(
     )
     if button is None:
         raise HTTPException(status_code=404, detail="Message not found")
+    return _message_button_out(button)
+
+
+@router.patch("/shop/message-buttons/{button_id}")
+async def update_message_button(
+    button_id: int,
+    body: MessageButtonUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("shop")),
+):
+    values = body.model_dump(exclude_unset=True)
+    if "button_type" in values and values["button_type"] not in {"inline_url", "inline_copy", "inline_action"}:
+        raise HTTPException(status_code=400, detail="Invalid button type")
+    if values.get("text") == "":
+        raise HTTPException(status_code=400, detail="Button text cannot be empty")
+    button = await ShopCustomizationService.update_message_button(session, button_id, **values)
+    if button is None:
+        raise HTTPException(status_code=404, detail="Button not found")
     return _message_button_out(button)
 
 

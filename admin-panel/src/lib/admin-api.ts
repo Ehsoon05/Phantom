@@ -256,6 +256,11 @@ export const createMessageButton = (body: {
   row?: number;
   col?: number;
 }) => api<ShopMessageButton>("/admin/shop/message-buttons", { method: "POST", body: JSON.stringify(body) });
+export const updateMessageButton = (id: number, body: Partial<Omit<ShopMessageButton, "id" | "message_key">>) =>
+  api<ShopMessageButton>(`/admin/shop/message-buttons/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
 export const deleteMessageButton = (id: number) =>
   api<{ deleted: boolean }>(`/admin/shop/message-buttons/${id}`, { method: "DELETE" });
 export const listButtons = () => api<ShopButton[]>("/admin/shop/buttons");

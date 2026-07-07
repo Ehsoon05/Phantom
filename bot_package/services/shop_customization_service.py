@@ -722,6 +722,32 @@ class ShopCustomizationService:
         return True
 
     @staticmethod
+    async def update_message_button(session: AsyncSession, button_id: int, **values) -> ShopMessageButton | None:
+        button = await session.get(ShopMessageButton, button_id)
+        if button is None:
+            return None
+        allowed = {
+            "button_type",
+            "text",
+            "payload",
+            "style",
+            "premium_emoji_id",
+            "source_button_id",
+            "row",
+            "col",
+            "is_enabled",
+        }
+        for field, value in values.items():
+            if field not in allowed:
+                continue
+            if field in {"row", "col"} and value is not None:
+                value = max(0, int(value))
+            setattr(button, field, value)
+        button.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+        return button
+
+    @staticmethod
     async def get_message_button(session: AsyncSession, button_id: int) -> ShopMessageButton | None:
         return await session.get(ShopMessageButton, button_id)
 

@@ -14,6 +14,7 @@ import {
   listMessages,
   resetShop,
   updateButton,
+  updateMessageButton,
   updateMessage,
   type ShopButton,
   type ShopMessage,
@@ -25,6 +26,93 @@ const MESSAGE_BUTTON_TYPES: Record<string, string> = {
   inline_copy: "کپی شیشه‌ای",
   inline_action: "اتصال به دکمه موجود",
 };
+
+const BUTTON_STYLES = ["", "primary", "success", "danger"];
+
+function MessageButtonRow({ button, shopButtons }: { button: ShopMessageButton; shopButtons: ShopButton[] }) {
+  const qc = useQueryClient();
+  const [form, setForm] = useState({
+    button_type: button.button_type,
+    text: button.text,
+    payload: button.payload ?? "",
+    style: button.style ?? "",
+    premium_emoji_id: button.premium_emoji_id ?? "",
+    source_button_id: button.source_button_id ? String(button.source_button_id) : "",
+    row: String(button.row),
+    col: String(button.col),
+    is_enabled: button.is_enabled,
+  });
+  const inv = () => qc.invalidateQueries({ queryKey: ["admin-message-buttons"] });
+  const save = useMutation({
+    mutationFn: () =>
+      updateMessageButton(button.id, {
+        button_type: form.button_type,
+        text: form.text,
+        payload: form.payload || null,
+        style: form.style || null,
+        premium_emoji_id: form.premium_emoji_id || null,
+        source_button_id: form.button_type === "inline_action" && form.source_button_id ? Number(form.source_button_id) : null,
+        row: parseInt(form.row || "0", 10),
+        col: parseInt(form.col || "0", 10),
+        is_enabled: form.is_enabled,
+      }),
+    onSuccess: inv,
+  });
+  const remove = useMutation({ mutationFn: (id: number) => deleteMessageButton(id), onSuccess: inv });
+  const linked = shopButtons.find((item) => item.id === button.source_button_id);
+
+  return (
+    <div className="space-y-2 rounded-md bg-muted/50 p-2 text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span>
+          <b>{button.text}</b>{" "}
+          <span className="text-muted-foreground">
+            · {MESSAGE_BUTTON_TYPES[button.button_type] ?? button.button_type}
+            · ردیف {button.row} / ستون {button.col}
+            {button.style ? ` · رنگ ${button.style}` : ""}
+            {button.premium_emoji_id ? ` · ایموجی پریمیوم ${button.premium_emoji_id}` : ""}
+            {linked ? ` · اکشن: ${linked.text} (${linked.action})` : ""}
+          </span>
+          {!button.is_enabled && <Badge variant="destructive" className="mr-2">خاموش</Badge>}
+        </span>
+        <div className="flex gap-1">
+          <Button size="sm" variant="secondary" onClick={() => setForm({ ...form, is_enabled: !form.is_enabled })}>
+            {form.is_enabled ? "خاموش کردن" : "روشن کردن"}
+          </Button>
+          <Button size="sm" variant="destructive" onClick={() => { if (confirm("حذف دکمه شیشه‌ای؟")) remove.mutate(button.id); }}>
+            حذف
+          </Button>
+        </div>
+      </div>
+      <div className="grid gap-2 md:grid-cols-6">
+        <select className="rounded-md border bg-transparent px-2 py-1 text-xs" value={form.button_type} onChange={(e) => setForm({ ...form, button_type: e.target.value })}>
+          <option value="inline_url">لینک</option>
+          <option value="inline_copy">کپی</option>
+          <option value="inline_action">اکشن دکمه موجود</option>
+        </select>
+        <input className="rounded-md border bg-transparent px-2 py-1 text-xs" placeholder="متن/ایموجی دکمه" value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} />
+        <input className="rounded-md border bg-transparent px-2 py-1 text-xs md:col-span-2" placeholder="لینک یا متن کپی" value={form.payload} onChange={(e) => setForm({ ...form, payload: e.target.value })} />
+        <select className="rounded-md border bg-transparent px-2 py-1 text-xs" value={form.style} onChange={(e) => setForm({ ...form, style: e.target.value })}>
+          {BUTTON_STYLES.map((style) => <option key={style || "default"} value={style}>{style || "default"}</option>)}
+        </select>
+        <input className="rounded-md border bg-transparent px-2 py-1 text-xs" placeholder="Premium emoji ID" dir="ltr" value={form.premium_emoji_id} onChange={(e) => setForm({ ...form, premium_emoji_id: e.target.value })} />
+        {form.button_type === "inline_action" && (
+          <select className="rounded-md border bg-transparent px-2 py-1 text-xs md:col-span-3" value={form.source_button_id} onChange={(e) => setForm({ ...form, source_button_id: e.target.value })}>
+            <option value="">دکمه متصل را انتخاب کنید</option>
+            {shopButtons.map((shopButton) => (
+              <option key={shopButton.id} value={shopButton.id}>{shopButton.text} · {shopButton.menu} · {shopButton.action}</option>
+            ))}
+          </select>
+        )}
+        <input className="rounded-md border bg-transparent px-2 py-1 text-xs" placeholder="ردیف" inputMode="numeric" value={form.row} onChange={(e) => setForm({ ...form, row: e.target.value })} />
+        <input className="rounded-md border bg-transparent px-2 py-1 text-xs" placeholder="ستون" inputMode="numeric" value={form.col} onChange={(e) => setForm({ ...form, col: e.target.value })} />
+        <Button size="sm" disabled={!form.text || save.isPending} onClick={() => save.mutate()}>
+          ذخیره دکمه
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 function MessageButtonsEditor({
   message,
@@ -40,6 +128,8 @@ function MessageButtonsEditor({
     button_type: "inline_url",
     text: "",
     payload: "",
+    style: "",
+    premium_emoji_id: "",
     source_button_id: "",
     row: "0",
     col: "0",
@@ -52,16 +142,17 @@ function MessageButtonsEditor({
         button_type: form.button_type,
         text: form.text,
         payload: form.payload || null,
+        style: form.style || null,
+        premium_emoji_id: form.premium_emoji_id || null,
         source_button_id: form.button_type === "inline_action" && form.source_button_id ? Number(form.source_button_id) : null,
         row: parseInt(form.row || "0", 10),
         col: parseInt(form.col || "0", 10),
       }),
     onSuccess: () => {
-      setForm({ button_type: "inline_url", text: "", payload: "", source_button_id: "", row: "0", col: "0" });
+      setForm({ button_type: "inline_url", text: "", payload: "", style: "", premium_emoji_id: "", source_button_id: "", row: "0", col: "0" });
       inv();
     },
   });
-  const remove = useMutation({ mutationFn: (id: number) => deleteMessageButton(id), onSuccess: inv });
 
   return (
     <div className="space-y-2 rounded-md border p-2">
@@ -72,25 +163,7 @@ function MessageButtonsEditor({
             دکمه چندتایی ندارد. {message.response_button_type !== "text" ? `تنظیم قدیمی: ${message.response_button_type}` : ""}
           </p>
         )}
-        {buttons.map((button) => {
-          const linked = shopButtons.find((item) => item.id === button.source_button_id);
-          return (
-            <div key={button.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted/50 px-2 py-1 text-xs">
-              <span>
-                <b>{button.text}</b>{" "}
-                <span className="text-muted-foreground">
-                  · {MESSAGE_BUTTON_TYPES[button.button_type] ?? button.button_type}
-                  · ردیف {button.row} / ستون {button.col}
-                  {button.payload ? ` · ${button.payload}` : ""}
-                  {linked ? ` · اکشن: ${linked.text} (${linked.action})` : ""}
-                </span>
-              </span>
-              <Button size="sm" variant="destructive" onClick={() => { if (confirm("حذف دکمه شیشه‌ای؟")) remove.mutate(button.id); }}>
-                حذف
-              </Button>
-            </div>
-          );
-        })}
+        {buttons.map((button) => <MessageButtonRow key={button.id} button={button} shopButtons={shopButtons} />)}
       </div>
       <div className="grid gap-2 md:grid-cols-6">
         <select className="rounded-md border bg-transparent px-2 text-xs" value={form.button_type} onChange={(e) => setForm({ ...form, button_type: e.target.value })}>
@@ -100,6 +173,10 @@ function MessageButtonsEditor({
         </select>
         <input className="rounded-md border bg-transparent px-2 text-xs" placeholder="متن دکمه" value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} />
         <input className="rounded-md border bg-transparent px-2 text-xs md:col-span-2" placeholder="لینک/متن کپی مثل {link} یا {share_url}" value={form.payload} onChange={(e) => setForm({ ...form, payload: e.target.value })} />
+        <select className="rounded-md border bg-transparent px-2 text-xs" value={form.style} onChange={(e) => setForm({ ...form, style: e.target.value })}>
+          {BUTTON_STYLES.map((style) => <option key={style || "default-new"} value={style}>{style || "default"}</option>)}
+        </select>
+        <input className="rounded-md border bg-transparent px-2 text-xs" placeholder="Premium emoji ID" dir="ltr" value={form.premium_emoji_id} onChange={(e) => setForm({ ...form, premium_emoji_id: e.target.value })} />
         <input className="rounded-md border bg-transparent px-2 text-xs" placeholder="ردیف" inputMode="numeric" value={form.row} onChange={(e) => setForm({ ...form, row: e.target.value })} />
         <input className="rounded-md border bg-transparent px-2 text-xs" placeholder="ستون" inputMode="numeric" value={form.col} onChange={(e) => setForm({ ...form, col: e.target.value })} />
         {form.button_type === "inline_action" && (
