@@ -139,11 +139,16 @@ class RialRequestOut(BaseModel):
     tracking_code: str
     amount_toman: int
     status: str
+    payment_mode: str | None = None
     support_handle: str
     request_text: str
     message_text: str | None = None
     copy_text: str | None = None
     send_url: str | None = None
+    destination_card: str | None = None
+    destination_holder: str | None = None
+    expires_at: datetime | None = None
+    receipt_bot_url: str | None = None
     created_at: datetime
 
 
@@ -186,3 +191,4 @@ class SetBalanceRequest(BaseModel):
 
 class RialDecisionRequest(BaseModel):
     approve: bool
+    rejection_reason: str | None = None

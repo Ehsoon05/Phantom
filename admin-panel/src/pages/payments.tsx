@@ -27,7 +27,7 @@ const CRYPTO_STATUS_TONE: Record<string, "default" | "secondary" | "destructive"
 function RialCard({ request }: { request: RialRequest }) {
   const queryClient = useQueryClient();
   const decide = useMutation({
-    mutationFn: (approve: boolean) => decideRial(request.id, approve),
+    mutationFn: ({ approve, reason }: { approve: boolean; reason?: string }) => decideRial(request.id, approve, reason),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["rial-requests"] });
       queryClient.invalidateQueries({ queryKey: ["users"] });
@@ -56,7 +56,7 @@ function RialCard({ request }: { request: RialRequest }) {
             disabled={decide.isPending}
             onClick={() => {
               if (confirm(`تایید و شارژ ${formatToman(request.amount_toman)}؟`))
-                decide.mutate(true);
+                decide.mutate({ approve: true });
             }}
           >
             ✅ تایید و شارژ
@@ -66,7 +66,8 @@ function RialCard({ request }: { request: RialRequest }) {
             variant="destructive"
             disabled={decide.isPending}
             onClick={() => {
-              if (confirm("رد درخواست؟")) decide.mutate(false);
+              const reason = prompt("دلیل رد را بنویسید. اگر لازم نیست خالی بگذارید:") ?? "";
+              if (confirm("رد درخواست؟")) decide.mutate({ approve: false, reason: reason.trim() || undefined });
             }}
           >
             رد

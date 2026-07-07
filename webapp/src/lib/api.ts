@@ -103,6 +103,7 @@ export interface PaymentMethods {
     phone_required: boolean;
     phone_verified: boolean;
     verify_phone_url: string;
+    payment_mode: "receipt_bot" | "direct_support";
   };
 }
 
@@ -124,11 +125,16 @@ export interface RialRequest {
   tracking_code: string;
   amount_toman: number;
   status: string;
+  payment_mode: "receipt_bot" | "direct_support";
   support_handle: string;
   request_text: string;
   message_text: string | null;
   copy_text: string | null;
   send_url: string | null;
+  destination_card: string | null;
+  destination_holder: string | null;
+  expires_at: string | null;
+  receipt_bot_url: string | null;
   created_at: string;
 }
 
@@ -166,6 +172,8 @@ export interface RialSummary {
   tracking_code: string;
   amount_toman: number;
   status: string;
+  payment_mode?: string;
+  expires_at?: string | null;
   created_at: string;
 }
 export const getRialRequests = () => api<RialSummary[]>("/wallet/rial/requests");

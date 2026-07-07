@@ -71,7 +71,13 @@ from ..utils.keyboards import (
     ADMIN_RIAL_HISTORY,
     ADMIN_RIAL_SETTINGS,
     ADMIN_RIAL_SET_MIN,
+    ADMIN_RIAL_SET_DEST_CARD,
+    ADMIN_RIAL_SET_DEST_HOLDER,
+    ADMIN_RIAL_SET_RECEIPT_ADMINS,
+    ADMIN_RIAL_SET_RECEIPT_BOT,
+    ADMIN_RIAL_SET_VALID_MINUTES,
     ADMIN_RIAL_SET_SUPPORT,
+    ADMIN_RIAL_TOGGLE_MODE,
     ADMIN_RIAL_TOGGLE_PHONE,
     ADMIN_CREATE_COUPON,
     ADMIN_DEACTIVATE_COUPON,
@@ -312,6 +318,11 @@ PROVISION_PROTOCOL_CHOICES = [
     CRYPTO_SET_TON_VALUE,
     RIAL_SET_MIN_VALUE,
     RIAL_SET_SUPPORT_VALUE,
+    RIAL_SET_DEST_CARD_VALUE,
+    RIAL_SET_DEST_HOLDER_VALUE,
+    RIAL_SET_VALID_MINUTES_VALUE,
+    RIAL_SET_RECEIPT_BOT_VALUE,
+    RIAL_SET_RECEIPT_ADMINS_VALUE,
     SHOP_RESET_CONFIRM,
     SHOP_RESET_PASSWORD,
     TRIAL_SET_VOLUME_VALUE,
@@ -332,7 +343,7 @@ PROVISION_PROTOCOL_CHOICES = [
     SERVICE_REMINDER_VOLUME_VALUE,
     SERVICE_REMINDER_DAYS_VALUE,
     SERVICE_REMINDER_HOURS_VALUE,
-) = range(77)
+) = range(82)
 
 
 SHOP_MENU_LABELS = {
@@ -535,6 +546,32 @@ MESSAGE_PLACEHOLDER_HINTS = {
         "`{support_handle}` `{amount}` `{source_card}`\n"
         "`{tracking_code}` `{phone_number}` `{copy_text}`\n"
         "نام کلیدها را تغییر ندهید؛ فقط متن و جای آن‌ها را عوض کنید."
+    ),
+    "rial_card_payment_instructions": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{destination_card}` `{destination_holder}` `{amount}` `{valid_minutes}` `{expires_at}` `{tracking_code}`\n"
+        "این پیام شماره کارت مقصد را به کاربر نشان می‌دهد و بعد از مهلت تعیین‌شده پاک می‌شود."
+    ),
+    "rial_receipt_bot_start": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{amount}` `{tracking_code}` `{expires_at}`"
+    ),
+    "rial_receipt_received": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{tracking_code}` `{amount}`"
+    ),
+    "rial_receipt_approved": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{amount}` `{wallet_balance}` `{tracking_code}`"
+    ),
+    "rial_receipt_rejected": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{amount}` `{tracking_code}` `{reason_text}`"
+    ),
+    "rial_receipt_expired": "\n\nاین پیام وقتی مهلت دو ساعته ارسال رسید تمام شده باشد ارسال می‌شود.",
+    "rial_receipt_admin_request": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{user_name}` `{username}` `{telegram_id}` `{phone_number}` `{amount}` `{source_card}` `{tracking_code}` `{created_at}`"
     ),
 }
 
@@ -5484,11 +5521,23 @@ async def rial_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
         minimum = await SettingsService.get_rial_min_amount(session)
         require_phone = await SettingsService.rial_phone_required(session)
         support_handle = await SettingsService.get_rial_support_handle(session)
+        payment_mode = await SettingsService.get_rial_payment_mode(session)
+        dest_card = await SettingsService.get_rial_destination_card_number(session)
+        dest_holder = await SettingsService.get_rial_destination_card_holder(session)
+        valid_minutes = await SettingsService.get_rial_receipt_valid_minutes(session)
+        receipt_bot = await SettingsService.get_rial_receipt_bot_username(session)
+        receipt_admins = await SettingsService.get_rial_receipt_admin_ids(session)
     await update.message.reply_text(
         "**تنظیمات کارت‌به‌کارت**\n\n"
         f"حداقل مبلغ: **{minimum:,} تومان**\n"
         f"الزام تایید شماره در ربات: **{'روشن' if require_phone else 'خاموش'}**\n"
-        f"آیدی پشتیبانی: **{support_handle}**",
+        f"آیدی پشتیبانی: **{support_handle}**\n"
+        f"روش فعلی: **{'بات دریافت رسید' if payment_mode == 'receipt_bot' else 'ارسال به پشتیبانی'}**\n"
+        f"شماره کارت مقصد: `{dest_card or '-'}`\n"
+        f"صاحب کارت مقصد: **{dest_holder or '-'}**\n"
+        f"اعتبار پرداخت: **{valid_minutes} دقیقه**\n"
+        f"بات دریافت رسید: @{receipt_bot}\n"
+        f"ادمین‌های رسید: `{', '.join(str(item) for item in receipt_admins)}`",
         reply_markup=admin_rial_settings_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
@@ -5501,6 +5550,19 @@ async def rial_toggle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await SettingsService.set_rial_phone_required(session, enabled)
     await update.message.reply_text(
         f"الزام تایید شماره در ربات برای پرداخت ریالی **{'روشن' if enabled else 'خاموش'}** شد.",
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    await rial_settings_menu(update, context)
+
+
+@require_auth(permission="users")
+async def rial_toggle_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        current = await SettingsService.get_rial_payment_mode(session)
+        new_mode = "direct_support" if current == "receipt_bot" else "receipt_bot"
+        await SettingsService.set_rial_payment_mode(session, new_mode)
+    await update.message.reply_text(
+        f"روش پرداخت ریالی روی **{'بات دریافت رسید' if new_mode == 'receipt_bot' else 'ارسال به پشتیبانی'}** تنظیم شد.",
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     await rial_settings_menu(update, context)
@@ -5547,6 +5609,108 @@ async def rial_set_support_save(update: Update, context: ContextTypes.DEFAULT_TY
     async with async_session() as session:
         await SettingsService.set_rial_support_handle(session, username)
     await update.message.reply_text(f"آیدی پشتیبانی ریالی روی **@{username}** تنظیم شد.", parse_mode=constants.ParseMode.MARKDOWN)
+    await rial_settings_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="users")
+async def rial_set_dest_card_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("شماره کارت مقصد را ۱۶ رقمی وارد کنید:", reply_markup=_cancel_back_keyboard())
+    return RIAL_SET_DEST_CARD_VALUE
+
+
+@require_auth(permission="users")
+async def rial_set_dest_card_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    card = re.sub(r"\D", "", update.message.text or "")
+    if len(card) != 16:
+        await update.message.reply_text("شماره کارت باید ۱۶ رقم باشد.")
+        return RIAL_SET_DEST_CARD_VALUE
+    async with async_session() as session:
+        await SettingsService.set_rial_destination_card_number(session, card)
+    await update.message.reply_text("شماره کارت مقصد ذخیره شد.")
+    await rial_settings_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="users")
+async def rial_set_dest_holder_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("نام صاحب کارت مقصد را وارد کنید:", reply_markup=_cancel_back_keyboard())
+    return RIAL_SET_DEST_HOLDER_VALUE
+
+
+@require_auth(permission="users")
+async def rial_set_dest_holder_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    holder = (update.message.text or "").strip()
+    if not holder:
+        await update.message.reply_text("نام صاحب کارت نمی‌تواند خالی باشد.")
+        return RIAL_SET_DEST_HOLDER_VALUE
+    async with async_session() as session:
+        await SettingsService.set_rial_destination_card_holder(session, holder)
+    await update.message.reply_text("صاحب کارت مقصد ذخیره شد.")
+    await rial_settings_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="users")
+async def rial_set_valid_minutes_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("مدت اعتبار پرداخت را به دقیقه وارد کنید. مثال: `120`", reply_markup=_cancel_back_keyboard(), parse_mode=constants.ParseMode.MARKDOWN)
+    return RIAL_SET_VALID_MINUTES_VALUE
+
+
+@require_auth(permission="users")
+async def rial_set_valid_minutes_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    amount = _parse_amount(update.message.text)
+    if amount is None or amount <= 0:
+        await update.message.reply_text("عدد معتبر نیست.")
+        return RIAL_SET_VALID_MINUTES_VALUE
+    async with async_session() as session:
+        await SettingsService.set_rial_receipt_valid_minutes(session, amount)
+    await update.message.reply_text(f"اعتبار پرداخت روی **{amount} دقیقه** تنظیم شد.", parse_mode=constants.ParseMode.MARKDOWN)
+    await rial_settings_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="users")
+async def rial_set_receipt_bot_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("یوزرنیم بات دریافت رسید را با یا بدون @ وارد کنید:", reply_markup=_cancel_back_keyboard())
+    return RIAL_SET_RECEIPT_BOT_VALUE
+
+
+@require_auth(permission="users")
+async def rial_set_receipt_bot_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    username = (update.message.text or "").strip().lstrip("@")
+    if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", username):
+        await update.message.reply_text("یوزرنیم بات معتبر نیست.")
+        return RIAL_SET_RECEIPT_BOT_VALUE
+    async with async_session() as session:
+        await SettingsService.set_rial_receipt_bot_username(session, username)
+    await update.message.reply_text(f"بات دریافت رسید روی @{username} تنظیم شد.")
+    await rial_settings_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="users")
+async def rial_set_receipt_admins_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("آیدی عددی ادمین‌های رسید را با کاما جدا کنید:", reply_markup=_cancel_back_keyboard())
+    return RIAL_SET_RECEIPT_ADMINS_VALUE
+
+
+@require_auth(permission="users")
+async def rial_set_receipt_admins_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    admin_ids = []
+    for part in re.split(r"[,،\\s]+", update.message.text or ""):
+        if not part:
+            continue
+        if not part.isdigit():
+            await update.message.reply_text("فقط آیدی عددی وارد کنید.")
+            return RIAL_SET_RECEIPT_ADMINS_VALUE
+        admin_ids.append(int(part))
+    if not admin_ids:
+        await update.message.reply_text("حداقل یک آیدی عددی لازم است.")
+        return RIAL_SET_RECEIPT_ADMINS_VALUE
+    async with async_session() as session:
+        await SettingsService.set_rial_receipt_admin_ids(session, admin_ids)
+    await update.message.reply_text("ادمین‌های دریافت رسید ذخیره شدند.")
     await rial_settings_menu(update, context)
     return ConversationHandler.END
 
@@ -6155,6 +6319,66 @@ rial_set_support_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
 )
 
+rial_set_dest_card_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_RIAL_SET_DEST_CARD), rial_set_dest_card_start)],
+    states={
+        RIAL_SET_DEST_CARD_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, rial_set_dest_card_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+rial_set_dest_holder_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_RIAL_SET_DEST_HOLDER), rial_set_dest_holder_start)],
+    states={
+        RIAL_SET_DEST_HOLDER_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, rial_set_dest_holder_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+rial_set_valid_minutes_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_RIAL_SET_VALID_MINUTES), rial_set_valid_minutes_start)],
+    states={
+        RIAL_SET_VALID_MINUTES_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, rial_set_valid_minutes_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+rial_set_receipt_bot_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_RIAL_SET_RECEIPT_BOT), rial_set_receipt_bot_start)],
+    states={
+        RIAL_SET_RECEIPT_BOT_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, rial_set_receipt_bot_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+rial_set_receipt_admins_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_RIAL_SET_RECEIPT_ADMINS), rial_set_receipt_admins_start)],
+    states={
+        RIAL_SET_RECEIPT_ADMINS_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, rial_set_receipt_admins_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
 trial_set_volume_conv = ConversationHandler(
     entry_points=[MessageHandler(_exact_filter(ADMIN_TRIAL_SET_VOLUME), trial_set_volume_start)],
     states={
@@ -6332,6 +6556,11 @@ admin_handlers = [
     crypto_set_ton_conv,
     rial_set_min_conv,
     rial_set_support_conv,
+    rial_set_dest_card_conv,
+    rial_set_dest_holder_conv,
+    rial_set_valid_minutes_conv,
+    rial_set_receipt_bot_conv,
+    rial_set_receipt_admins_conv,
     trial_set_volume_conv,
     trial_set_duration_conv,
     service_reminder_volume_conv,
@@ -6351,6 +6580,7 @@ admin_handlers = [
     MessageHandler(_exact_filter(ADMIN_RIAL_HISTORY), rial_history),
     MessageHandler(_exact_filter(ADMIN_RIAL_SETTINGS), rial_settings_menu),
     MessageHandler(_exact_filter(ADMIN_RIAL_TOGGLE_PHONE), rial_toggle_phone),
+    MessageHandler(_exact_filter(ADMIN_RIAL_TOGGLE_MODE), rial_toggle_mode),
     MessageHandler(_exact_filter(ADMIN_LOGOUT), admin_logout),
     MessageHandler(_exact_filter(ADMIN_ADMINS), admin_management_menu),
     MessageHandler(_exact_filter(ADMIN_REFRESH_ADMINS), list_admins),

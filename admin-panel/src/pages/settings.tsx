@@ -73,7 +73,22 @@ function RialSection() {
   const inv = () => qc.invalidateQueries({ queryKey: ["set-rial"] });
   const [min, setMin] = useState("");
   const [handle, setHandle] = useState("");
-  useEffect(() => { if (data) { setMin(String(data.min_amount_toman)); setHandle(data.support_handle); } }, [data]);
+  const [destCard, setDestCard] = useState("");
+  const [destHolder, setDestHolder] = useState("");
+  const [validMinutes, setValidMinutes] = useState("");
+  const [receiptBot, setReceiptBot] = useState("");
+  const [receiptAdmins, setReceiptAdmins] = useState("");
+  useEffect(() => {
+    if (data) {
+      setMin(String(data.min_amount_toman));
+      setHandle(data.support_handle);
+      setDestCard(data.destination_card_number ?? "");
+      setDestHolder(data.destination_card_holder ?? "");
+      setValidMinutes(String(data.receipt_valid_minutes ?? 120));
+      setReceiptBot(data.receipt_bot_username ?? "");
+      setReceiptAdmins((data.receipt_admin_ids ?? []).join(","));
+    }
+  }, [data]);
   const save = useMutation({ mutationFn: (b: Record<string, unknown>) => setRialSettings(b), onSuccess: inv });
   return (
     <Section title="تنظیمات ریالی">
@@ -83,6 +98,14 @@ function RialSection() {
         <Button size="sm" variant="outline" onClick={() => save.mutate({ phone_required: !data?.phone_required })}>
           تایید شماره در ربات: {data?.phone_required ? "فعال" : "غیرفعال"}
         </Button>
+        <Button size="sm" variant="outline" onClick={() => save.mutate({ payment_mode: data?.payment_mode === "receipt_bot" ? "direct_support" : "receipt_bot" })}>
+          روش ریالی: {data?.payment_mode === "receipt_bot" ? "بات رسید" : "پشتیبانی"}
+        </Button>
+        <div className="flex gap-1"><Input placeholder="شماره کارت مقصد" dir="ltr" value={destCard} onChange={(e) => setDestCard(e.target.value)} /><Button size="sm" onClick={() => save.mutate({ destination_card_number: destCard })}>ثبت</Button></div>
+        <div className="flex gap-1"><Input placeholder="صاحب کارت" value={destHolder} onChange={(e) => setDestHolder(e.target.value)} /><Button size="sm" onClick={() => save.mutate({ destination_card_holder: destHolder })}>ثبت</Button></div>
+        <div className="flex gap-1"><Input placeholder="اعتبار دقیقه" dir="ltr" value={validMinutes} onChange={(e) => setValidMinutes(e.target.value)} /><Button size="sm" onClick={() => save.mutate({ receipt_valid_minutes: parseInt(validMinutes, 10) })}>ثبت</Button></div>
+        <div className="flex gap-1"><Input placeholder="بات رسید" dir="ltr" value={receiptBot} onChange={(e) => setReceiptBot(e.target.value)} /><Button size="sm" onClick={() => save.mutate({ receipt_bot_username: receiptBot })}>ثبت</Button></div>
+        <div className="flex gap-1 md:col-span-2"><Input placeholder="ادمین‌های رسید با کاما" dir="ltr" value={receiptAdmins} onChange={(e) => setReceiptAdmins(e.target.value)} /><Button size="sm" onClick={() => save.mutate({ receipt_admin_ids: receiptAdmins.split(/[،,\\s]+/).filter(Boolean).map((v) => parseInt(v, 10)) })}>ثبت</Button></div>
       </div>
     </Section>
   );

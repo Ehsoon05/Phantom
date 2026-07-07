@@ -321,19 +321,42 @@ function RialTab() {
     // bold/code markers for clean display in the webview.
     const messageText = (result.message_text ?? "").replace(/```/g, "").replace(/\*\*/g, "").trim();
     const copyText = result.copy_text ?? result.request_text;
+    const isReceiptBot = result.payment_mode === "receipt_bot";
     return (
       <Card>
         <CardContent className="space-y-4 p-4">
           <p className="font-bold">✅ درخواست ثبت شد</p>
           <p className="text-sm leading-6 text-muted-foreground">
-            متن زیر را بدون تغییر برای ادمین ارسال کنید تا پس از بررسی، کیف پولتان شارژ شود.
+            {isReceiptBot
+              ? "مبلغ را به کارت نمایش داده‌شده واریز کنید و سپس رسید را از طریق بات واریزی ارسال کنید."
+              : "متن زیر را بدون تغییر برای ادمین ارسال کنید تا پس از بررسی، کیف پولتان شارژ شود."}
           </p>
           {messageText && (
             <div className="whitespace-pre-wrap rounded-lg bg-muted p-3 text-xs leading-6">
               {messageText}
             </div>
           )}
-          <CopyRow label="متن آماده برای ارسال به ادمین" value={copyText} />
+          {isReceiptBot && result.destination_card && (
+            <CopyRow label="شماره کارت مقصد" value={result.destination_card} />
+          )}
+          {isReceiptBot && result.expires_at && (
+            <p className="text-xs text-destructive">
+              اعتبار پرداخت تا: {formatTehranDateTime(result.expires_at)}
+            </p>
+          )}
+          {!isReceiptBot && <CopyRow label="متن آماده برای ارسال به ادمین" value={copyText} />}
+          {result.receipt_bot_url && (
+            <Button
+              className="w-full"
+              onClick={() => {
+                const tg = getWebApp();
+                if (tg) tg.openTelegramLink(result.receipt_bot_url!);
+                else window.location.href = result.receipt_bot_url!;
+              }}
+            >
+              📸 ارسال رسید پرداخت
+            </Button>
+          )}
           {result.send_url && (
             <Button asChild className="w-full">
               <a href={result.send_url}>📩 ارسال به ادمین</a>

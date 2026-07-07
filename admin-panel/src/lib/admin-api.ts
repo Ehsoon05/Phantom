@@ -291,6 +291,12 @@ export interface RialSettings {
   min_amount_toman: number;
   phone_required: boolean;
   support_handle: string;
+  payment_mode: "receipt_bot" | "direct_support";
+  destination_card_number: string;
+  destination_card_holder: string;
+  receipt_valid_minutes: number;
+  receipt_bot_username: string;
+  receipt_admin_ids: number[];
 }
 export const getRialSettings = () => api<RialSettings>("/admin/settings/rial");
 export const setRialSettings = (body: Partial<RialSettings>) =>

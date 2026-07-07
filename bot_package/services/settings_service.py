@@ -17,6 +17,12 @@ SUBSCRIPTION_DEVICE_LIMIT = "subscription_device_limit"
 RIAL_MIN_AMOUNT = "rial_min_amount"
 RIAL_REQUIRE_PHONE = "rial_require_phone"
 RIAL_SUPPORT_HANDLE = "rial_support_handle"
+RIAL_PAYMENT_MODE = "rial_payment_mode"
+RIAL_DESTINATION_CARD_NUMBER = "rial_destination_card_number"
+RIAL_DESTINATION_CARD_HOLDER = "rial_destination_card_holder"
+RIAL_RECEIPT_VALID_MINUTES = "rial_receipt_valid_minutes"
+RIAL_RECEIPT_BOT_USERNAME = "rial_receipt_bot_username"
+RIAL_RECEIPT_ADMIN_IDS = "rial_receipt_admin_ids"
 TRIAL_ENABLED = "trial_enabled"
 TRIAL_VOLUME_MB = "trial_volume_mb"
 TRIAL_DURATION_HOURS = "trial_duration_hours"
@@ -39,6 +45,12 @@ DEFAULTS = {
     RIAL_MIN_AMOUNT: "100000",
     RIAL_REQUIRE_PHONE: "true",
     RIAL_SUPPORT_HANDLE: "@PhantomHubsSupport",
+    RIAL_PAYMENT_MODE: "receipt_bot",
+    RIAL_DESTINATION_CARD_NUMBER: "6219861931573371",
+    RIAL_DESTINATION_CARD_HOLDER: "احسان خلج",
+    RIAL_RECEIPT_VALID_MINUTES: "120",
+    RIAL_RECEIPT_BOT_USERNAME: "PhantomVariziBot",
+    RIAL_RECEIPT_ADMIN_IDS: "60585628,6987529339",
     TRIAL_ENABLED: "true",
     TRIAL_VOLUME_MB: "500",
     TRIAL_DURATION_HOURS: "24",
@@ -175,6 +187,73 @@ class SettingsService:
     async def set_rial_support_handle(session: AsyncSession, handle: str) -> None:
         value = handle.strip().lstrip("@")
         await SettingsService.set(session, RIAL_SUPPORT_HANDLE, f"@{value}")
+
+    @staticmethod
+    async def get_rial_payment_mode(session: AsyncSession) -> str:
+        value = (await SettingsService.get(session, RIAL_PAYMENT_MODE, "receipt_bot") or "").strip()
+        return value if value in {"receipt_bot", "direct_support"} else "receipt_bot"
+
+    @staticmethod
+    async def set_rial_payment_mode(session: AsyncSession, mode: str) -> None:
+        await SettingsService.set(session, RIAL_PAYMENT_MODE, "direct_support" if mode == "direct_support" else "receipt_bot")
+
+    @staticmethod
+    async def get_rial_destination_card_number(session: AsyncSession) -> str:
+        return (await SettingsService.get(session, RIAL_DESTINATION_CARD_NUMBER, "6219861931573371") or "").strip()
+
+    @staticmethod
+    async def set_rial_destination_card_number(session: AsyncSession, card_number: str) -> None:
+        await SettingsService.set(session, RIAL_DESTINATION_CARD_NUMBER, "".join(ch for ch in card_number if ch.isdigit()))
+
+    @staticmethod
+    async def get_rial_destination_card_holder(session: AsyncSession) -> str:
+        return (await SettingsService.get(session, RIAL_DESTINATION_CARD_HOLDER, "احسان خلج") or "").strip()
+
+    @staticmethod
+    async def set_rial_destination_card_holder(session: AsyncSession, holder: str) -> None:
+        await SettingsService.set(session, RIAL_DESTINATION_CARD_HOLDER, holder.strip())
+
+    @staticmethod
+    async def get_rial_receipt_valid_minutes(session: AsyncSession) -> int:
+        try:
+            return max(1, int(await SettingsService.get(session, RIAL_RECEIPT_VALID_MINUTES, "120") or 120))
+        except (TypeError, ValueError):
+            return 120
+
+    @staticmethod
+    async def set_rial_receipt_valid_minutes(session: AsyncSession, minutes: int) -> None:
+        await SettingsService.set(session, RIAL_RECEIPT_VALID_MINUTES, str(max(1, int(minutes))))
+
+    @staticmethod
+    async def get_rial_receipt_bot_username(session: AsyncSession) -> str:
+        value = (await SettingsService.get(session, RIAL_RECEIPT_BOT_USERNAME, "PhantomVariziBot") or "").strip().lstrip("@")
+        return value or "PhantomVariziBot"
+
+    @staticmethod
+    async def set_rial_receipt_bot_username(session: AsyncSession, username: str) -> None:
+        await SettingsService.set(session, RIAL_RECEIPT_BOT_USERNAME, username.strip().lstrip("@"))
+
+    @staticmethod
+    async def get_rial_receipt_admin_ids(session: AsyncSession) -> list[int]:
+        raw = await SettingsService.get(session, RIAL_RECEIPT_ADMIN_IDS, "60585628,6987529339")
+        ids: list[int] = []
+        for part in (raw or "").split(","):
+            try:
+                value = int(part.strip())
+            except ValueError:
+                continue
+            if value > 0 and value not in ids:
+                ids.append(value)
+        return ids
+
+    @staticmethod
+    async def set_rial_receipt_admin_ids(session: AsyncSession, admin_ids: list[int]) -> None:
+        cleaned = []
+        for value in admin_ids:
+            value = int(value)
+            if value > 0 and value not in cleaned:
+                cleaned.append(value)
+        await SettingsService.set(session, RIAL_RECEIPT_ADMIN_IDS, ",".join(str(value) for value in cleaned))
 
     @staticmethod
     async def trial_enabled(session: AsyncSession) -> bool:

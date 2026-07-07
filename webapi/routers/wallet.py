@@ -1,4 +1,5 @@
 import re
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -17,6 +18,7 @@ from bot_package.config_loader import BotConfig
 from bot_package.services.rial_payment_service import RialPaymentService
 from bot_package.services.settings_service import SettingsService
 from bot_package.services.shop_customization_service import ShopCustomizationService
+from bot_package.utils.datetime_format import format_tehran_datetime
 
 from ..deps import get_current_user, get_session
 from ..schemas import (
@@ -83,6 +85,7 @@ async def payment_methods(
             "verify_phone_url": (
                 f"https://t.me/{BotConfig.MAIN_BOT_USERNAME}?start=verify_phone"
             ),
+            "payment_mode": await SettingsService.get_rial_payment_mode(session),
         },
     }
 
@@ -202,6 +205,12 @@ async def create_rial_request(
         )
 
     support_handle = await SettingsService.get_rial_support_handle(session)
+    payment_mode = await SettingsService.get_rial_payment_mode(session)
+    destination_card = await SettingsService.get_rial_destination_card_number(session)
+    destination_holder = await SettingsService.get_rial_destination_card_holder(session)
+    valid_minutes = await SettingsService.get_rial_receipt_valid_minutes(session)
+    receipt_bot_username = await SettingsService.get_rial_receipt_bot_username(session)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=valid_minutes)
     # Build the request exactly like the bot: a copyable support message, a
     # fuller "direct" text stored for the admin, and the customizable
     # rial_payment_request template shown to the user.
@@ -213,7 +222,51 @@ async def create_rial_request(
         source_card=source_card,
         support_handle=support_handle,
         request_text="",
+        payment_mode=payment_mode,
+        destination_card_number=destination_card if payment_mode == "receipt_bot" else None,
+        destination_card_holder=destination_holder if payment_mode == "receipt_bot" else None,
+        expires_at=expires_at if payment_mode == "receipt_bot" else None,
     )
+    if payment_mode == "receipt_bot":
+        direct_text = (
+            f"درخواست پرداخت کارت‌به‌کارت #{request.id}\n"
+            f"مبلغ: {body.amount_toman:,} تومان\n"
+            f"کارت مبدا: {source_card}\n"
+            f"کارت مقصد: {destination_card}\n"
+            f"صاحب کارت: {destination_holder}\n"
+            f"کد پیگیری: {request.tracking_code}\n"
+            f"آیدی عددی تلگرام: {user.telegram_id}"
+        )
+        if phone_number:
+            direct_text += f"\nشماره تماس: {phone_number}"
+        message = await ShopCustomizationService.get_message(
+            session,
+            "rial_card_payment_instructions",
+            destination_card=destination_card,
+            destination_holder=destination_holder,
+            amount=f"{body.amount_toman:,}",
+            valid_minutes=f"{valid_minutes:,}",
+            expires_at=format_tehran_datetime(expires_at),
+            tracking_code=request.tracking_code,
+        )
+        await RialPaymentService.update_request_text(session, request, direct_text)
+        return RialRequestOut(
+            id=request.id,
+            tracking_code=request.tracking_code,
+            amount_toman=request.amount_toman,
+            status=request.status,
+            payment_mode=request.payment_mode,
+            support_handle=request.support_handle,
+            request_text=direct_text,
+            message_text=str(message),
+            copy_text=destination_card,
+            send_url=None,
+            destination_card=destination_card,
+            destination_holder=destination_holder,
+            expires_at=request.expires_at,
+            receipt_bot_url=f"https://t.me/{receipt_bot_username}?start=r_{request.id}",
+            created_at=request.created_at,
+        )
     copy_text = (
         "سلام،\n\n"
         f"درخواست شارژ حساب به مبلغ {body.amount_toman:,} تومان را دارم\n"
@@ -246,11 +299,16 @@ async def create_rial_request(
         tracking_code=request.tracking_code,
         amount_toman=request.amount_toman,
         status=request.status,
+        payment_mode=request.payment_mode,
         support_handle=request.support_handle,
         request_text=direct_text,
         message_text=str(message),
         copy_text=copy_text,
         send_url=send_url,
+        destination_card=request.destination_card_number,
+        destination_holder=request.destination_card_holder,
+        expires_at=request.expires_at,
+        receipt_bot_url=None,
         created_at=request.created_at,
     )
 
@@ -278,6 +336,8 @@ async def list_rial_requests(
             "tracking_code": r.tracking_code,
             "amount_toman": r.amount_toman,
             "status": r.status,
+            "payment_mode": r.payment_mode,
+            "expires_at": r.expires_at,
             "created_at": r.created_at,
         }
         for r in rows

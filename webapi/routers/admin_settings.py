@@ -88,6 +88,12 @@ async def get_rial_settings(
         "min_amount_toman": await SettingsService.get_rial_min_amount(session),
         "phone_required": await SettingsService.rial_phone_required(session),
         "support_handle": await SettingsService.get_rial_support_handle(session),
+        "payment_mode": await SettingsService.get_rial_payment_mode(session),
+        "destination_card_number": await SettingsService.get_rial_destination_card_number(session),
+        "destination_card_holder": await SettingsService.get_rial_destination_card_holder(session),
+        "receipt_valid_minutes": await SettingsService.get_rial_receipt_valid_minutes(session),
+        "receipt_bot_username": await SettingsService.get_rial_receipt_bot_username(session),
+        "receipt_admin_ids": await SettingsService.get_rial_receipt_admin_ids(session),
     }
 
 
@@ -95,6 +101,12 @@ class RialSettingsRequest(BaseModel):
     min_amount_toman: int | None = Field(default=None, ge=0)
     phone_required: bool | None = None
     support_handle: str | None = None
+    payment_mode: str | None = None
+    destination_card_number: str | None = None
+    destination_card_holder: str | None = None
+    receipt_valid_minutes: int | None = Field(default=None, ge=1)
+    receipt_bot_username: str | None = None
+    receipt_admin_ids: list[int] | None = None
 
 
 @router.put("/settings/rial")
@@ -109,6 +121,20 @@ async def set_rial_settings(
         await SettingsService.set_rial_phone_required(session, body.phone_required)
     if body.support_handle is not None:
         await SettingsService.set_rial_support_handle(session, body.support_handle)
+    if body.payment_mode is not None:
+        if body.payment_mode not in {"receipt_bot", "direct_support"}:
+            raise HTTPException(status_code=400, detail="payment_mode must be receipt_bot or direct_support")
+        await SettingsService.set_rial_payment_mode(session, body.payment_mode)
+    if body.destination_card_number is not None:
+        await SettingsService.set_rial_destination_card_number(session, body.destination_card_number)
+    if body.destination_card_holder is not None:
+        await SettingsService.set_rial_destination_card_holder(session, body.destination_card_holder)
+    if body.receipt_valid_minutes is not None:
+        await SettingsService.set_rial_receipt_valid_minutes(session, body.receipt_valid_minutes)
+    if body.receipt_bot_username is not None:
+        await SettingsService.set_rial_receipt_bot_username(session, body.receipt_bot_username)
+    if body.receipt_admin_ids is not None:
+        await SettingsService.set_rial_receipt_admin_ids(session, body.receipt_admin_ids)
     return await get_rial_settings(session, _admin)
 
 

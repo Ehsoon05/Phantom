@@ -7,6 +7,7 @@ from bot_package.admin_bot import setup_admin_bot
 from bot_package.config_loader import BotConfig
 from bot_package.database import async_session, engine
 from bot_package.main_bot import setup_main_bot
+from bot_package.receipt_bot import setup_receipt_bot
 from bot_package.services.admin_service import AdminService
 from bot_package.services.price_service import PriceService
 from bot_package.services.crypto_jobs import register_crypto_jobs
@@ -57,6 +58,7 @@ async def main():
 
     main_app = await setup_main_bot()
     admin_app = await setup_admin_bot()
+    receipt_app = await setup_receipt_bot()
 
     # Crypto background jobs run on the main (user-facing) bot so payment
     # confirmations are delivered to users.
@@ -69,14 +71,17 @@ async def main():
         with contextlib.suppress(NotImplementedError):
             loop.add_signal_handler(sig, stop_event.set)
 
-    await asyncio.gather(_start_polling(main_app), _start_polling(admin_app))
-    logger.info("Both Telegram bots are running")
-    print("Both Telegram bots are running. Press Ctrl+C to stop.")
+    apps = [main_app, admin_app]
+    if receipt_app is not None:
+        apps.append(receipt_app)
+    await asyncio.gather(*(_start_polling(app) for app in apps))
+    logger.info("%s Telegram bots are running", len(apps))
+    print(f"{len(apps)} Telegram bots are running. Press Ctrl+C to stop.")
 
     try:
         await stop_event.wait()
     finally:
-        await asyncio.gather(_stop_polling(main_app), _stop_polling(admin_app))
+        await asyncio.gather(*(_stop_polling(app) for app in apps))
 
 
 if __name__ == "__main__":

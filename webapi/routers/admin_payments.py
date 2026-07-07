@@ -21,6 +21,12 @@ def _rial_out(request: RialPaymentRequest) -> dict:
         "amount_toman": request.amount_toman,
         "phone_number": request.phone_number,
         "source_card": request.source_card,
+        "payment_mode": request.payment_mode,
+        "destination_card_number": request.destination_card_number,
+        "destination_card_holder": request.destination_card_holder,
+        "expires_at": request.expires_at,
+        "receipt_status": request.receipt_status,
+        "rejection_reason": request.rejection_reason,
         "status": request.status,
         "created_at": request.created_at,
         "updated_at": request.updated_at,
@@ -53,6 +59,7 @@ async def decide_rial_request(
         request_id=request_id,
         approve=body.approve,
         admin_id=admin.telegram_id,
+        rejection_reason=body.rejection_reason,
     )
     if request is None:
         raise HTTPException(status_code=404, detail="Request not found")

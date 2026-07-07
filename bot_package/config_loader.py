@@ -75,6 +75,7 @@ class BotConfig:
     MAIN_BOT_TOKEN = os.getenv("MAIN_BOT_TOKEN", "").strip()
     MAIN_BOT_USERNAME = os.getenv("MAIN_BOT_USERNAME", "PhantomHubs_bot").strip().lstrip("@")
     ADMIN_BOT_TOKEN = os.getenv("ADMIN_BOT_TOKEN", "").strip()
+    RIAL_RECEIPT_BOT_TOKEN = os.getenv("RIAL_RECEIPT_BOT_TOKEN", "").strip()
     ADMIN_USER_IDS = _parse_admin_user_ids()
     ADMIN_USER_ID = ADMIN_USER_IDS[0] if ADMIN_USER_IDS else 0
     OWNER_USER_IDS = _parse_owner_user_ids()

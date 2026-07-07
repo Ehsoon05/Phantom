@@ -161,6 +161,12 @@ export interface RialRequest {
   amount_toman: number;
   phone_number: string | null;
   source_card: string;
+  payment_mode: string;
+  destination_card_number: string | null;
+  destination_card_holder: string | null;
+  expires_at: string | null;
+  receipt_status: string | null;
+  rejection_reason: string | null;
   status: string;
   created_at: string;
   updated_at: string;
@@ -207,10 +213,10 @@ export const toggleBlockUser = (telegramId: number) =>
   api<AdminUser>(`/admin/users/${telegramId}/block`, { method: "POST" });
 export const getRialRequests = (status = "pending") =>
   api<RialRequest[]>(`/admin/payments/rial?status=${status}`);
-export const decideRial = (id: number, approve: boolean) =>
+export const decideRial = (id: number, approve: boolean, rejectionReason?: string) =>
   api<RialRequest>(`/admin/payments/rial/${id}/decision`, {
     method: "POST",
-    body: JSON.stringify({ approve }),
+    body: JSON.stringify({ approve, rejection_reason: rejectionReason }),
   });
 export const getCryptoLedger = () => api<CryptoInvoice[]>("/admin/payments/crypto");
 
