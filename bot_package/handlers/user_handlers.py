@@ -457,7 +457,20 @@ async def process_purchase(
                 source_label="bot",
             )
         except InsufficientBalance:
-            text = await ShopCustomizationService.get_message(session, "insufficient_balance", required_price="موردنیاز")
+            plan = await ShopCustomizationService.get_plan(session, selected_plan_id)
+            user_row = await session.get(User, update.effective_user.id)
+            wallet_balance = user_row.wallet_balance or 0 if user_row else 0
+            required_price = 0
+            if plan is not None:
+                original_price = await PriceService.get_plan_price(session, plan)
+                coupon = await CouponService.get_active_coupon(session, update.effective_user.id)
+                required_price, _discount = CouponService.calculate_discount(original_price, coupon)
+            text = await ShopCustomizationService.get_message(
+                session,
+                "insufficient_balance",
+                required_price=f"{required_price:,}",
+                wallet_balance=f"{wallet_balance:,}",
+            )
             fallback_keyboard = await ShopCustomizationService.wallet_keyboard(session)
             keyboard = await _message_markup(session, "insufficient_balance", fallback_keyboard, copy_text=text)
             await _reply_shop_message(update.message, text, reply_markup=keyboard)
@@ -889,7 +902,23 @@ async def renew_service_callback(update: Update, context: ContextTypes.DEFAULT_T
                 source_label="bot",
             )
         except InsufficientBalance:
-            text = await ShopCustomizationService.get_message(session, "insufficient_balance", required_price="موردنیاز")
+            purchase = (
+                await session.execute(
+                    select(Purchase)
+                    .options(selectinload(Purchase.config))
+                    .where(Purchase.id == purchase_id, Purchase.user_id == update.effective_user.id)
+                )
+            ).scalar_one_or_none()
+            plan = await ShopCustomizationService.get_plan(session, purchase.config.shop_plan_id) if purchase and purchase.config else None
+            user_row = await session.get(User, update.effective_user.id)
+            wallet_balance = user_row.wallet_balance or 0 if user_row else 0
+            required_price = await PriceService.get_plan_price(session, plan) if plan is not None else 0
+            text = await ShopCustomizationService.get_message(
+                session,
+                "insufficient_balance",
+                required_price=f"{required_price:,}",
+                wallet_balance=f"{wallet_balance:,}",
+            )
             keyboard = await ShopCustomizationService.wallet_keyboard(session)
             await _reply_shop_message(query.message, text, reply_markup=keyboard)
             return

@@ -305,7 +305,11 @@ DEFAULT_MESSAGES: dict[str, str] = {
     "service_name_invalid": "نام سرویس باید بین ۱ تا ۶۰ کاراکتر باشد. لطفا یک نام کوتاه‌تر ارسال کنید.",
     "blocked_user": "حساب شما مسدود شده است.",
     "inactive_plan": "این پلن در حال حاضر فعال نیست.",
-    "insufficient_balance": "موجودی کیف پول کافی نیست.\nمبلغ موردنیاز: {required_price} تومان",
+    "insufficient_balance": (
+        "موجودی کیف پول کافی نیست.\n"
+        "موجودی فعلی کیف پول: {wallet_balance} تومان\n"
+        "مبلغ موردنیاز: {required_price} تومان"
+    ),
     "plan_unavailable": "پلن {volume} گیگ فعلا ناموجود است.",
     "plan_sold_out": "پلن {volume} گیگ همین الان ناموجود شد. لطفا دوباره تلاش کنید.",
     "coupon_prompt": "کد تخفیف را ارسال کنید.",
@@ -474,6 +478,12 @@ class ShopCustomizationService:
                     message.text = message.text.replace(old_commission_line, "{commission_text}")
                 elif "{commission_text}" not in message.text:
                     message.text = message.text.replace("لینک قابل کلیک:", "{commission_text}\n\nلینک قابل کلیک:")
+            elif key == "insufficient_balance" and "{wallet_balance}" not in message.text:
+                message.text = message.text.replace(
+                    "مبلغ موردنیاز:",
+                    "موجودی فعلی کیف پول: {wallet_balance} تومان\n"
+                    "مبلغ موردنیاز:",
+                )
 
         for definition in DEFAULT_MESSAGE_BUTTONS:
             existing = (
