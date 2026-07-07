@@ -1,4 +1,5 @@
 const TEHRAN_TIME_ZONE = "Asia/Tehran";
+const LTR_MARK = "\u200e";
 
 const MONTHS = [
   "January",
@@ -84,7 +85,7 @@ export function formatTehranDateTime(value: string | null | undefined, includeTi
   const year = valueOf("year");
   const jalali = gregorianToJalali(Number(year), month, day);
   const jalaliText = `${jalali.day} ${JALALI_MONTHS[jalali.month - 1]} ${jalali.year}`;
-  const gregorianText = `${day} ${MONTHS[month - 1] ?? valueOf("month")} ${year}`;
+  const gregorianText = `${LTR_MARK}${day} ${MONTHS[month - 1] ?? valueOf("month")} ${year}${LTR_MARK}`;
   const dateText = `شمسی: ${jalaliText} | میلادی: ${gregorianText}`;
   if (!includeTime) return dateText;
   return `${dateText} | ساعت: ${valueOf("hour")}:${valueOf("minute")}`;

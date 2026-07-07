@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 
 TEHRAN_TZ = ZoneInfo("Asia/Tehran")
+LTR_MARK = "\u200e"
 
 GREGORIAN_MONTHS = {
     1: "January",
@@ -78,7 +79,7 @@ def format_tehran_datetime(value: datetime | None, *, include_time: bool = True)
         return "-"
     jy, jm, jd = gregorian_to_jalali(local_value.year, local_value.month, local_value.day)
     jalali_text = f"{jd} {JALALI_MONTHS[jm]} {jy}"
-    gregorian_text = f"{local_value.day} {GREGORIAN_MONTHS[local_value.month]} {local_value.year}"
+    gregorian_text = f"{LTR_MARK}{local_value.day} {GREGORIAN_MONTHS[local_value.month]} {local_value.year}{LTR_MARK}"
     date_text = f"شمسی: {jalali_text} | میلادی: {gregorian_text}"
     if not include_time:
         return date_text
