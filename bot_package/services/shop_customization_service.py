@@ -1138,10 +1138,11 @@ class ShopCustomizationService:
         template = message.text if message else DEFAULT_MESSAGES[key]
         parse_mode = message.parse_mode if message and message.parse_mode else PARSE_MODE_MARKDOWN
         if values:
-            rendered = (
-                _safe_format_html(template, values)
-                if parse_mode == "HTML"
-                else _safe_format(template, values, escape_values=escape_markdown_values)
+            rendered, parse_mode = _render_template_with_values(
+                template,
+                parse_mode,
+                values,
+                escape_markdown_values=escape_markdown_values,
             )
         else:
             rendered = template
@@ -1609,5 +1610,22 @@ def _safe_format(template: str, values: dict, *, escape_values: bool = False) ->
 def _safe_format_html(template: str, values: dict) -> str:
     rendered = template
     for key, value in values.items():
-        rendered = rendered.replace("{" + str(key) + "}", html.escape(str(value), quote=False))
+        replacement = str(value) if getattr(value, "parse_mode", None) == "HTML" else html.escape(str(value), quote=False)
+        rendered = rendered.replace("{" + str(key) + "}", replacement)
     return rendered
+
+
+def _render_template_with_values(
+    template: str,
+    parse_mode: str,
+    values: dict,
+    *,
+    escape_markdown_values: bool = False,
+) -> tuple[str, str]:
+    has_html_value = any(getattr(value, "parse_mode", None) == "HTML" for value in values.values())
+    if parse_mode == "HTML":
+        return _safe_format_html(template, values), "HTML"
+    if has_html_value:
+        html_template = _markdown_to_telegram_html(template)
+        return _safe_format_html(html_template, values), "HTML"
+    return _safe_format(template, values, escape_values=escape_markdown_values), parse_mode

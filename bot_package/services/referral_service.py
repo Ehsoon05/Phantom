@@ -49,18 +49,16 @@ class ReferralService:
         }
 
     @staticmethod
-    async def commission_text(session: AsyncSession) -> str:
+    async def commission_text(session: AsyncSession):
         settings = await ReferralService.commission_settings(session)
         if not settings["enabled"] or settings["percent"] <= 0:
             return ""
         from .shop_customization_service import ShopCustomizationService
 
-        return str(
-            await ShopCustomizationService.get_message(
-                session,
-                "referral_commission_text",
-                commission_percent=f"{settings['percent']:d}",
-            )
+        return await ShopCustomizationService.get_message(
+            session,
+            "referral_commission_text",
+            commission_percent=f"{settings['percent']:d}",
         )
 
     @staticmethod
