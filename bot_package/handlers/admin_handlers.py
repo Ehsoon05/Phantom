@@ -1,5 +1,6 @@
 import json
 import logging
+import html
 import re
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -399,13 +400,29 @@ def _message_label(message) -> str:
 
 
 def _message_preview(text: str | None, *, limit: int = 1800) -> str:
-    value = text or "-"
+    value = _readable_message_preview(text or "-")
     if len(value) <= limit:
         return value
     return (
         value[:limit]
         + "\n\n... متن فعلی طولانی است و برای جلوگیری از خطای تلگرام کوتاه نمایش داده شد."
     )
+
+
+def _readable_message_preview(text: str) -> str:
+    value = text or "-"
+    value = re.sub(r'<tg-emoji\s+emoji-id="[^"]+">(.+?)</tg-emoji>', r"\1", value, flags=re.DOTALL)
+    value = re.sub(r"<br\s*/?>", "\n", value, flags=re.IGNORECASE)
+    value = re.sub(r"</p\s*>", "\n", value, flags=re.IGNORECASE)
+    value = re.sub(r"<p[^>]*>", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"</?(b|strong)[^>]*>", "**", value, flags=re.IGNORECASE)
+    value = re.sub(r"</?(i|em)[^>]*>", "_", value, flags=re.IGNORECASE)
+    value = re.sub(r"</?u[^>]*>", "__", value, flags=re.IGNORECASE)
+    value = re.sub(r"<code[^>]*>(.*?)</code>", r"`\1`", value, flags=re.IGNORECASE | re.DOTALL)
+    value = re.sub(r"<pre[^>]*>(.*?)</pre>", r"```\n\1\n```", value, flags=re.IGNORECASE | re.DOTALL)
+    value = re.sub(r'<a\s+href="([^"]+)"[^>]*>(.*?)</a>', r"\2 (\1)", value, flags=re.IGNORECASE | re.DOTALL)
+    value = re.sub(r"<[^>]+>", "", value)
+    return html.unescape(value)
 
 
 async def _message_key_from_admin_label(text: str) -> str | None:
