@@ -136,13 +136,22 @@ def _parse_mode(text: str):
     return getattr(text, "parse_mode", constants.ParseMode.MARKDOWN)
 
 
-async def _message_markup(session, key: str, fallback_markup=None, *, default_url: str | None = None, copy_text: str | None = None):
+async def _message_markup(
+    session,
+    key: str,
+    fallback_markup=None,
+    *,
+    default_url: str | None = None,
+    copy_text: str | None = None,
+    context: dict[str, object] | None = None,
+):
     return await ShopCustomizationService.message_reply_markup(
         session,
         key,
         fallback_markup=fallback_markup,
         default_url=default_url,
         copy_text=copy_text,
+        context=context,
     )
 
 
