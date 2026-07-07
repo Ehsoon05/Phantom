@@ -327,6 +327,11 @@ DEFAULT_MESSAGES: dict[str, str] = {
         "از هر خرید دوستانتان، **{commission_percent} درصد پورسانت** "
         "مستقیم به کیف پول شما اضافه می‌شود."
     ),
+    "referral_user_identity": (
+        "نام: {name}\n"
+        "یوزرنیم: {username}\n"
+        "آیدی عددی: {telegram_id}"
+    ),
     "referral_join_notification": (
         "👥 یک کاربر جدید با لینک دعوت شما به جمع کاربران فانتوم هابز پیوست.\n\n"
         "{referred_identity}"

@@ -64,23 +64,33 @@ class ReferralService:
         )
 
     @staticmethod
-    def user_identity_text(user: User) -> str:
+    def user_raw_values(user: User) -> dict[str, str]:
         username = user.username or ""
-        return (
-            f"نام: {user.first_name or ''}\n"
-            f"یوزرنیم: {('@' + username.lstrip('@')) if username else ''}\n"
-            f"آیدی عددی: {user.telegram_id}"
+        return {
+            "name": user.first_name or "",
+            "username": f"@{username.lstrip('@')}" if username else "",
+            "telegram_id": str(user.telegram_id),
+        }
+
+    @staticmethod
+    async def user_identity_text(session: AsyncSession, user: User) -> str:
+        return str(
+            await ShopCustomizationService.get_message(
+                session,
+                "referral_user_identity",
+                escape_markdown_values=True,
+                **ReferralService.user_raw_values(user),
+            )
         )
 
     @staticmethod
-    def user_template_values(user: User, prefix: str) -> dict[str, str]:
-        username = user.username or ""
-        username_text = f"@{username.lstrip('@')}" if username else ""
+    async def user_template_values(session: AsyncSession, user: User, prefix: str) -> dict[str, str]:
+        raw_values = ReferralService.user_raw_values(user)
         return {
-            f"{prefix}_identity": ReferralService.user_identity_text(user),
-            f"{prefix}_name": user.first_name or "",
-            f"{prefix}_username": username_text,
-            f"{prefix}_id": str(user.telegram_id),
+            f"{prefix}_identity": await ReferralService.user_identity_text(session, user),
+            f"{prefix}_name": raw_values["name"],
+            f"{prefix}_username": raw_values["username"],
+            f"{prefix}_id": raw_values["telegram_id"],
         }
 
     @staticmethod
@@ -119,8 +129,8 @@ class ReferralService:
     async def notify_referral_join(referrer_user_id: int | None, referred_user: User) -> None:
         if not referrer_user_id:
             return
-        values = ReferralService.user_template_values(referred_user, "referred")
         async with async_session() as session:
+            values = await ReferralService.user_template_values(session, referred_user, "referred")
             text = await ShopCustomizationService.get_message(
                 session,
                 "referral_join_notification",
@@ -147,9 +157,9 @@ class ReferralService:
             "percent": f"{notification['percent']:d}",
             "commission": f"{notification['commission']:,}",
             "wallet_balance": f"{notification['wallet_balance']:,}",
-            **ReferralService.user_template_values(referred, "referred"),
         }
         async with async_session() as session:
+            values.update(await ReferralService.user_template_values(session, referred, "referred"))
             text = await ShopCustomizationService.get_message(
                 session,
                 "referral_commission_notification",

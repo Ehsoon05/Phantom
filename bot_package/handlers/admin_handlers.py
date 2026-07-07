@@ -506,6 +506,11 @@ MESSAGE_PLACEHOLDER_HINTS = {
         "`{commission_percent}`\n"
         "عدد درصد به صورت لاتین جایگزین می‌شود."
     ),
+    "referral_user_identity": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{name}` `{username}` `{telegram_id}`\n"
+        "این قالب داخل `{referred_identity}` استفاده می‌شود."
+    ),
     "referral_join_notification": (
         "\n\nکلیدهای قابل استفاده:\n"
         "`{referred_identity}` `{referred_name}` `{referred_username}` `{referred_id}`\n"
