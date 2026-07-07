@@ -400,7 +400,7 @@ def _message_label(message) -> str:
 
 
 def _message_preview(text: str | None, *, limit: int = 1800) -> str:
-    value = _readable_message_preview(text or "-")
+    value = _html_message_preview(text or "-")
     if len(value) <= limit:
         return value
     return (
@@ -409,20 +409,45 @@ def _message_preview(text: str | None, *, limit: int = 1800) -> str:
     )
 
 
-def _readable_message_preview(text: str) -> str:
-    value = text or "-"
-    value = re.sub(r'<tg-emoji\s+emoji-id="[^"]+">(.+?)</tg-emoji>', r"\1", value, flags=re.DOTALL)
-    value = re.sub(r"<br\s*/?>", "\n", value, flags=re.IGNORECASE)
-    value = re.sub(r"</p\s*>", "\n", value, flags=re.IGNORECASE)
-    value = re.sub(r"<p[^>]*>", "", value, flags=re.IGNORECASE)
-    value = re.sub(r"</?(b|strong)[^>]*>", "**", value, flags=re.IGNORECASE)
-    value = re.sub(r"</?(i|em)[^>]*>", "_", value, flags=re.IGNORECASE)
-    value = re.sub(r"</?u[^>]*>", "__", value, flags=re.IGNORECASE)
-    value = re.sub(r"<code[^>]*>(.*?)</code>", r"`\1`", value, flags=re.IGNORECASE | re.DOTALL)
-    value = re.sub(r"<pre[^>]*>(.*?)</pre>", r"```\n\1\n```", value, flags=re.IGNORECASE | re.DOTALL)
-    value = re.sub(r'<a\s+href="([^"]+)"[^>]*>(.*?)</a>', r"\2 (\1)", value, flags=re.IGNORECASE | re.DOTALL)
+def _html_message_preview(text: str) -> str:
+    tokens: dict[str, str] = {}
+
+    def protect(value: str) -> str:
+        token = f"__HTML_PREVIEW_TOKEN_{len(tokens)}__"
+        tokens[token] = value
+        return token
+
+    value = html.unescape(text or "-")
+
+    def protect_custom_emoji(match: re.Match) -> str:
+        emoji_id = html.escape(match.group(1), quote=True)
+        fallback = html.escape(match.group(2), quote=False)
+        return protect(f'<tg-emoji emoji-id="{emoji_id}">{fallback}</tg-emoji>')
+
+    value = re.sub(
+        r'<tg-emoji\s+emoji-id="([^"]+)">(.+?)</tg-emoji>',
+        protect_custom_emoji,
+        value,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    replacements = {
+        r"<br\s*/?>": "\n",
+        r"</p\s*>": "\n",
+        r"<p[^>]*>": "",
+        r"</?(b|strong)[^>]*>": lambda match: protect("</b>" if match.group(0).startswith("</") else "<b>"),
+        r"</?(i|em)[^>]*>": lambda match: protect("</i>" if match.group(0).startswith("</") else "<i>"),
+        r"</?u[^>]*>": lambda match: protect("</u>" if match.group(0).startswith("</") else "<u>"),
+        r"</?s[^>]*>": lambda match: protect("</s>" if match.group(0).startswith("</") else "<s>"),
+        r"</?code[^>]*>": lambda match: protect("</code>" if match.group(0).startswith("</") else "<code>"),
+        r"</?pre[^>]*>": lambda match: protect("</pre>" if match.group(0).startswith("</") else "<pre>"),
+    }
+    for pattern, replacement in replacements.items():
+        value = re.sub(pattern, replacement, value, flags=re.IGNORECASE)
     value = re.sub(r"<[^>]+>", "", value)
-    return html.unescape(value)
+    value = html.escape(value, quote=False)
+    for token, replacement in tokens.items():
+        value = value.replace(token, replacement)
+    return value
 
 
 async def _message_key_from_admin_label(text: str) -> str | None:
@@ -3114,6 +3139,7 @@ async def _show_shop_message_editor(update: Update, context: ContextTypes.DEFAUL
         await update.message.reply_text(
             editor_text,
             reply_markup=admin_response_button_keyboard(),
+            parse_mode=constants.ParseMode.HTML,
         )
     except BadRequest:
         await update.message.reply_text(
