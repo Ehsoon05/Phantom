@@ -6,19 +6,19 @@ from zoneinfo import ZoneInfo
 
 TEHRAN_TZ = ZoneInfo("Asia/Tehran")
 
-GREGORIAN_MONTHS_FA = {
-    1: "ژانویه",
-    2: "فوریه",
-    3: "مارس",
-    4: "آوریل",
-    5: "مه",
-    6: "ژوئن",
-    7: "جولای",
-    8: "اوت",
-    9: "سپتامبر",
-    10: "اکتبر",
-    11: "نوامبر",
-    12: "دسامبر",
+GREGORIAN_MONTHS = {
+    1: "January",
+    2: "February",
+    3: "March",
+    4: "April",
+    5: "May",
+    6: "June",
+    7: "July",
+    8: "August",
+    9: "September",
+    10: "October",
+    11: "November",
+    12: "December",
 }
 
 
@@ -34,7 +34,7 @@ def format_tehran_datetime(value: datetime | None, *, include_time: bool = True)
     local_value = as_tehran(value)
     if local_value is None:
         return "-"
-    month = GREGORIAN_MONTHS_FA[local_value.month]
+    month = GREGORIAN_MONTHS[local_value.month]
     date_text = f"{local_value.day} {month} {local_value.year}"
     if not include_time:
         return date_text

@@ -1,18 +1,18 @@
 const TEHRAN_TIME_ZONE = "Asia/Tehran";
 
 const MONTHS = [
-  "ژانویه",
-  "فوریه",
-  "مارس",
-  "آوریل",
-  "مه",
-  "ژوئن",
-  "جولای",
-  "اوت",
-  "سپتامبر",
-  "اکتبر",
-  "نوامبر",
-  "دسامبر",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 
 function normalizeDate(value: string | null | undefined) {
