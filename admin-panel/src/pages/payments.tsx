@@ -12,6 +12,7 @@ import {
   getRialRequests,
   type RialRequest,
 } from "@/lib/api";
+import { formatTehranDateTime } from "@/lib/date";
 
 const CRYPTO_STATUS_TONE: Record<string, "default" | "secondary" | "destructive"> = {
   credited: "default",
@@ -46,7 +47,7 @@ function RialCard({ request }: { request: RialRequest }) {
             {request.phone_number ? ` · ${request.phone_number}` : ""}
           </p>
           <p className="text-xs text-muted-foreground">
-            {new Date(request.created_at + "Z").toLocaleString("fa-IR")}
+            {formatTehranDateTime(request.created_at)}
           </p>
         </div>
         <div className="flex gap-2">
@@ -141,7 +142,7 @@ function CryptoLedger() {
                   {invoice.tx_hash ?? "—"}
                 </td>
                 <td className="py-2 text-xs text-muted-foreground">
-                  {new Date(invoice.created_at + "Z").toLocaleDateString("fa-IR")}
+                  {formatTehranDateTime(invoice.created_at, false)}
                 </td>
               </tr>
             ))}

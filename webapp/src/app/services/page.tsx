@@ -28,6 +28,7 @@ import {
   v2boxLink,
   v2rayNgLink,
 } from "@/lib/api";
+import { formatTehranDateTime } from "@/lib/date";
 import { getWebApp } from "@/lib/telegram";
 
 async function copyText(value: string) {
@@ -145,7 +146,7 @@ function ServicesContent() {
                 {purchase.service_name ?? `${purchase.volume_gb} گیگ`}
               </p>
               <p className="text-xs text-muted-foreground">
-                {new Date(purchase.purchased_at).toLocaleDateString("fa-IR")}
+                {formatTehranDateTime(purchase.purchased_at, false)}
               </p>
             </div>
             <p className="text-xs text-muted-foreground">

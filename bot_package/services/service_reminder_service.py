@@ -18,6 +18,7 @@ from .provisioning_service import ProvisioningError, ProvisioningService
 from .settings_service import SettingsService
 from .shop_customization_service import ShopCustomizationService
 from .subscription_link_service import SubscriptionLinkService
+from ..utils.datetime_format import format_tehran_datetime, format_tehran_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -369,7 +370,7 @@ class ServiceReminderService:
             "category_key": purchase.category_key or config.category_key or "default",
             "remaining_percent_value": remaining_percent_value,
             "remaining_seconds_value": remaining_seconds_value,
-            "deletion_due_at": deletion_due_at.strftime("%Y-%m-%d %H:%M UTC") if deletion_due_at else "نامشخص",
+            "deletion_due_at": format_tehran_datetime(deletion_due_at) if deletion_due_at else "نامشخص",
             "deletion_remaining_time": _format_duration(deletion_remaining_seconds),
         }
         return due_rules, values
@@ -474,10 +475,10 @@ def _format_expiry(expire: int | None) -> tuple[str, str]:
     expiry = datetime.fromtimestamp(expire, timezone.utc)
     remaining = expiry - datetime.now(timezone.utc)
     if remaining.total_seconds() <= 0:
-        return expiry.strftime("%Y-%m-%d %H:%M UTC"), "منقضی شده"
+        return format_tehran_datetime(expiry), "منقضی شده"
     days = remaining.days
     hours = remaining.seconds // 3600
-    return expiry.strftime("%Y-%m-%d %H:%M UTC"), f"{days} روز و {hours} ساعت"
+    return format_tehran_timestamp(expire), f"{days} روز و {hours} ساعت"
 
 
 def _format_duration(seconds: int | None) -> str:

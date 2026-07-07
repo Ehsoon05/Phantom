@@ -46,6 +46,7 @@ from ..services.required_channel_service import RequiredChannelService
 from ..services.shop_customization_service import ShopCustomizationService
 from ..services.subscription_link_service import SubscriptionLinkService
 from ..services.user_service import UserService
+from ..utils.datetime_format import format_tehran_datetime, format_tehran_timestamp
 from ..utils.keyboards import (
     referral_share_keyboard,
 )
@@ -694,10 +695,10 @@ def _format_expiry(expire: int | None) -> tuple[str, str]:
     expiry = datetime.fromtimestamp(expire, timezone.utc)
     remaining = expiry - datetime.now(timezone.utc)
     if remaining.total_seconds() <= 0:
-        return expiry.strftime("%Y-%m-%d %H:%M UTC"), "منقضی شده"
+        return format_tehran_datetime(expiry), "منقضی شده"
     days = remaining.days
     hours = remaining.seconds // 3600
-    return expiry.strftime("%Y-%m-%d %H:%M UTC"), f"{days} روز و {hours} ساعت"
+    return format_tehran_timestamp(expire), f"{days} روز و {hours} ساعت"
 
 
 async def service_details_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -795,7 +796,7 @@ async def service_details_callback(update: Update, context: ContextTypes.DEFAULT
             expiry_text=expiry_text,
             remaining_time=remaining_time,
             config_count=config_count,
-            purchased_at=purchase.purchased_at.strftime("%Y-%m-%d %H:%M"),
+            purchased_at=format_tehran_datetime(purchase.purchased_at),
             price=f"{purchase.price:,}",
         )
     rows = [

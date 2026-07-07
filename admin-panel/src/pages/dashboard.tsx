@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatToman, getRevenueDaily, getSalesReport, getStats, getStock, hasPermission } from "@/lib/api";
+import { formatTehranDateTime } from "@/lib/date";
 
 function StatCard({
   title,
@@ -266,7 +267,7 @@ export function DashboardPage() {
                     <tbody>
                       {salesReport.recent.map((row) => (
                         <tr key={row.id} className="border-b last:border-0">
-                          <td className="py-2">{new Date(row.purchased_at).toLocaleString("fa-IR")}</td>
+                          <td className="py-2">{formatTehranDateTime(row.purchased_at)}</td>
                           <td className="py-2" dir="ltr">{row.user_id}</td>
                           <td className="py-2">{row.service_name ?? `${row.volume_gb} GB`}</td>
                           <td className="py-2 text-muted-foreground">{row.category_key}</td>

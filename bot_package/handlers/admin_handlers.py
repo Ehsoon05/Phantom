@@ -45,6 +45,7 @@ from ..services.required_channel_service import RequiredChannelService
 from ..services.shop_customization_service import ShopCustomizationService, clean_custom_variable_name
 from ..services.subscription_link_service import SubscriptionLinkService
 from ..services.user_service import UserService
+from ..utils.datetime_format import TEHRAN_TZ, format_tehran_datetime
 from ..utils.keyboards import (
     ADMIN_ADMINS,
     ADMIN_ADD_ADMIN,
@@ -1117,7 +1118,7 @@ def _rial_request_decision_keyboard(request_id: int) -> InlineKeyboardMarkup:
 
 
 def _format_admin_rial_request(request) -> str:
-    when = request.created_at.strftime("%Y-%m-%d %H:%M") if request.created_at else "-"
+    when = format_tehran_datetime(request.created_at) if request.created_at else "-"
     phone = request.phone_number or "دریافت نشده"
     return (
         f"درخواست واریز ریالی #{request.id}\n\n"
@@ -1419,7 +1420,7 @@ async def view_prices(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with async_session() as session:
         plans = await ShopCustomizationService.list_plans(session)
 
-    message = PRICE_LIST_HEADER.format(datetime.now().strftime("%Y-%m-%d %H:%M"))
+    message = PRICE_LIST_HEADER.format(format_tehran_datetime(datetime.now(timezone.utc)))
     async with async_session() as session:
         for plan in plans:
             price = await PriceService.get_plan_price(session, plan)
@@ -1487,7 +1488,7 @@ async def save_new_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if success:
         await update.message.reply_text(
-            PRICE_UPDATED.format(context.user_data.get("editing_volume"), f"{new_price:,}", datetime.now().strftime("%H:%M:%S")),
+            PRICE_UPDATED.format(context.user_data.get("editing_volume"), f"{new_price:,}", datetime.now(TEHRAN_TZ).strftime("%H:%M:%S")),
             reply_markup=admin_prices_keyboard(),
             parse_mode=constants.ParseMode.MARKDOWN,
         )
@@ -1520,7 +1521,7 @@ async def search_user_result(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"نام: {user.first_name}\n"
             f"یوزرنیم: @{user.username or 'ندارد'}\n"
             f"موجودی کیف پول: **{user.wallet_balance:,} تومان**\n"
-            f"تاریخ عضویت: {user.created_at.strftime('%Y-%m-%d')}\n"
+            f"تاریخ عضویت: {format_tehran_datetime(user.created_at, include_time=False)}\n"
             f"وضعیت: {status}\n\n"
             "**خلاصه خرید**\n"
             f"تعداد خرید: **{purchase_summary['total_count']}**\n"
@@ -1532,7 +1533,7 @@ async def search_user_result(update: Update, context: ContextTypes.DEFAULT_TYPE)
             for purchase in purchase_summary["purchases"]:
                 coupon_text = f" | کد تخفیف: {purchase.coupon_code}" if purchase.coupon_code else ""
                 message += (
-                    f"{purchase.purchased_at.strftime('%Y-%m-%d %H:%M')} | "
+                    f"{format_tehran_datetime(purchase.purchased_at)} | "
                     f"{purchase.volume_gb} گیگ | {purchase.price:,} تومان{coupon_text}\n"
                 )
         else:
@@ -1642,7 +1643,7 @@ async def charge_wallet_execute(update: Update, context: ContextTypes.DEFAULT_TY
         else:
             notification_status = "\nشارژ ثبت شد، اما ارسال پیام به کاربر ممکن نبود."
         await update.message.reply_text(
-            CHARGE_SUCCESS.format(user_id, f"{amount:,}", datetime.now().strftime("%H:%M:%S"))
+            CHARGE_SUCCESS.format(user_id, f"{amount:,}", datetime.now(TEHRAN_TZ).strftime("%H:%M:%S"))
             + notification_status,
             reply_markup=admin_users_keyboard(),
             parse_mode=constants.ParseMode.MARKDOWN,
@@ -1909,14 +1910,10 @@ async def sales_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if purchases:
         message += "\n**آخرین فروش‌ها:**\n"
         for purchase in purchases[:12]:
-            purchased_at = purchase.purchased_at
-            if purchased_at.tzinfo is None:
-                purchased_at = purchased_at.replace(tzinfo=timezone.utc)
-            local_time = purchased_at.astimezone(tehran).strftime("%m-%d %H:%M")
             kind = "تمدید" if purchase.kind == "renewal" else "خرید"
             source = "پنل" if purchase.provision_source == "panel" else "انبار"
             title = escape_markdown(purchase.service_name or _volume_label(purchase.volume_gb), version=1)
-            message += f"{local_time} | {kind} | {source} | {title} | {purchase.price:,} تومان\n"
+            message += f"{format_tehran_datetime(purchase.purchased_at)} | {kind} | {source} | {title} | {purchase.price:,} تومان\n"
 
     await update.message.reply_text(
         message[:3900],
@@ -1957,7 +1954,7 @@ async def referral_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     lines = ["**گزارش دعوت‌ها**\n"]
     for referred_id, referrer_id, referred_at in rows[:50]:
-        when = referred_at.strftime("%Y-%m-%d %H:%M") if referred_at else "-"
+        when = format_tehran_datetime(referred_at) if referred_at else "-"
         lines.append(f"`{referred_id}` ← `{referrer_id}` | {when}")
 
     await update.message.reply_text(
@@ -5163,7 +5160,7 @@ def _crypto_asset_label(value: str | None) -> str:
 
 def _format_invoice(invoice) -> str:
     status = _CRYPTO_STATUS_FA.get(invoice.status, invoice.status)
-    when = invoice.created_at.strftime("%Y-%m-%d %H:%M") if invoice.created_at else "-"
+    when = format_tehran_datetime(invoice.created_at) if invoice.created_at else "-"
     coin_label = _crypto_asset_label(invoice.coin)
     network_label = _crypto_asset_label(invoice.network)
     lines = [
@@ -5383,7 +5380,7 @@ async def crypto_set_ton_save(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 def _format_rial_request(request) -> str:
-    when = request.created_at.strftime("%Y-%m-%d %H:%M") if request.created_at else "-"
+    when = format_tehran_datetime(request.created_at) if request.created_at else "-"
     phone = request.phone_number or "دریافت نشده"
     return (
         f"#{request.id} | {request.status}\n"

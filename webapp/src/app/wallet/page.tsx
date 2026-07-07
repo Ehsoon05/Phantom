@@ -32,6 +32,7 @@ import {
   type CryptoInvoice,
   type RialRequest,
 } from "@/lib/api";
+import { formatTehranDateTime } from "@/lib/date";
 import { getWebApp } from "@/lib/telegram";
 
 // Persian digits -> latin, for amount inputs typed with a Persian keyboard.
@@ -465,7 +466,7 @@ function TransactionsList() {
       {transactions.slice(0, 10).map((t) => (
         <div key={t.id} className="flex items-center justify-between py-1 text-sm">
           <span className="text-muted-foreground">
-            {new Date(t.created_at + "Z").toLocaleDateString("fa-IR")}
+            {formatTehranDateTime(t.created_at, false)}
           </span>
           <span className={t.amount >= 0 ? "font-bold text-green-600" : "font-bold"}>
             {t.amount >= 0 ? "+" : ""}

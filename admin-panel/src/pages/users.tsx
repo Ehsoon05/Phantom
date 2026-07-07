@@ -24,19 +24,12 @@ import {
   revokeUserSubscriptionLink,
   renewUserPurchase,
 } from "@/lib/admin-api";
+import { formatTehranDateTime } from "@/lib/date";
 
 const PAGE_SIZE = 25;
 
 function formatStartDate(value: string | null) {
-  if (!value) return "نامشخص";
-  const normalized = /(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? value : `${value}Z`;
-  const date = new Date(normalized);
-  if (Number.isNaN(date.getTime())) return "نامشخص";
-  return new Intl.DateTimeFormat("en-GB", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "Asia/Tehran",
-  }).format(date);
+  return formatTehranDateTime(value);
 }
 
 function telegramProfileUrl(username: string) {
@@ -113,7 +106,7 @@ function UserDetail({ telegramId }: { telegramId: number }) {
                 <td className="py-2">
                   {p.panel_deleted_at ? <Badge variant="destructive">حذف از پنل</Badge> : <Badge variant="secondary">فعال</Badge>}
                 </td>
-                <td className="py-2 text-muted-foreground">{new Date(p.purchased_at + "Z").toLocaleDateString("fa-IR")}</td>
+                <td className="py-2 text-muted-foreground">{formatTehranDateTime(p.purchased_at, false)}</td>
                 <td className="py-2">
                   <div className="flex flex-wrap gap-1">
                     <Button
