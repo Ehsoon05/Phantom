@@ -351,6 +351,38 @@ RESPONSE_BUTTON_VALUES = {
     ADMIN_RESPONSE_REPLY_KEYBOARD: "reply_keyboard",
 }
 
+ADMIN_MESSAGE_BUTTONS_LIST = "🔘 دکمه‌های شیشه‌ای پیام"
+ADMIN_MESSAGE_BUTTON_ADD = "➕ افزودن دکمه شیشه‌ای"
+ADMIN_MESSAGE_BUTTON_DELETE = "🗑 حذف دکمه شیشه‌ای"
+ADMIN_MESSAGE_BUTTON_TOGGLE = "🔛 خاموش/روشن دکمه شیشه‌ای"
+ADMIN_MESSAGE_BUTTON_TEXT = "✏️ متن دکمه شیشه‌ای"
+ADMIN_MESSAGE_BUTTON_PAYLOAD = "🔗 لینک/متن کپی دکمه شیشه‌ای"
+ADMIN_MESSAGE_BUTTON_TYPE = "🧩 نوع دکمه شیشه‌ای"
+ADMIN_MESSAGE_BUTTON_STYLE = "🎨 رنگ دکمه شیشه‌ای"
+ADMIN_MESSAGE_BUTTON_PREMIUM = "💎 ایموجی پریمیوم دکمه شیشه‌ای"
+ADMIN_MESSAGE_BUTTON_SOURCE = "⚙️ اکشن دکمه موجود"
+ADMIN_MESSAGE_BUTTON_ROW = "↕️ ردیف دکمه شیشه‌ای"
+ADMIN_MESSAGE_BUTTON_COL = "↔️ ستون دکمه شیشه‌ای"
+
+MESSAGE_BUTTON_TYPE_VALUES = {
+    "لینک شیشه‌ای": "inline_url",
+    "کپی شیشه‌ای": "inline_copy",
+    "اکشن دکمه موجود": "inline_action",
+}
+
+MESSAGE_BUTTON_ACTIONS = {
+    ADMIN_MESSAGE_BUTTON_DELETE: "delete",
+    ADMIN_MESSAGE_BUTTON_TOGGLE: "toggle",
+    ADMIN_MESSAGE_BUTTON_TEXT: "text",
+    ADMIN_MESSAGE_BUTTON_PAYLOAD: "payload",
+    ADMIN_MESSAGE_BUTTON_TYPE: "type",
+    ADMIN_MESSAGE_BUTTON_STYLE: "style",
+    ADMIN_MESSAGE_BUTTON_PREMIUM: "premium_emoji_id",
+    ADMIN_MESSAGE_BUTTON_SOURCE: "source_button_id",
+    ADMIN_MESSAGE_BUTTON_ROW: "row",
+    ADMIN_MESSAGE_BUTTON_COL: "col",
+}
+
 ADMIN_TOP_LEVEL_LABELS = {
     ADMIN_INVENTORY,
     ADMIN_PRICES,
@@ -494,6 +526,64 @@ def _button_label(button) -> str:
     status = "فعال" if button.is_enabled else "غیرفعال"
     emoji = f"{button.emoji} " if button.emoji else ""
     return f"#{button.id} {emoji}{button.text} ({status})"
+
+
+def _message_button_label(button) -> str:
+    status = "فعال" if button.is_enabled else "خاموش"
+    emoji = "💎 " if button.premium_emoji_id else ""
+    return f"#{button.id} {emoji}{button.text} | {button.button_type} | ردیف {button.row} ستون {button.col} ({status})"
+
+
+def _message_button_summary(button) -> str:
+    status = "فعال" if button.is_enabled else "خاموش"
+    style = button.style or "default"
+    payload = button.payload or "-"
+    premium = button.premium_emoji_id or "-"
+    source = f"#{button.source_button_id}" if button.source_button_id else "-"
+    return (
+        f"#{button.id} {button.text}\n"
+        f"  نوع: {button.button_type} | وضعیت: {status}\n"
+        f"  رنگ: {style} | ایموجی پریمیوم: {premium}\n"
+        f"  لینک/متن: {payload}\n"
+        f"  اکشن متصل: {source} | ردیف/ستون: {button.row}/{button.col}"
+    )
+
+
+def _message_buttons_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            [ADMIN_MESSAGE_BUTTONS_LIST, ADMIN_MESSAGE_BUTTON_ADD],
+            [ADMIN_MESSAGE_BUTTON_TEXT, ADMIN_MESSAGE_BUTTON_PAYLOAD],
+            [ADMIN_MESSAGE_BUTTON_TYPE, ADMIN_MESSAGE_BUTTON_STYLE],
+            [ADMIN_MESSAGE_BUTTON_PREMIUM, ADMIN_MESSAGE_BUTTON_SOURCE],
+            [ADMIN_MESSAGE_BUTTON_ROW, ADMIN_MESSAGE_BUTTON_COL],
+            [ADMIN_MESSAGE_BUTTON_TOGGLE, ADMIN_MESSAGE_BUTTON_DELETE],
+            [ADMIN_RESPONSE_TEXT, ADMIN_RESPONSE_INLINE_COPY],
+            [ADMIN_RESPONSE_INLINE_URL, ADMIN_RESPONSE_INLINE_ACTION],
+            [ADMIN_RESPONSE_REPLY_KEYBOARD, ADMIN_RESPONSE_SELECT_EXISTING],
+            [ADMIN_RESPONSE_EDIT_STYLE, ADMIN_RESPONSE_EDIT_PREMIUM_EMOJI],
+            [ADMIN_EDIT_PREMIUM_EMOJI, ADMIN_EDIT_PREMIUM_EMOJI_POSITION],
+            [CANCEL, ADMIN_BACK],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
+def _message_button_type_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [[label] for label in MESSAGE_BUTTON_TYPE_VALUES] + [[CANCEL, ADMIN_BACK]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
+async def _get_message_button_for_key(session, key: str, raw_value: str):
+    button_id = _parse_hash_id(raw_value)
+    button = await ShopCustomizationService.get_message_button(session, button_id) if button_id else None
+    if not button or button.message_key != key:
+        return None
+    return button
 
 
 def _volume_label(volume_gb: int) -> str:
@@ -3080,12 +3170,15 @@ async def shop_message_select(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def _show_shop_message_editor(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str):
     async with async_session() as session:
         message = await ShopCustomizationService.get_message_row(session, key)
+        message_buttons = await ShopCustomizationService.list_message_buttons(session, key)
     if not message:
         await update.message.reply_text("این پیام پیدا نشد.", reply_markup=admin_shop_settings_keyboard())
         return ConversationHandler.END
 
     context.user_data["shop_message_key"] = key
     context.user_data.pop("shop_message_field", None)
+    context.user_data.pop("shop_message_button_action", None)
+    context.user_data.pop("shop_message_button_id", None)
     button_type = message.response_button_type or "text"
     button_text = message.response_button_text or "-"
     button_url = message.response_button_url or "-"
@@ -3099,10 +3192,15 @@ async def _show_shop_message_editor(update: Update, context: ContextTypes.DEFAUL
         "right": "راست",
         "none": "غیرفعال",
     }.get(message.premium_emoji_position, "غیرفعال")
+    message_button_lines = (
+        "\n\nدکمه‌های شیشه‌ای چندتایی این پیام:\n"
+        + ("\n\n".join(_message_button_summary(button) for button in message_buttons) if message_buttons else "ندارد")
+    )
     extra_note = (
         "\n\nایموجی پریمیوم پیام:\n"
         f"آیدی فعلی: {premium_emoji}\n"
         f"جای فعلی: {premium_position}\n"
+        f"{message_button_lines}"
         "\n\nتنظیم دکمه جواب همین پیام:\n"
         f"نوع فعلی: {button_type}\n"
         f"متن دکمه: {button_text}\n"
@@ -3138,13 +3236,13 @@ async def _show_shop_message_editor(update: Update, context: ContextTypes.DEFAUL
     try:
         await update.message.reply_text(
             editor_text,
-            reply_markup=admin_response_button_keyboard(),
+            reply_markup=_message_buttons_keyboard(),
             parse_mode=constants.ParseMode.HTML,
         )
     except BadRequest:
         await update.message.reply_text(
             fallback_text,
-            reply_markup=admin_response_button_keyboard(),
+            reply_markup=_message_buttons_keyboard(),
         )
     return SHOP_MESSAGE_TEXT
 
@@ -3157,11 +3255,161 @@ async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = context.user_data.get("shop_message_key")
     raw_value = (update.message.text or update.message.caption or "").strip()
     pending_field = context.user_data.get("shop_message_field")
+    pending_button_action = context.user_data.get("shop_message_button_action")
     if raw_value.startswith("📝"):
         selected_key = await _message_key_from_admin_label(raw_value)
         if selected_key:
             return await _show_shop_message_editor(update, context, selected_key)
         await update.message.reply_text("این پیام پیدا نشد.")
+        return SHOP_MESSAGE_TEXT
+    if pending_field and str(pending_field).startswith("message_button_"):
+        button_id = context.user_data.get("shop_message_button_id")
+        async with async_session() as session:
+            button = await ShopCustomizationService.get_message_button(session, button_id) if button_id else None
+            if not button or button.message_key != key:
+                context.user_data.pop("shop_message_field", None)
+                context.user_data.pop("shop_message_button_id", None)
+                await update.message.reply_text("دکمه معتبر نیست؛ دوباره از فهرست انتخاب کنید.")
+                return await _show_shop_message_editor(update, context, key)
+
+            update_values = {}
+            if pending_field == "message_button_text":
+                if not raw_value:
+                    await update.message.reply_text("متن دکمه نمی‌تواند خالی باشد.")
+                    return SHOP_MESSAGE_TEXT
+                update_values["text"] = raw_value
+            elif pending_field == "message_button_payload":
+                update_values["payload"] = None if raw_value in {"", "-", "حذف"} else raw_value
+            elif pending_field == "message_button_type":
+                button_type = MESSAGE_BUTTON_TYPE_VALUES.get(raw_value)
+                if not button_type:
+                    await update.message.reply_text("نوع دکمه معتبر نیست.", reply_markup=_message_button_type_keyboard())
+                    return SHOP_MESSAGE_TEXT
+                update_values["button_type"] = button_type
+            elif pending_field == "message_button_style":
+                style = raw_value if raw_value in STYLE_VALUES else None
+                if style is None:
+                    await update.message.reply_text("رنگ معتبر نیست.", reply_markup=admin_style_keyboard())
+                    return SHOP_MESSAGE_TEXT
+                update_values["style"] = None if style == "default" else style
+            elif pending_field == "message_button_premium_emoji_id":
+                premium_emoji_id = _read_custom_emoji_id(update.message, raw_value)
+                if premium_emoji_id == "":
+                    await update.message.reply_text("ایموجی پریمیوم معتبر بفرستید یا برای حذف `-` ارسال کنید.")
+                    return SHOP_MESSAGE_TEXT
+                update_values["premium_emoji_id"] = premium_emoji_id
+            elif pending_field == "message_button_source_id":
+                source_id = _parse_hash_id(raw_value)
+                source_button = await ShopCustomizationService.get_button(session, source_id) if source_id else None
+                if not source_button:
+                    await update.message.reply_text("دکمه معتبر نیست؛ یکی از دکمه‌های فهرست را انتخاب کنید.")
+                    return SHOP_MESSAGE_TEXT
+                update_values["source_button_id"] = source_button.id
+                update_values["button_type"] = "inline_action"
+            elif pending_field == "message_button_row":
+                if not raw_value.isdigit():
+                    await update.message.reply_text("ردیف باید عدد باشد؛ مثلا 0 یا 1.")
+                    return SHOP_MESSAGE_TEXT
+                update_values["row"] = int(raw_value)
+            elif pending_field == "message_button_col":
+                if not raw_value.isdigit():
+                    await update.message.reply_text("ستون باید عدد باشد؛ مثلا 0 یا 1.")
+                    return SHOP_MESSAGE_TEXT
+                update_values["col"] = int(raw_value)
+
+            await ShopCustomizationService.update_message_button(session, button.id, **update_values)
+        context.user_data.pop("shop_message_field", None)
+        context.user_data.pop("shop_message_button_id", None)
+        await update.message.reply_text("تنظیمات دکمه شیشه‌ای ذخیره شد.")
+        return await _show_shop_message_editor(update, context, key)
+
+    if pending_button_action:
+        async with async_session() as session:
+            button = await _get_message_button_for_key(session, key, raw_value)
+            if not button:
+                await update.message.reply_text("دکمه معتبر نیست؛ یکی از دکمه‌های همین پیام را انتخاب کنید.")
+                return SHOP_MESSAGE_TEXT
+
+            if pending_button_action == "delete":
+                await ShopCustomizationService.delete_message_button(session, button.id)
+                context.user_data.pop("shop_message_button_action", None)
+                await update.message.reply_text("دکمه شیشه‌ای حذف شد.")
+                return await _show_shop_message_editor(update, context, key)
+            if pending_button_action == "toggle":
+                await ShopCustomizationService.update_message_button(session, button.id, is_enabled=not button.is_enabled)
+                context.user_data.pop("shop_message_button_action", None)
+                await update.message.reply_text("وضعیت دکمه شیشه‌ای تغییر کرد.")
+                return await _show_shop_message_editor(update, context, key)
+            if pending_button_action == "source_button_id":
+                buttons = await ShopCustomizationService.list_buttons(session)
+                labels = [_button_label(item) for item in buttons if item.is_enabled]
+                if not labels:
+                    await update.message.reply_text("دکمه فعالی برای اتصال وجود ندارد.")
+                    return SHOP_MESSAGE_TEXT
+                context.user_data["shop_message_field"] = "message_button_source_id"
+                context.user_data["shop_message_button_id"] = button.id
+                context.user_data.pop("shop_message_button_action", None)
+                await update.message.reply_text(
+                    "دکمه موجود را انتخاب کنید تا اکشن آن به این دکمه شیشه‌ای وصل شود.",
+                    reply_markup=_rows(labels, width=1),
+                )
+                return SHOP_MESSAGE_TEXT
+
+        context.user_data["shop_message_button_id"] = button.id
+        context.user_data.pop("shop_message_button_action", None)
+        context.user_data["shop_message_field"] = f"message_button_{pending_button_action}"
+        prompts = {
+            "text": "متن جدید دکمه شیشه‌ای را بفرستید.",
+            "payload": "لینک یا متن کپی را بفرستید. برای حذف مقدار، `-` بفرستید.",
+            "premium_emoji_id": "ایموجی پریمیوم دکمه را مستقیم ارسال کنید تا آیدی آن خوانده شود. برای حذف `-` بفرستید.",
+            "row": "شماره ردیف را بفرستید؛ از 0 شروع می‌شود.",
+            "col": "شماره ستون را بفرستید؛ از 0 شروع می‌شود.",
+        }
+        if pending_button_action == "type":
+            await update.message.reply_text("نوع دکمه شیشه‌ای را انتخاب کنید.", reply_markup=_message_button_type_keyboard())
+        elif pending_button_action == "style":
+            await update.message.reply_text("رنگ دکمه شیشه‌ای را انتخاب کنید.", reply_markup=admin_style_keyboard())
+        else:
+            await update.message.reply_text(prompts.get(pending_button_action, "مقدار جدید را بفرستید."), reply_markup=_cancel_back_keyboard())
+        return SHOP_MESSAGE_TEXT
+
+    if raw_value == ADMIN_MESSAGE_BUTTONS_LIST:
+        async with async_session() as session:
+            buttons = await ShopCustomizationService.list_message_buttons(session, key)
+        text = "دکمه شیشه‌ای برای این پیام ثبت نشده است." if not buttons else "\n\n".join(_message_button_summary(button) for button in buttons)
+        await update.message.reply_text(text, reply_markup=_message_buttons_keyboard())
+        return SHOP_MESSAGE_TEXT
+    if raw_value == ADMIN_MESSAGE_BUTTON_ADD:
+        async with async_session() as session:
+            buttons = await ShopCustomizationService.list_message_buttons(session, key)
+            next_row = max((button.row for button in buttons), default=-1) + 1
+            button = await ShopCustomizationService.create_message_button(
+                session,
+                message_key=key,
+                button_type="inline_url",
+                text="دکمه جدید",
+                payload=None,
+                row=next_row,
+                col=0,
+            )
+        if not button:
+            await update.message.reply_text("ساخت دکمه انجام نشد؛ پیام معتبر نیست.")
+            return SHOP_MESSAGE_TEXT
+        await update.message.reply_text(
+            f"دکمه شیشه‌ای ساخته شد: #{button.id}\nحالا با گزینه‌های ویرایش، متن، نوع، لینک، رنگ و ایموجی‌اش را تنظیم کن."
+        )
+        return await _show_shop_message_editor(update, context, key)
+    if raw_value in MESSAGE_BUTTON_ACTIONS:
+        async with async_session() as session:
+            buttons = await ShopCustomizationService.list_message_buttons(session, key)
+        if not buttons:
+            await update.message.reply_text("برای این پیام هنوز دکمه شیشه‌ای ساخته نشده است. اول «افزودن دکمه شیشه‌ای» را بزن.")
+            return SHOP_MESSAGE_TEXT
+        context.user_data["shop_message_button_action"] = MESSAGE_BUTTON_ACTIONS[raw_value]
+        await update.message.reply_text(
+            "کدام دکمه شیشه‌ای را می‌خواهی تغییر بدهی؟",
+            reply_markup=_rows([_message_button_label(button) for button in buttons], width=1),
+        )
         return SHOP_MESSAGE_TEXT
     if pending_field == "premium_emoji_id":
         premium_emoji_id = _read_custom_emoji_id(update.message, raw_value)
