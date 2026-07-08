@@ -209,7 +209,6 @@ async def create_rial_request(
     destination_card = await SettingsService.get_rial_destination_card_number(session)
     destination_holder = await SettingsService.get_rial_destination_card_holder(session)
     valid_minutes = await SettingsService.get_rial_receipt_valid_minutes(session)
-    receipt_bot_username = await SettingsService.get_rial_receipt_bot_username(session)
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=valid_minutes)
     # Build the request exactly like the bot: a copyable support message, a
     # fuller "direct" text stored for the admin, and the customizable
@@ -264,7 +263,7 @@ async def create_rial_request(
             destination_card=destination_card,
             destination_holder=destination_holder,
             expires_at=request.expires_at,
-            receipt_bot_url=f"https://t.me/{receipt_bot_username}?start=r_{request.id}",
+            receipt_bot_url=f"https://t.me/{BotConfig.MAIN_BOT_USERNAME}?start=rial_receipt_{request.id}",
             created_at=request.created_at,
         )
     copy_text = (

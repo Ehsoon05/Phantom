@@ -208,6 +208,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if payload == "verify_phone":
         await rial_user.verify_phone_start(update, context)
         return
+    if payload and payload.startswith("rial_receipt_"):
+        try:
+            request_id = int(payload.removeprefix("rial_receipt_"))
+        except ValueError:
+            request_id = None
+        await rial_user.start_receipt_upload(update, context, request_id)
+        return
     if db_user.accepted_rules_at is None:
         await rules_menu(update, context)
         return
@@ -1037,6 +1044,9 @@ async def shop_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get(rial_user.STEP_KEY):
         await rial_user.handle_text(update, context)
         return
+    if context.user_data.get(rial_user.RECEIPT_REQUEST_KEY):
+        await rial_user.handle_text(update, context)
+        return
 
     if context.user_data.get(crypto_user.STEP_KEY):
         await crypto_user.handle_step(update, context)
@@ -1149,8 +1159,10 @@ user_handlers = [
     CommandHandler("support", support_menu),
     CommandHandler("cancel", cancel_coupon),
     CallbackQueryHandler(response_button_callback, pattern=r"^shop_response(_button)?:\d+$"),
+    CallbackQueryHandler(rial_user.receipt_upload_callback, pattern=rf"^{rial_user.RECEIPT_CALLBACK_PREFIX}:\d+$"),
     CallbackQueryHandler(service_details_callback, pattern=r"^(service:\d+|service_qr:\d+|services:list)$"),
     CallbackQueryHandler(renew_service_callback, pattern=r"^renew_(confirm|do):\d+$"),
     MessageHandler(filters.CONTACT, rial_user.handle_contact),
+    MessageHandler((filters.PHOTO | filters.Document.ALL | filters.VIDEO) & ~filters.COMMAND, rial_user.handle_receipt_message),
     MessageHandler(filters.TEXT & ~filters.COMMAND, shop_text_router),
 ]

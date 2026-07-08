@@ -30,6 +30,8 @@ STEP_KEY = "rial_step"
 AMOUNT_KEY = "rial_amount"
 PHONE_KEY = "rial_phone"
 VERIFY_PHONE_KEY = "verify_phone_for_webapp"
+RECEIPT_REQUEST_KEY = "rial_receipt_request_id"
+RECEIPT_CALLBACK_PREFIX = "rial_receipt_upload"
 
 
 def _back_keyboard() -> ReplyKeyboardMarkup:
@@ -93,6 +95,7 @@ def clear_state(context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop(AMOUNT_KEY, None)
     context.user_data.pop(PHONE_KEY, None)
     context.user_data.pop(VERIFY_PHONE_KEY, None)
+    context.user_data.pop(RECEIPT_REQUEST_KEY, None)
 
 
 async def _cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -101,6 +104,54 @@ async def _cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         text = await ShopCustomizationService.get_message(session, "main_menu")
         keyboard = await ShopCustomizationService.main_menu_keyboard(session)
     await update.effective_message.reply_text(text, reply_markup=keyboard, parse_mode=getattr(text, "parse_mode", None))
+
+
+async def start_receipt_upload(update: Update, context: ContextTypes.DEFAULT_TYPE, request_id: int | None = None) -> None:
+    async with async_session() as session:
+        request = await RialPaymentService.get_request(session, request_id) if request_id else None
+        if not request or request.user_id != update.effective_user.id:
+            request = await RialPaymentService.latest_receipt_waiting_request(session, update.effective_user.id)
+        if not request:
+            await update.effective_message.reply_text("درخواست پرداخت فعالی برای دریافت رسید پیدا نشد.")
+            return
+        if RialPaymentService.is_expired(request):
+            await RialPaymentService.mark_expired(session, request)
+            text = await ShopCustomizationService.get_message(session, "rial_receipt_expired")
+            await update.effective_message.reply_text(text, parse_mode=getattr(text, "parse_mode", None))
+            return
+        text = await ShopCustomizationService.get_message(
+            session,
+            "rial_receipt_bot_start",
+            amount=f"{request.amount_toman:,}",
+            tracking_code=request.tracking_code,
+            expires_at=format_tehran_datetime(request.expires_at),
+        )
+    context.user_data[RECEIPT_REQUEST_KEY] = request.id
+    await update.effective_message.reply_text(
+        text,
+        reply_markup=_back_keyboard(),
+        parse_mode=getattr(text, "parse_mode", None),
+    )
+
+
+async def receipt_upload_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    try:
+        request_id = int((query.data or "").split(":", 1)[1])
+    except (IndexError, ValueError):
+        await query.message.reply_text("درخواست پرداخت معتبر نیست.")
+        return
+    callback_update = type(
+        "CallbackUpdate",
+        (),
+        {
+            "effective_user": query.from_user,
+            "effective_message": query.message,
+            "message": query.message,
+        },
+    )()
+    await start_receipt_upload(callback_update, context, request_id)
 
 
 async def charge_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -151,6 +202,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     text = (update.message.text or "").strip()
     if text == BACK_TO_MAIN:
         await _cancel(update, context)
+        return
+
+    if context.user_data.get(RECEIPT_REQUEST_KEY):
+        await handle_receipt_message(update, context)
         return
 
     step = context.user_data.get(STEP_KEY)
@@ -272,7 +327,6 @@ async def _handle_card(update: Update, context: ContextTypes.DEFAULT_TYPE, value
         destination_card = await SettingsService.get_rial_destination_card_number(session)
         destination_holder = await SettingsService.get_rial_destination_card_holder(session)
         valid_minutes = await SettingsService.get_rial_receipt_valid_minutes(session)
-        receipt_bot_username = await SettingsService.get_rial_receipt_bot_username(session)
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=valid_minutes)
         request = await RialPaymentService.create_request(
             session,
@@ -339,10 +393,9 @@ async def _handle_card(update: Update, context: ContextTypes.DEFAULT_TYPE, value
             await RialPaymentService.update_request_text(session, request, direct_text)
 
     if payment_mode == "receipt_bot":
-        receipt_url = f"https://t.me/{receipt_bot_username}?start=r_{request.id}"
         keyboard = InlineKeyboardMarkup(
             [
-                [InlineKeyboardButton("📸 ارسال رسید پرداخت", url=receipt_url)],
+                [InlineKeyboardButton("📸 ارسال رسید پرداخت", callback_data=f"{RECEIPT_CALLBACK_PREFIX}:{request.id}")],
                 [InlineKeyboardButton("📋 کپی شماره کارت", api_kwargs={"copy_text": {"text": destination_card}})],
             ]
         )
@@ -378,3 +431,30 @@ async def _handle_card(update: Update, context: ContextTypes.DEFAULT_TYPE, value
                 data={"chat_id": sent.chat_id, "message_id": sent.message_id, "request_id": request.id},
                 name=f"delete_rial_card_{request.id}",
             )
+
+
+async def handle_receipt_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_message or not update.effective_user:
+        return
+    request_id = context.user_data.get(RECEIPT_REQUEST_KEY)
+    if not request_id:
+        async with async_session() as session:
+            request = await RialPaymentService.latest_receipt_waiting_request(session, update.effective_user.id)
+        if not request:
+            return
+        request_id = request.id
+    from ..receipt_bot import send_receipt_to_admins
+
+    ok, user_text = await send_receipt_to_admins(
+        request_id=int(request_id),
+        source_chat_id=update.effective_chat.id,
+        source_message_id=update.effective_message.message_id,
+        receipt_text=update.effective_message.text or update.effective_message.caption,
+        source_bot=context.bot,
+        source_message=update.effective_message,
+    )
+    context.user_data.pop(RECEIPT_REQUEST_KEY, None)
+    await update.effective_message.reply_text(
+        user_text or ("رسید شما دریافت شد." if ok else "ارسال رسید انجام نشد."),
+        parse_mode=getattr(user_text, "parse_mode", None),
+    )

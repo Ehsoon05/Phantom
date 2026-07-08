@@ -65,17 +65,25 @@ function gregorianToJalali(year: number, month: number, day: number) {
 }
 
 export function formatTehranDateTime(value: string | null | undefined, includeTime = true) {
+  const parts = formatTehranDateParts(value);
+  if (!parts) return "نامشخص";
+  const dateText = `شمسی: ${parts.jalali} | میلادی: ${parts.gregorian}`;
+  if (!includeTime) return dateText;
+  return `${dateText} | ساعت: ${parts.time}`;
+}
+
+export function formatTehranDateParts(value: string | null | undefined) {
   const normalized = normalizeDate(value);
-  if (!normalized) return "نامشخص";
+  if (!normalized) return null;
   const date = new Date(normalized);
-  if (Number.isNaN(date.getTime())) return "نامشخص";
+  if (Number.isNaN(date.getTime())) return null;
 
   const parts = new Intl.DateTimeFormat("en-GB", {
     day: "numeric",
     month: "numeric",
     year: "numeric",
-    hour: includeTime ? "2-digit" : undefined,
-    minute: includeTime ? "2-digit" : undefined,
+    hour: "2-digit",
+    minute: "2-digit",
     hourCycle: "h23",
     timeZone: TEHRAN_TIME_ZONE,
   }).formatToParts(date);
@@ -86,7 +94,9 @@ export function formatTehranDateTime(value: string | null | undefined, includeTi
   const jalali = gregorianToJalali(Number(year), month, day);
   const jalaliText = `${jalali.day} ${JALALI_MONTHS[jalali.month - 1]} ${jalali.year}`;
   const gregorianText = `${LTR_MARK}${day} ${MONTHS[month - 1] ?? valueOf("month")} ${year}${LTR_MARK}`;
-  const dateText = `شمسی: ${jalaliText} | میلادی: ${gregorianText}`;
-  if (!includeTime) return dateText;
-  return `${dateText} | ساعت: ${valueOf("hour")}:${valueOf("minute")}`;
+  return {
+    jalali: jalaliText,
+    gregorian: gregorianText,
+    time: `${valueOf("hour")}:${valueOf("minute")}`,
+  };
 }

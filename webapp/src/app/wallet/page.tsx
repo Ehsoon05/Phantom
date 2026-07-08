@@ -32,7 +32,7 @@ import {
   type CryptoInvoice,
   type RialRequest,
 } from "@/lib/api";
-import { formatTehranDateTime } from "@/lib/date";
+import { formatTehranDateParts, formatTehranDateTime } from "@/lib/date";
 import { getWebApp } from "@/lib/telegram";
 
 // Persian digits -> latin, for amount inputs typed with a Persian keyboard.
@@ -90,6 +90,23 @@ function CopyRow({ label, value }: { label: string; value: string }) {
         {value}
       </p>
     </button>
+  );
+}
+
+function DateInfo({ value, title = "زمان" }: { value: string | null | undefined; title?: string }) {
+  const parts = formatTehranDateParts(value);
+  if (!parts) return null;
+  return (
+    <div className="grid gap-2 rounded-lg bg-muted p-3 text-xs">
+      <p className="font-bold text-foreground">{title}</p>
+      <div className="grid gap-1 text-muted-foreground">
+        <p>شمسی: {parts.jalali}</p>
+        <p dir="ltr" className="text-right">
+          Gregorian: {parts.gregorian}
+        </p>
+        <p>ساعت تهران: <span dir="ltr">{parts.time}</span></p>
+      </div>
+    </div>
   );
 }
 
@@ -328,7 +345,7 @@ function RialTab() {
           <p className="font-bold">✅ درخواست ثبت شد</p>
           <p className="text-sm leading-6 text-muted-foreground">
             {isReceiptBot
-              ? "مبلغ را به کارت نمایش داده‌شده واریز کنید و سپس رسید را از طریق بات واریزی ارسال کنید."
+              ? "مبلغ را به کارت نمایش داده‌شده واریز کنید و سپس رسید را داخل بات اصلی ارسال کنید."
               : "متن زیر را بدون تغییر برای ادمین ارسال کنید تا پس از بررسی، کیف پولتان شارژ شود."}
           </p>
           {messageText && (
@@ -339,11 +356,7 @@ function RialTab() {
           {isReceiptBot && result.destination_card && (
             <CopyRow label="شماره کارت مقصد" value={result.destination_card} />
           )}
-          {isReceiptBot && result.expires_at && (
-            <p className="text-xs text-destructive">
-              اعتبار پرداخت تا: {formatTehranDateTime(result.expires_at)}
-            </p>
-          )}
+          {isReceiptBot && result.expires_at && <DateInfo value={result.expires_at} title="اعتبار پرداخت تا" />}
           {!isReceiptBot && <CopyRow label="متن آماده برای ارسال به ادمین" value={copyText} />}
           {result.receipt_bot_url && (
             <Button
@@ -354,7 +367,7 @@ function RialTab() {
                 else window.location.href = result.receipt_bot_url!;
               }}
             >
-              📸 ارسال رسید پرداخت
+              📸 ارسال رسید در بات اصلی
             </Button>
           )}
           {result.send_url && (
