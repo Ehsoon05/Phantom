@@ -22,7 +22,7 @@ from ..services.phone_verification_service import PhoneVerificationService
 from ..services.rial_payment_service import RialPaymentService
 from ..services.settings_service import SettingsService
 from ..services.shop_customization_service import ShopCustomizationService
-from ..utils.datetime_format import format_tehran_datetime
+from ..utils.datetime_format import format_tehran_datetime, format_tehran_time
 from ..utils.keyboards import BACK_TO_MAIN
 
 
@@ -31,7 +31,6 @@ AMOUNT_KEY = "rial_amount"
 PHONE_KEY = "rial_phone"
 VERIFY_PHONE_KEY = "verify_phone_for_webapp"
 RECEIPT_REQUEST_KEY = "rial_receipt_request_id"
-RECEIPT_CALLBACK_PREFIX = "rial_receipt_upload"
 
 
 def _back_keyboard() -> ReplyKeyboardMarkup:
@@ -132,26 +131,6 @@ async def start_receipt_upload(update: Update, context: ContextTypes.DEFAULT_TYP
         reply_markup=_back_keyboard(),
         parse_mode=getattr(text, "parse_mode", None),
     )
-
-
-async def receipt_upload_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    try:
-        request_id = int((query.data or "").split(":", 1)[1])
-    except (IndexError, ValueError):
-        await query.message.reply_text("درخواست پرداخت معتبر نیست.")
-        return
-    callback_update = type(
-        "CallbackUpdate",
-        (),
-        {
-            "effective_user": query.from_user,
-            "effective_message": query.message,
-            "message": query.message,
-        },
-    )()
-    await start_receipt_upload(callback_update, context, request_id)
 
 
 async def charge_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -349,7 +328,7 @@ async def _handle_card(update: Update, context: ContextTypes.DEFAULT_TYPE, value
                 destination_holder=destination_holder,
                 amount=f"{amount:,}",
                 valid_minutes=f"{valid_minutes:,}",
-                expires_at=format_tehran_datetime(expires_at),
+                expires_at=format_tehran_time(expires_at),
                 tracking_code=request.tracking_code,
             )
             direct_text = (
@@ -395,7 +374,6 @@ async def _handle_card(update: Update, context: ContextTypes.DEFAULT_TYPE, value
     if payment_mode == "receipt_bot":
         keyboard = InlineKeyboardMarkup(
             [
-                [InlineKeyboardButton("📸 ارسال رسید پرداخت", callback_data=f"{RECEIPT_CALLBACK_PREFIX}:{request.id}")],
                 [InlineKeyboardButton("📋 کپی شماره کارت", api_kwargs={"copy_text": {"text": destination_card}})],
             ]
         )
@@ -409,6 +387,8 @@ async def _handle_card(update: Update, context: ContextTypes.DEFAULT_TYPE, value
             ]
         )
     clear_state(context)
+    if payment_mode == "receipt_bot":
+        context.user_data[RECEIPT_REQUEST_KEY] = request.id
     sent = await update.message.reply_text(
         message,
         reply_markup=keyboard,

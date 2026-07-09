@@ -32,7 +32,7 @@ import {
   type CryptoInvoice,
   type RialRequest,
 } from "@/lib/api";
-import { formatTehranDateParts, formatTehranDateTime } from "@/lib/date";
+import { formatTehranDateTime, formatTehranTime } from "@/lib/date";
 import { getWebApp } from "@/lib/telegram";
 
 // Persian digits -> latin, for amount inputs typed with a Persian keyboard.
@@ -90,23 +90,6 @@ function CopyRow({ label, value }: { label: string; value: string }) {
         {value}
       </p>
     </button>
-  );
-}
-
-function DateInfo({ value, title = "زمان" }: { value: string | null | undefined; title?: string }) {
-  const parts = formatTehranDateParts(value);
-  if (!parts) return null;
-  return (
-    <div className="grid gap-2 rounded-lg bg-muted p-3 text-xs">
-      <p className="font-bold text-foreground">{title}</p>
-      <div className="grid gap-1 text-muted-foreground">
-        <p>شمسی: {parts.jalali}</p>
-        <p dir="ltr" className="text-right">
-          Gregorian: {parts.gregorian}
-        </p>
-        <p>ساعت تهران: <span dir="ltr">{parts.time}</span></p>
-      </div>
-    </div>
   );
 }
 
@@ -356,7 +339,11 @@ function RialTab() {
           {isReceiptBot && result.destination_card && (
             <CopyRow label="شماره کارت مقصد" value={result.destination_card} />
           )}
-          {isReceiptBot && result.expires_at && <DateInfo value={result.expires_at} title="اعتبار پرداخت تا" />}
+          {isReceiptBot && result.expires_at && (
+            <p className="rounded-lg bg-destructive/10 p-3 text-xs font-medium text-destructive">
+              اعتبار پرداخت تا ساعت <span dir="ltr">{formatTehranTime(result.expires_at)}</span> تهران است.
+            </p>
+          )}
           {!isReceiptBot && <CopyRow label="متن آماده برای ارسال به ادمین" value={copyText} />}
           {result.receipt_bot_url && (
             <Button

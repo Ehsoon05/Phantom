@@ -86,6 +86,13 @@ def format_tehran_datetime(value: datetime | None, *, include_time: bool = True)
     return f"{date_text} | ساعت: {local_value:%H:%M}"
 
 
+def format_tehran_time(value: datetime | None) -> str:
+    local_value = as_tehran(value)
+    if local_value is None:
+        return "-"
+    return f"{local_value:%H:%M}"
+
+
 def format_tehran_timestamp(timestamp: int | None, *, include_time: bool = True) -> str:
     if not timestamp:
         return "نامحدود"

@@ -1159,7 +1159,6 @@ user_handlers = [
     CommandHandler("support", support_menu),
     CommandHandler("cancel", cancel_coupon),
     CallbackQueryHandler(response_button_callback, pattern=r"^shop_response(_button)?:\d+$"),
-    CallbackQueryHandler(rial_user.receipt_upload_callback, pattern=rf"^{rial_user.RECEIPT_CALLBACK_PREFIX}:\d+$"),
     CallbackQueryHandler(service_details_callback, pattern=r"^(service:\d+|service_qr:\d+|services:list)$"),
     CallbackQueryHandler(renew_service_callback, pattern=r"^renew_(confirm|do):\d+$"),
     MessageHandler(filters.CONTACT, rial_user.handle_contact),

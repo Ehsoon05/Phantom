@@ -18,7 +18,7 @@ from bot_package.config_loader import BotConfig
 from bot_package.services.rial_payment_service import RialPaymentService
 from bot_package.services.settings_service import SettingsService
 from bot_package.services.shop_customization_service import ShopCustomizationService
-from bot_package.utils.datetime_format import format_tehran_datetime
+from bot_package.utils.datetime_format import format_tehran_time
 
 from ..deps import get_current_user, get_session
 from ..schemas import (
@@ -245,7 +245,7 @@ async def create_rial_request(
             destination_holder=destination_holder,
             amount=f"{body.amount_toman:,}",
             valid_minutes=f"{valid_minutes:,}",
-            expires_at=format_tehran_datetime(expires_at),
+            expires_at=format_tehran_time(expires_at),
             tracking_code=request.tracking_code,
         )
         await RialPaymentService.update_request_text(session, request, direct_text)

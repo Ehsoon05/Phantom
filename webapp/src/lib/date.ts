@@ -100,3 +100,8 @@ export function formatTehranDateParts(value: string | null | undefined) {
     time: `${valueOf("hour")}:${valueOf("minute")}`,
   };
 }
+
+export function formatTehranTime(value: string | null | undefined) {
+  const parts = formatTehranDateParts(value);
+  return parts?.time ?? "نامشخص";
+}
