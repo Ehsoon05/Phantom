@@ -286,19 +286,22 @@ async def charge_wallet(
     session: AsyncSession = Depends(get_session),
     admin: Admin = Depends(require_permission("users")),
 ):
+    if body.amount == 0:
+        raise HTTPException(status_code=400, detail="Amount must not be zero")
     ok = await UserService.charge_wallet(session, telegram_id, body.amount, admin.telegram_id)
     if not ok:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=400, detail="User not found or wallet balance is insufficient")
     await session.commit()
     user = (
         await session.execute(select(User).where(User.telegram_id == telegram_id))
     ).scalar_one()
-    await WalletNotificationService.send_charge_notification(
-        session,
-        telegram_id=telegram_id,
-        amount=body.amount,
-        wallet_balance=user.wallet_balance or 0,
-    )
+    if body.amount > 0:
+        await WalletNotificationService.send_charge_notification(
+            session,
+            telegram_id=telegram_id,
+            amount=body.amount,
+            wallet_balance=user.wallet_balance or 0,
+        )
     return _user_out(user)
 
 

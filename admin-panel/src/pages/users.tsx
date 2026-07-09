@@ -220,7 +220,7 @@ function UserRow({ user }: { user: AdminUser }) {
             <p className="text-sm">موجودی: <span className="font-bold">{formatToman(user.wallet_balance)}</span></p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={() => { const v = prompt("مبلغ شارژ (منفی=کسر):"); const a = parseInt(v ?? "", 10); if (!Number.isNaN(a) && a !== 0) charge.mutate(a); }}>شارژ</Button>
+            <Button size="sm" variant="outline" onClick={() => { const v = prompt("مبلغ تغییر موجودی (مثبت=شارژ، منفی=کسر):"); const a = parseInt((v ?? "").replace(/,/g, ""), 10); if (!Number.isNaN(a) && a !== 0) charge.mutate(a); }}>افزایش/کسر</Button>
             <Button size="sm" variant="outline" onClick={() => { const v = prompt("موجودی جدید:", String(user.wallet_balance)); const b = parseInt(v ?? "", 10); if (!Number.isNaN(b) && b >= 0) setBal.mutate(b); }}>تنظیم</Button>
             <Button size="sm" variant={user.is_blocked ? "secondary" : "destructive"} onClick={() => { if (confirm(user.is_blocked ? "رفع مسدودیت؟" : "مسدود کردن؟")) block.mutate(); }}>{user.is_blocked ? "رفع مسدودی" : "مسدود"}</Button>
             <Button size="sm" variant="ghost" onClick={() => setOpen((o) => !o)}>{open ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />} خریدها</Button>

@@ -1661,8 +1661,8 @@ async def charge_wallet_execute(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("مبلغ شارژ را فقط به صورت عددی ارسال کنید.")
         return CHARGE_AMOUNT
 
-    if amount <= 0:
-        await update.message.reply_text("مبلغ شارژ باید بیشتر از صفر باشد.")
+    if amount == 0:
+        await update.message.reply_text("مبلغ تغییر موجودی نمی‌تواند صفر باشد.")
         return CHARGE_AMOUNT
 
     async with async_session() as session:
@@ -1673,17 +1673,20 @@ async def charge_wallet_execute(update: Update, context: ContextTypes.DEFAULT_TY
             ).scalar_one()
 
     if success:
-        async with async_session() as session:
-            notified = await WalletNotificationService.send_charge_notification(
-                session,
-                telegram_id=user_id,
-                amount=amount,
-                wallet_balance=user.wallet_balance,
-            )
-        if notified:
-            notification_status = "\nپیام شارژ نیز برای کاربر ارسال شد."
+        if amount > 0:
+            async with async_session() as session:
+                notified = await WalletNotificationService.send_charge_notification(
+                    session,
+                    telegram_id=user_id,
+                    amount=amount,
+                    wallet_balance=user.wallet_balance,
+                )
+            if notified:
+                notification_status = "\nپیام شارژ نیز برای کاربر ارسال شد."
+            else:
+                notification_status = "\nشارژ ثبت شد، اما ارسال پیام به کاربر ممکن نبود."
         else:
-            notification_status = "\nشارژ ثبت شد، اما ارسال پیام به کاربر ممکن نبود."
+            notification_status = "\nکسر موجودی ثبت شد."
         await update.message.reply_text(
             CHARGE_SUCCESS.format(user_id, f"{amount:,}", datetime.now(TEHRAN_TZ).strftime("%H:%M:%S"))
             + notification_status,
@@ -1691,7 +1694,10 @@ async def charge_wallet_execute(update: Update, context: ContextTypes.DEFAULT_TY
             parse_mode=constants.ParseMode.MARKDOWN,
         )
     else:
-        await update.message.reply_text("کاربر پیدا نشد.", reply_markup=admin_users_keyboard())
+        await update.message.reply_text(
+            "کاربر پیدا نشد یا موجودی کیف پول برای کسر این مبلغ کافی نیست.",
+            reply_markup=admin_users_keyboard(),
+        )
 
 
 async def _execute_broadcast(
