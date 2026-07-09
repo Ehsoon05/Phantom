@@ -172,6 +172,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         admins = await SettingsService.get_rial_receipt_admin_ids(session)
     if _admin_allowed(update.effective_user.id, admins):
         await update.effective_message.reply_text("بات داخلی تایید واریز فعال است.")
+        return
+    await update.effective_message.reply_text(
+        "برای ثبت پرداخت و ارسال رسید، لطفاً از بات اصلی PhantomHubs استفاده کنید:\n"
+        f"https://t.me/{BotConfig.MAIN_BOT_USERNAME}"
+    )
 
 
 async def receive_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
