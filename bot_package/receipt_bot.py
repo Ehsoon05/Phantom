@@ -1,7 +1,7 @@
 import logging
 
 from sqlalchemy import select
-from telegram import Bot, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update, constants
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update, constants
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from .config_loader import BotConfig
@@ -10,6 +10,7 @@ from .models import RialPaymentRequest, User
 from .services.rial_payment_service import RialPaymentService
 from .services.settings_service import SettingsService
 from .services.shop_customization_service import ShopCustomizationService
+from .services.wallet_notification_service import WalletNotificationService
 from .utils.datetime_format import format_tehran_datetime
 
 logger = logging.getLogger(__name__)
@@ -167,16 +168,10 @@ async def _send_receipt_copy(
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    payload = context.args[0] if context.args else ""
-    request_id = None
-    if payload.startswith("r_"):
-        try:
-            request_id = int(payload.removeprefix("r_"))
-        except ValueError:
-            request_id = None
-    await update.effective_message.reply_text(
-        "رسید پرداخت را داخل بات اصلی PhantomHubs ارسال کنید. این بات فقط برای تایید ادمین‌ها استفاده می‌شود."
-    )
+    async with async_session() as session:
+        admins = await SettingsService.get_rial_receipt_admin_ids(session)
+    if _admin_allowed(update.effective_user.id, admins):
+        await update.effective_message.reply_text("بات داخلی تایید واریز فعال است.")
 
 
 async def receive_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -279,15 +274,35 @@ async def _decide(update: Update, context: ContextTypes.DEFAULT_TYPE, *, request
                 tracking_code=request.tracking_code,
                 reason_text=reason_text,
             )
+    user_notified = False
+    charge_notified = False
     try:
-        await context.bot.send_message(
-            chat_id=request.user_id,
-            text=user_text,
-            parse_mode=getattr(user_text, "parse_mode", None),
-        )
-    except Exception:
-        pass
-    await update.effective_message.reply_text("✅ تایید شد و کیف پول شارژ شد." if approve else "❌ رسید رد شد.")
+        async with Bot(BotConfig.MAIN_BOT_TOKEN) as main_bot:
+            await main_bot.send_message(
+                chat_id=request.user_id,
+                text=user_text,
+                parse_mode=getattr(user_text, "parse_mode", None),
+            )
+            user_notified = True
+            if approve and wallet_balance is not None:
+                async with async_session() as session:
+                    charge_notified = await WalletNotificationService.send_charge_notification(
+                        session,
+                        telegram_id=request.user_id,
+                        amount=request.amount_toman,
+                        wallet_balance=wallet_balance,
+                        bot=main_bot,
+                    )
+    except Exception as exc:
+        logger.info("Could not notify user %s for rial request %s: %s", request.user_id, request.id, exc)
+    suffix = ""
+    if approve:
+        suffix = "\nپیام تایید و شارژ برای کاربر ارسال شد." if user_notified and charge_notified else "\nکیف پول شارژ شد، اما ارسال پیام به کاربر کامل نبود."
+    elif user_notified:
+        suffix = "\nپیام رد شدن برای کاربر ارسال شد."
+    await update.effective_message.reply_text(
+        ("✅ تایید شد و کیف پول شارژ شد." if approve else "❌ رسید رد شد.") + suffix
+    )
 
 
 async def setup_receipt_bot():
@@ -295,11 +310,7 @@ async def setup_receipt_bot():
         logger.info("RIAL_RECEIPT_BOT_TOKEN is empty; receipt bot is disabled")
         return None
     app = Application.builder().token(BotConfig.RIAL_RECEIPT_BOT_TOKEN).build()
-    await app.bot.set_my_commands(
-        [
-            BotCommand("start", "ارسال رسید پرداخت"),
-        ]
-    )
+    await app.bot.set_my_commands([])
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(decision_callback, pattern=f"^{RECEIPT_DECISION_PREFIX}:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reject_reason), group=0)
