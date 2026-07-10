@@ -186,6 +186,29 @@ export interface CryptoInvoice {
   credited_at: string | null;
 }
 
+export interface HooshPayInvoice {
+  id: number;
+  uid: string | null;
+  order_id: string;
+  user_id: number;
+  amount_toman: number;
+  payable_amount: number | null;
+  merchant_credit: number | null;
+  fee_amount: number | null;
+  fee_percent: number | null;
+  fee_mode: string;
+  payment_url: string | null;
+  card_number: string | null;
+  card_holder: string | null;
+  bank_name: string | null;
+  status: string;
+  tracking_code: string | null;
+  created_at: string;
+  updated_at: string;
+  expires_at: string | null;
+  credited_at: string | null;
+}
+
 export const getStats = () => api<Stats>("/admin/stats");
 export const getRevenueDaily = (days = 30) =>
   api<RevenuePoint[]>(`/admin/stats/revenue-daily?days=${days}`);
@@ -219,5 +242,7 @@ export const decideRial = (id: number, approve: boolean, rejectionReason?: strin
     body: JSON.stringify({ approve, rejection_reason: rejectionReason }),
   });
 export const getCryptoLedger = () => api<CryptoInvoice[]>("/admin/payments/crypto");
+export const getHooshPayLedger = (status?: string) =>
+  api<HooshPayInvoice[]>(`/admin/payments/hooshpay${status ? `?status=${encodeURIComponent(status)}` : ""}`);
 
 export const formatToman = (value: number) => `${value.toLocaleString("fa-IR")} تومان`;

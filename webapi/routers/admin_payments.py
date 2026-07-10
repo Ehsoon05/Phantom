@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot_package.models import Admin, RialPaymentRequest
+from bot_package.models import Admin, HooshPayInvoice, RialPaymentRequest
 from bot_package.services.crypto_payment_service import CryptoPaymentService
+from bot_package.services.hooshpay_service import HooshPayService
 from bot_package.services.rial_payment_service import RialPaymentService
 from bot_package.services.wallet_notification_service import WalletNotificationService
 
@@ -33,6 +34,31 @@ def _rial_out(request: RialPaymentRequest) -> dict:
     }
 
 
+def _hooshpay_out(invoice: HooshPayInvoice) -> dict:
+    return {
+        "id": invoice.id,
+        "uid": invoice.uid,
+        "order_id": invoice.order_id,
+        "user_id": invoice.user_id,
+        "amount_toman": invoice.amount_toman,
+        "payable_amount": invoice.payable_amount,
+        "merchant_credit": invoice.merchant_credit,
+        "fee_amount": invoice.fee_amount,
+        "fee_percent": invoice.fee_percent,
+        "fee_mode": invoice.fee_mode,
+        "payment_url": invoice.payment_url,
+        "card_number": invoice.card_number,
+        "card_holder": invoice.card_holder,
+        "bank_name": invoice.bank_name,
+        "status": invoice.status,
+        "tracking_code": invoice.tracking_code,
+        "created_at": invoice.created_at,
+        "updated_at": invoice.updated_at,
+        "expires_at": invoice.expires_at,
+        "credited_at": invoice.credited_at,
+    }
+
+
 @router.get("/rial")
 async def list_rial_requests(
     status: str | None = Query(default="pending"),
@@ -45,6 +71,18 @@ async def list_rial_requests(
         stmt = stmt.where(RialPaymentRequest.status == status)
     rows = (await session.execute(stmt)).scalars().all()
     return [_rial_out(r) for r in rows]
+
+
+@router.get("/hooshpay")
+async def list_hooshpay_invoices(
+    status: str | None = Query(default=None),
+    limit: int = Query(default=50, le=200),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("reports")),
+):
+    rows = await HooshPayService.list_recent(session, status=status, limit=limit, offset=offset)
+    return [_hooshpay_out(row) for row in rows]
 
 
 @router.post("/rial/{request_id}/decision")

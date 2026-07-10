@@ -302,6 +302,20 @@ export const getRialSettings = () => api<RialSettings>("/admin/settings/rial");
 export const setRialSettings = (body: Partial<RialSettings>) =>
   api<RialSettings>("/admin/settings/rial", { method: "PUT", body: JSON.stringify(body) });
 
+export interface HooshPaySettings {
+  enabled: boolean;
+  min_amount_toman: number;
+  fee_mode: "seller" | "buyer" | "split";
+  api_base_url: string;
+  callback_base_url: string;
+  api_key_configured: boolean;
+  api_secret_configured: boolean;
+}
+export const getHooshPaySettings = () => api<HooshPaySettings>("/admin/settings/hooshpay");
+export const setHooshPaySettings = (
+  body: Partial<HooshPaySettings> & { api_key?: string; api_secret?: string }
+) => api<HooshPaySettings>("/admin/settings/hooshpay", { method: "PUT", body: JSON.stringify(body) });
+
 export interface TrialSettings {
   enabled: boolean;
   volume_mb: number;

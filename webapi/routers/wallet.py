@@ -2,7 +2,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,14 +16,18 @@ from bot_package.services.crypto_payment_service import (
 )
 from bot_package.config_loader import BotConfig
 from bot_package.services.rial_payment_service import RialPaymentService
+from bot_package.services.hooshpay_service import HooshPayError, HooshPayService, verify_hooshpay_signature
 from bot_package.services.settings_service import SettingsService
 from bot_package.services.shop_customization_service import ShopCustomizationService
+from bot_package.services.wallet_notification_service import WalletNotificationService
 from bot_package.utils.datetime_format import format_tehran_time
 
 from ..deps import get_current_user, get_session
 from ..schemas import (
     CryptoInvoiceOut,
     CryptoInvoiceRequest,
+    HooshPayInvoiceOut,
+    HooshPayInvoiceRequest,
     RialRequestIn,
     RialRequestOut,
     TransactionOut,
@@ -62,6 +66,29 @@ def _crypto_label(value: str) -> str:
     return "گرام(تون)" if value.upper() == "TON" else value
 
 
+def _hooshpay_out(invoice) -> HooshPayInvoiceOut:
+    return HooshPayInvoiceOut(
+        id=invoice.id,
+        uid=invoice.uid,
+        order_id=invoice.order_id,
+        amount_toman=invoice.amount_toman,
+        payable_amount=invoice.payable_amount,
+        merchant_credit=invoice.merchant_credit,
+        fee_amount=invoice.fee_amount,
+        fee_percent=invoice.fee_percent,
+        fee_mode=invoice.fee_mode,
+        payment_url=invoice.payment_url,
+        card_number=invoice.card_number,
+        card_holder=invoice.card_holder,
+        bank_name=invoice.bank_name,
+        status=invoice.status,
+        tracking_code=invoice.tracking_code,
+        created_at=invoice.created_at,
+        expires_at=invoice.expires_at,
+        credited_at=invoice.credited_at,
+    )
+
+
 @router.get("/methods")
 async def payment_methods(
     session: AsyncSession = Depends(get_session),
@@ -86,6 +113,11 @@ async def payment_methods(
                 f"https://t.me/{BotConfig.MAIN_BOT_USERNAME}?start=verify_phone"
             ),
             "payment_mode": await SettingsService.get_rial_payment_mode(session),
+        },
+        "hooshpay": {
+            "enabled": await SettingsService.hooshpay_enabled(session),
+            "min_amount_toman": await SettingsService.get_hooshpay_min_amount(session),
+            "fee_mode": await SettingsService.get_hooshpay_fee_mode(session),
         },
     }
 
@@ -310,6 +342,111 @@ async def create_rial_request(
         receipt_bot_url=None,
         created_at=request.created_at,
     )
+
+
+@router.post("/hooshpay/invoices", response_model=HooshPayInvoiceOut)
+async def create_hooshpay_invoice(
+    body: HooshPayInvoiceRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    try:
+        invoice = await HooshPayService.create_invoice(
+            session,
+            user_id=user.telegram_id,
+            amount_toman=body.amount_toman,
+        )
+    except HooshPayError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _hooshpay_out(invoice)
+
+
+@router.get("/hooshpay/invoices", response_model=list[HooshPayInvoiceOut])
+async def list_hooshpay_invoices(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    invoices = await HooshPayService.list_for_user(session, user.telegram_id, limit=20)
+    return [_hooshpay_out(invoice) for invoice in invoices]
+
+
+@router.get("/hooshpay/invoices/{invoice_id}", response_model=HooshPayInvoiceOut)
+async def get_hooshpay_invoice(
+    invoice_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    invoice = await HooshPayService.get_invoice(session, invoice_id)
+    if invoice is None or invoice.user_id != user.telegram_id:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return _hooshpay_out(invoice)
+
+
+@router.post("/hooshpay/invoices/{invoice_id}/verify", response_model=HooshPayInvoiceOut)
+async def verify_hooshpay_invoice(
+    invoice_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    invoice = await HooshPayService.get_invoice(session, invoice_id)
+    if invoice is None or invoice.user_id != user.telegram_id:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    try:
+        paid = await HooshPayService.verify_remote(session, invoice)
+        if paid:
+            invoice, wallet_balance, credited = await HooshPayService.mark_paid_and_credit(session, invoice=invoice)
+            if credited and wallet_balance is not None:
+                await WalletNotificationService.send_charge_notification(
+                    session,
+                    telegram_id=invoice.user_id,
+                    amount=invoice.amount_toman,
+                    wallet_balance=wallet_balance,
+                )
+        else:
+            await session.commit()
+    except (HooshPayError, Exception) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _hooshpay_out(invoice)
+
+
+@router.post("/hooshpay/callback")
+async def hooshpay_callback(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    payload = await request.json()
+    signature = request.headers.get("X-HooshPay-Signature", "")
+    secret = await SettingsService.get_hooshpay_api_secret(session)
+    if not secret or not verify_hooshpay_signature(payload, signature, secret):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+    if payload.get("event") != "payment.success":
+        return {"ok": True}
+    order_id = str(payload.get("order_id") or "")
+    invoice = await HooshPayService.get_by_order_id(session, order_id)
+    if invoice is None:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    invoice, wallet_balance, credited = await HooshPayService.mark_paid_and_credit(
+        session,
+        invoice=invoice,
+        payload=payload,
+    )
+    if credited and wallet_balance is not None:
+        await WalletNotificationService.send_charge_notification(
+            session,
+            telegram_id=invoice.user_id,
+            amount=invoice.amount_toman,
+            wallet_balance=wallet_balance,
+        )
+    return {"ok": True}
+
+
+@router.get("/hooshpay/return")
+async def hooshpay_return(order_id: str | None = None):
+    return {
+        "ok": True,
+        "message": "پرداخت شما در حال بررسی است. پس از تایید، کیف پول به‌صورت خودکار شارژ می‌شود.",
+        "order_id": order_id,
+    }
 
 
 @router.get("/rial/requests")

@@ -25,7 +25,7 @@ except ImportError:
         del version
         return text.replace("\\", "\\\\").replace("_", "\\_").replace("*", "\\*").replace("`", "\\`").replace("[", "\\[")
 
-from . import crypto_user, rial_user
+from . import crypto_user, hooshpay_user, rial_user
 from ..config_loader import BotConfig
 from ..database import async_session
 from ..models import Config, Purchase, User
@@ -1048,6 +1048,10 @@ async def shop_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await rial_user.handle_text(update, context)
         return
 
+    if context.user_data.get(hooshpay_user.STEP_KEY):
+        await hooshpay_user.handle_text(update, context)
+        return
+
     if context.user_data.get(crypto_user.STEP_KEY):
         await crypto_user.handle_step(update, context)
         return
@@ -1105,6 +1109,8 @@ async def _dispatch_shop_action(update: Update, context: ContextTypes.DEFAULT_TY
         await crypto_user.charge_start(update, context)
     elif action == "charge_rial":
         await rial_user.charge_start(update, context)
+    elif action == "charge_hooshpay":
+        await hooshpay_user.charge_start(update, context)
     elif action == "trial_config":
         await trial_config(update, context)
     elif action and action.startswith("custom_message:"):

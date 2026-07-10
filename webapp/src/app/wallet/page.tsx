@@ -19,17 +19,21 @@ import {
   cancelCryptoInvoice,
   cancelRialRequest,
   createCryptoInvoice,
+  createHooshPayInvoice,
   createRialRequest,
   formatToman,
   getCryptoInvoice,
   getCryptoInvoices,
+  getHooshPayInvoices,
   getMe,
   getPaymentMethods,
   getRialRequests,
   getTransactions,
+  verifyHooshPayInvoice,
   tonTransferLink,
   type AppliedCoupon,
   type CryptoInvoice,
+  type HooshPayInvoice,
   type RialRequest,
 } from "@/lib/api";
 import { formatTehranDateTime, formatTehranTime } from "@/lib/date";
@@ -475,6 +479,137 @@ function RialTab() {
   );
 }
 
+function HooshPayStatus({ invoice }: { invoice: HooshPayInvoice }) {
+  const tone = invoice.status === "paid" || invoice.credited_at ? "default" : invoice.status === "failed" ? "destructive" : "secondary";
+  const label = invoice.credited_at ? "شارژ شد" : invoice.status === "paid" ? "پرداخت شد" : invoice.status === "pending" ? "در انتظار پرداخت" : invoice.status;
+  return <Badge variant={tone}>{label}</Badge>;
+}
+
+function HooshPayTab() {
+  const queryClient = useQueryClient();
+  const { data: methods } = useQuery({ queryKey: ["methods"], queryFn: getPaymentMethods });
+  const { data: invoices } = useQuery({ queryKey: ["hooshpay-invoices"], queryFn: getHooshPayInvoices });
+  const [amount, setAmount] = useState("");
+  const [invoice, setInvoice] = useState<HooshPayInvoice | null>(null);
+  const minAmount = methods?.hooshpay.min_amount_toman ?? 0;
+  const enabled = methods?.hooshpay.enabled ?? false;
+
+  const create = useMutation({
+    mutationFn: () => createHooshPayInvoice(parseAmount(amount)),
+    onSuccess: (data) => {
+      setInvoice(data);
+      setAmount("");
+      queryClient.invalidateQueries({ queryKey: ["hooshpay-invoices"] });
+    },
+  });
+  const verify = useMutation({
+    mutationFn: (id: number) => verifyHooshPayInvoice(id),
+    onSuccess: (data) => {
+      setInvoice(data);
+      queryClient.invalidateQueries({ queryKey: ["hooshpay-invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["me"] });
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+    },
+  });
+
+  if (!enabled) {
+    return (
+      <Card>
+        <CardContent className="space-y-2 p-4 text-center text-sm text-muted-foreground">
+          درگاه هوش‌پی در حال حاضر غیرفعال است.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const activeInvoice = invoice ?? invoices?.[0] ?? null;
+  const valid = parseAmount(amount) >= minAmount;
+  const errorMessage =
+    create.error instanceof ApiError ? create.error.message : create.error ? "ساخت فاکتور انجام نشد" : null;
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardContent className="space-y-4 p-4">
+          <div>
+            <p className="text-sm font-bold">⚡️ درگاه هوش‌پی</p>
+            <p className="mt-1 text-xs leading-6 text-muted-foreground">
+              پرداخت کارت‌به‌کارت آنی، بدون احراز و همراه با کارمزد. کارمزد فعلی به صورت split محاسبه می‌شود.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <p className="text-sm font-semibold">مبلغ شارژ کیف پول (تومان)</p>
+            <Input
+              inputMode="numeric"
+              dir="ltr"
+              className="text-center"
+              placeholder={minAmount ? `حداقل ${minAmount.toLocaleString("fa-IR")}` : ""}
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+          </div>
+          {errorMessage && <p className="text-sm text-destructive">{errorMessage}</p>}
+          <Button className="w-full" disabled={!valid || create.isPending} onClick={() => create.mutate()}>
+            {create.isPending ? "در حال ساخت فاکتور…" : "ساخت لینک پرداخت هوش‌پی"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {activeInvoice && (
+        <Card className="border-primary/40">
+          <CardContent className="space-y-3 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-bold">آخرین فاکتور هوش‌پی</p>
+              <HooshPayStatus invoice={activeInvoice} />
+            </div>
+            <div className="grid gap-2 text-sm">
+              <div className="flex justify-between gap-2">
+                <span className="text-muted-foreground">مبلغ شارژ</span>
+                <span>{formatToman(activeInvoice.amount_toman)}</span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-muted-foreground">مبلغ قابل پرداخت</span>
+                <span>{formatToman(activeInvoice.payable_amount ?? activeInvoice.amount_toman)}</span>
+              </div>
+              {!!activeInvoice.fee_amount && (
+                <div className="flex justify-between gap-2">
+                  <span className="text-muted-foreground">کارمزد</span>
+                  <span>{formatToman(activeInvoice.fee_amount)}</span>
+                </div>
+              )}
+              <div className="flex justify-between gap-2">
+                <span className="text-muted-foreground">کد پیگیری</span>
+                <span dir="ltr">{activeInvoice.order_id}</span>
+              </div>
+            </div>
+            {activeInvoice.payment_url && !activeInvoice.credited_at && (
+              <Button
+                className="w-full"
+                onClick={() => {
+                  const tg = getWebApp();
+                  const opener = tg as unknown as { openLink?: (url: string) => void };
+                  if (opener?.openLink) opener.openLink(activeInvoice.payment_url!);
+                  else window.location.href = activeInvoice.payment_url!;
+                }}
+              >
+                پرداخت با هوش‌پی
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              className="w-full"
+              disabled={verify.isPending}
+              onClick={() => verify.mutate(activeInvoice.id)}
+            >
+              {verify.isPending ? "در حال بررسی…" : "بررسی وضعیت پرداخت"}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 function TransactionsList() {
   const { data: transactions, isLoading } = useQuery({
     queryKey: ["transactions"],
@@ -589,12 +724,18 @@ function WalletContent() {
           <TabsTrigger value="rial" className="flex-1">
             🏦 کارت‌به‌کارت
           </TabsTrigger>
+          <TabsTrigger value="hooshpay" className="flex-1">
+            ⚡️ هوش‌پی
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="crypto" className="pt-3">
           <CryptoTab />
         </TabsContent>
         <TabsContent value="rial" className="pt-3">
           <RialTab />
+        </TabsContent>
+        <TabsContent value="hooshpay" className="pt-3">
+          <HooshPayTab />
         </TabsContent>
       </Tabs>
 

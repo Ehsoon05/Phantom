@@ -23,6 +23,13 @@ RIAL_DESTINATION_CARD_HOLDER = "rial_destination_card_holder"
 RIAL_RECEIPT_VALID_MINUTES = "rial_receipt_valid_minutes"
 RIAL_RECEIPT_BOT_USERNAME = "rial_receipt_bot_username"
 RIAL_RECEIPT_ADMIN_IDS = "rial_receipt_admin_ids"
+HOOSHPAY_ENABLED = "hooshpay_enabled"
+HOOSHPAY_API_KEY = "hooshpay_api_key"
+HOOSHPAY_API_SECRET = "hooshpay_api_secret"
+HOOSHPAY_API_BASE_URL = "hooshpay_api_base_url"
+HOOSHPAY_CALLBACK_BASE_URL = "hooshpay_callback_base_url"
+HOOSHPAY_FEE_MODE = "hooshpay_fee_mode"
+HOOSHPAY_MIN_AMOUNT = "hooshpay_min_amount"
 TRIAL_ENABLED = "trial_enabled"
 TRIAL_VOLUME_MB = "trial_volume_mb"
 TRIAL_DURATION_HOURS = "trial_duration_hours"
@@ -51,6 +58,13 @@ DEFAULTS = {
     RIAL_RECEIPT_VALID_MINUTES: "120",
     RIAL_RECEIPT_BOT_USERNAME: "PhantomVariziBot",
     RIAL_RECEIPT_ADMIN_IDS: "60585628,6987529339",
+    HOOSHPAY_ENABLED: "true",
+    HOOSHPAY_API_KEY: "",
+    HOOSHPAY_API_SECRET: "",
+    HOOSHPAY_API_BASE_URL: "https://hooshpay.xyz",
+    HOOSHPAY_CALLBACK_BASE_URL: "https://webapi.phantomhubs.shop",
+    HOOSHPAY_FEE_MODE: "split",
+    HOOSHPAY_MIN_AMOUNT: "100000",
     TRIAL_ENABLED: "true",
     TRIAL_VOLUME_MB: "500",
     TRIAL_DURATION_HOURS: "24",
@@ -254,6 +268,77 @@ class SettingsService:
             if value > 0 and value not in cleaned:
                 cleaned.append(value)
         await SettingsService.set(session, RIAL_RECEIPT_ADMIN_IDS, ",".join(str(value) for value in cleaned))
+
+    @staticmethod
+    async def hooshpay_enabled(session: AsyncSession) -> bool:
+        value = await SettingsService.get(session, HOOSHPAY_ENABLED, "true")
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    async def set_hooshpay_enabled(session: AsyncSession, enabled: bool) -> None:
+        await SettingsService.set(session, HOOSHPAY_ENABLED, "true" if enabled else "false")
+
+    @staticmethod
+    async def get_hooshpay_api_key(session: AsyncSession) -> str:
+        from ..config_loader import BotConfig
+
+        return (await SettingsService.get(session, HOOSHPAY_API_KEY, "") or BotConfig.HOOSHPAY_API_KEY).strip()
+
+    @staticmethod
+    async def set_hooshpay_api_key(session: AsyncSession, value: str) -> None:
+        await SettingsService.set(session, HOOSHPAY_API_KEY, value.strip())
+
+    @staticmethod
+    async def get_hooshpay_api_secret(session: AsyncSession) -> str:
+        from ..config_loader import BotConfig
+
+        return (await SettingsService.get(session, HOOSHPAY_API_SECRET, "") or BotConfig.HOOSHPAY_API_SECRET).strip()
+
+    @staticmethod
+    async def set_hooshpay_api_secret(session: AsyncSession, value: str) -> None:
+        await SettingsService.set(session, HOOSHPAY_API_SECRET, value.strip())
+
+    @staticmethod
+    async def get_hooshpay_api_base_url(session: AsyncSession) -> str:
+        from ..config_loader import BotConfig
+
+        value = (await SettingsService.get(session, HOOSHPAY_API_BASE_URL, "") or BotConfig.HOOSHPAY_API_BASE_URL).strip()
+        return (value or "https://hooshpay.xyz").rstrip("/")
+
+    @staticmethod
+    async def set_hooshpay_api_base_url(session: AsyncSession, value: str) -> None:
+        await SettingsService.set(session, HOOSHPAY_API_BASE_URL, value.strip().rstrip("/"))
+
+    @staticmethod
+    async def get_hooshpay_callback_base_url(session: AsyncSession) -> str:
+        from ..config_loader import BotConfig
+
+        value = (await SettingsService.get(session, HOOSHPAY_CALLBACK_BASE_URL, "") or BotConfig.HOOSHPAY_CALLBACK_BASE_URL).strip()
+        return (value or "https://webapi.phantomhubs.shop").rstrip("/")
+
+    @staticmethod
+    async def set_hooshpay_callback_base_url(session: AsyncSession, value: str) -> None:
+        await SettingsService.set(session, HOOSHPAY_CALLBACK_BASE_URL, value.strip().rstrip("/"))
+
+    @staticmethod
+    async def get_hooshpay_fee_mode(session: AsyncSession) -> str:
+        value = (await SettingsService.get(session, HOOSHPAY_FEE_MODE, "split") or "split").strip()
+        return value if value in {"seller", "buyer", "split"} else "split"
+
+    @staticmethod
+    async def set_hooshpay_fee_mode(session: AsyncSession, value: str) -> None:
+        await SettingsService.set(session, HOOSHPAY_FEE_MODE, value if value in {"seller", "buyer", "split"} else "split")
+
+    @staticmethod
+    async def get_hooshpay_min_amount(session: AsyncSession) -> int:
+        try:
+            return max(1000, int(await SettingsService.get(session, HOOSHPAY_MIN_AMOUNT, "100000") or 100000))
+        except (TypeError, ValueError):
+            return 100000
+
+    @staticmethod
+    async def set_hooshpay_min_amount(session: AsyncSession, amount: int) -> None:
+        await SettingsService.set(session, HOOSHPAY_MIN_AMOUNT, str(max(1000, int(amount))))
 
     @staticmethod
     async def trial_enabled(session: AsyncSession) -> bool:

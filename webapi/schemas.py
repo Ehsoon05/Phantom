@@ -152,6 +152,31 @@ class RialRequestOut(BaseModel):
     created_at: datetime
 
 
+class HooshPayInvoiceRequest(BaseModel):
+    amount_toman: int = Field(gt=0)
+
+
+class HooshPayInvoiceOut(BaseModel):
+    id: int
+    uid: str | None
+    order_id: str
+    amount_toman: int
+    payable_amount: int | None
+    merchant_credit: int | None
+    fee_amount: int | None
+    fee_percent: int | None
+    fee_mode: str
+    payment_url: str | None
+    card_number: str | None
+    card_holder: str | None
+    bank_name: str | None
+    status: str
+    tracking_code: str | None
+    created_at: datetime
+    expires_at: datetime | None
+    credited_at: datetime | None
+
+
 class ReferralsOut(BaseModel):
     referral_code: str
     referral_link: str

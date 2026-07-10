@@ -97,6 +97,59 @@ async def get_rial_settings(
     }
 
 
+@router.get("/settings/hooshpay")
+async def get_hooshpay_settings(
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("shop")),
+):
+    api_key = await SettingsService.get_hooshpay_api_key(session)
+    api_secret = await SettingsService.get_hooshpay_api_secret(session)
+    return {
+        "enabled": await SettingsService.hooshpay_enabled(session),
+        "min_amount_toman": await SettingsService.get_hooshpay_min_amount(session),
+        "fee_mode": await SettingsService.get_hooshpay_fee_mode(session),
+        "api_base_url": await SettingsService.get_hooshpay_api_base_url(session),
+        "callback_base_url": await SettingsService.get_hooshpay_callback_base_url(session),
+        "api_key_configured": bool(api_key),
+        "api_secret_configured": bool(api_secret),
+    }
+
+
+class HooshPaySettingsRequest(BaseModel):
+    enabled: bool | None = None
+    min_amount_toman: int | None = Field(default=None, ge=1000)
+    fee_mode: str | None = None
+    api_key: str | None = None
+    api_secret: str | None = None
+    api_base_url: str | None = None
+    callback_base_url: str | None = None
+
+
+@router.put("/settings/hooshpay")
+async def set_hooshpay_settings(
+    body: HooshPaySettingsRequest,
+    session: AsyncSession = Depends(get_session),
+    admin: Admin = Depends(require_permission("shop")),
+):
+    if body.enabled is not None:
+        await SettingsService.set_hooshpay_enabled(session, body.enabled)
+    if body.min_amount_toman is not None:
+        await SettingsService.set_hooshpay_min_amount(session, body.min_amount_toman)
+    if body.fee_mode is not None:
+        if body.fee_mode not in {"seller", "buyer", "split"}:
+            raise HTTPException(status_code=400, detail="fee_mode must be seller, buyer, or split")
+        await SettingsService.set_hooshpay_fee_mode(session, body.fee_mode)
+    if body.api_key is not None and body.api_key.strip():
+        await SettingsService.set_hooshpay_api_key(session, body.api_key)
+    if body.api_secret is not None and body.api_secret.strip():
+        await SettingsService.set_hooshpay_api_secret(session, body.api_secret)
+    if body.api_base_url is not None:
+        await SettingsService.set_hooshpay_api_base_url(session, body.api_base_url)
+    if body.callback_base_url is not None:
+        await SettingsService.set_hooshpay_callback_base_url(session, body.callback_base_url)
+    return await get_hooshpay_settings(session, admin)
+
+
 class RialSettingsRequest(BaseModel):
     min_amount_toman: int | None = Field(default=None, ge=0)
     phone_required: bool | None = None

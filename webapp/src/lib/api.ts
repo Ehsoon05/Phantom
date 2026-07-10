@@ -105,6 +105,11 @@ export interface PaymentMethods {
     verify_phone_url: string;
     payment_mode: "receipt_bot" | "direct_support";
   };
+  hooshpay: {
+    enabled: boolean;
+    min_amount_toman: number;
+    fee_mode: "seller" | "buyer" | "split";
+  };
 }
 
 export interface CryptoInvoice {
@@ -138,6 +143,27 @@ export interface RialRequest {
   created_at: string;
 }
 
+export interface HooshPayInvoice {
+  id: number;
+  uid: string | null;
+  order_id: string;
+  amount_toman: number;
+  payable_amount: number | null;
+  merchant_credit: number | null;
+  fee_amount: number | null;
+  fee_percent: number | null;
+  fee_mode: string;
+  payment_url: string | null;
+  card_number: string | null;
+  card_holder: string | null;
+  bank_name: string | null;
+  status: string;
+  tracking_code: string | null;
+  created_at: string;
+  expires_at: string | null;
+  credited_at: string | null;
+}
+
 export interface Transaction {
   id: number;
   amount: number;
@@ -166,6 +192,15 @@ export const createRialRequest = (input: {
     method: "POST",
     body: JSON.stringify(input),
   });
+
+export const createHooshPayInvoice = (amountToman: number) =>
+  api<HooshPayInvoice>("/wallet/hooshpay/invoices", {
+    method: "POST",
+    body: JSON.stringify({ amount_toman: amountToman }),
+  });
+export const getHooshPayInvoices = () => api<HooshPayInvoice[]>("/wallet/hooshpay/invoices");
+export const verifyHooshPayInvoice = (id: number) =>
+  api<HooshPayInvoice>(`/wallet/hooshpay/invoices/${id}/verify`, { method: "POST" });
 
 export interface RialSummary {
   id: number;

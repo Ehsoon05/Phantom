@@ -11,6 +11,7 @@ ACCOUNT_INFO = "👤 اطلاعات حساب"
 APPLY_COUPON = "🎁 کد تخفیف"
 CHARGE_CRYPTO = "💎 شارژ با کریپتو"
 CHARGE_RIAL = "💳 پرداخت ریالی (کارت‌به‌کارت)"
+CHARGE_HOOSHPAY = "⚡️ درگاه هوش‌پی (آنی و بدون احراز + با کارمزد)"
 BACK_TO_MAIN = "⬅️ بازگشت به منوی اصلی"
 
 ADMIN_INVENTORY = "📦 مدیریت موجودی"

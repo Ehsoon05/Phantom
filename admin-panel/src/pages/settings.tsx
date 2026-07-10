@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import {
   getBrandedLinks,
   getCryptoSettings,
+  getHooshPaySettings,
   getRialSettings,
   getTrialSettings,
   listChannels,
@@ -17,6 +18,7 @@ import {
   setManualRate,
   setMargin,
   setRateMode,
+  setHooshPaySettings,
   setRialSettings,
   setTrialSettings,
   toggleChannel,
@@ -107,6 +109,55 @@ function RialSection() {
         <div className="flex gap-1"><Input placeholder="بات رسید" dir="ltr" value={receiptBot} onChange={(e) => setReceiptBot(e.target.value)} /><Button size="sm" onClick={() => save.mutate({ receipt_bot_username: receiptBot })}>ثبت</Button></div>
         <div className="flex gap-1 md:col-span-2"><Input placeholder="ادمین‌های رسید با کاما" dir="ltr" value={receiptAdmins} onChange={(e) => setReceiptAdmins(e.target.value)} /><Button size="sm" onClick={() => save.mutate({ receipt_admin_ids: receiptAdmins.split(/[،,\\s]+/).filter(Boolean).map((v) => parseInt(v, 10)) })}>ثبت</Button></div>
       </div>
+    </Section>
+  );
+}
+
+function HooshPaySection() {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["set-hooshpay"], queryFn: getHooshPaySettings });
+  const inv = () => qc.invalidateQueries({ queryKey: ["set-hooshpay"] });
+  const [min, setMin] = useState("");
+  const [apiBase, setApiBase] = useState("");
+  const [callbackBase, setCallbackBase] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [apiSecret, setApiSecret] = useState("");
+  useEffect(() => {
+    if (data) {
+      setMin(String(data.min_amount_toman));
+      setApiBase(data.api_base_url ?? "");
+      setCallbackBase(data.callback_base_url ?? "");
+    }
+  }, [data]);
+  const save = useMutation({ mutationFn: (b: Record<string, unknown>) => setHooshPaySettings(b), onSuccess: inv });
+  return (
+    <Section title="تنظیمات درگاه هوش‌پی">
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+        <Button size="sm" variant="outline" onClick={() => save.mutate({ enabled: !data?.enabled })}>
+          وضعیت: {data?.enabled ? "فعال" : "غیرفعال"}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => save.mutate({ fee_mode: data?.fee_mode === "split" ? "buyer" : "split" })}
+        >
+          کارمزد: {data?.fee_mode ?? "split"}
+        </Button>
+        <div className="flex gap-1"><Input placeholder="حداقل مبلغ" value={min} onChange={(e) => setMin(e.target.value)} /><Button size="sm" onClick={() => save.mutate({ min_amount_toman: parseInt(min, 10) })}>ثبت</Button></div>
+        <div className="flex gap-1 md:col-span-2"><Input placeholder="API Base URL" dir="ltr" value={apiBase} onChange={(e) => setApiBase(e.target.value)} /><Button size="sm" onClick={() => save.mutate({ api_base_url: apiBase })}>ثبت</Button></div>
+        <div className="flex gap-1 md:col-span-2"><Input placeholder="Callback Base URL" dir="ltr" value={callbackBase} onChange={(e) => setCallbackBase(e.target.value)} /><Button size="sm" onClick={() => save.mutate({ callback_base_url: callbackBase })}>ثبت</Button></div>
+        <div className="flex gap-1 md:col-span-2">
+          <Input placeholder={data?.api_key_configured ? "API Key تنظیم شده؛ برای تغییر مقدار جدید وارد کنید" : "API Key"} dir="ltr" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+          <Button size="sm" disabled={!apiKey.trim()} onClick={() => { save.mutate({ api_key: apiKey }); setApiKey(""); }}>ثبت</Button>
+        </div>
+        <div className="flex gap-1 md:col-span-2">
+          <Input placeholder={data?.api_secret_configured ? "API Secret تنظیم شده؛ برای تغییر مقدار جدید وارد کنید" : "API Secret"} dir="ltr" value={apiSecret} onChange={(e) => setApiSecret(e.target.value)} />
+          <Button size="sm" disabled={!apiSecret.trim()} onClick={() => { save.mutate({ api_secret: apiSecret }); setApiSecret(""); }}>ثبت</Button>
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        حالت پیش‌فرض کارمزد split است. Secret در پنل نمایش داده نمی‌شود و فقط وضعیت تنظیم بودن آن دیده می‌شود.
+      </p>
     </Section>
   );
 }
@@ -215,6 +266,7 @@ export function SettingsPage() {
       <h1 className="text-xl font-bold">تنظیمات</h1>
       <CryptoSection />
       <RialSection />
+      <HooshPaySection />
       <TrialSection />
       <BrandedSection />
       <ChannelsSection />

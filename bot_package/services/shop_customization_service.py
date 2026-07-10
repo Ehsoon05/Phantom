@@ -16,6 +16,7 @@ from ..utils.keyboards import (
     APPLY_COUPON,
     BACK_TO_MAIN,
     BUY_SUBSCRIPTION,
+    CHARGE_HOOSHPAY,
     CHARGE_RIAL,
     CHARGE_CRYPTO,
     HELP,
@@ -154,10 +155,11 @@ DEFAULT_BUTTONS: tuple[ButtonDefinition, ...] = (
     ButtonDefinition("help", "shop_main", "آموزش اتصال", None, None, 4, 1, "5776233299424843260"),
     _button_default("charge_rial", "shop_wallet", CHARGE_RIAL, STYLE_SUCCESS, 0, 0),
     _button_default("charge_crypto", "shop_wallet", CHARGE_CRYPTO, STYLE_SUCCESS, 0, 1),
-    _button_default("apply_coupon", "shop_wallet", APPLY_COUPON, STYLE_SUCCESS, 1, 0),
-    _button_default("referrals", "shop_wallet", REFERRALS, STYLE_PRIMARY, 1, 1),
-    _button_default("support", "shop_wallet", SUPPORT, STYLE_SUCCESS, 2, 0),
-    _button_default("back_to_main", "shop_wallet", BACK_TO_MAIN, STYLE_DANGER, 3, 0),
+    _button_default("charge_hooshpay", "shop_wallet", CHARGE_HOOSHPAY, STYLE_PRIMARY, 1, 0),
+    _button_default("apply_coupon", "shop_wallet", APPLY_COUPON, STYLE_SUCCESS, 2, 0),
+    _button_default("referrals", "shop_wallet", REFERRALS, STYLE_PRIMARY, 2, 1),
+    _button_default("support", "shop_wallet", SUPPORT, STYLE_SUCCESS, 3, 0),
+    _button_default("back_to_main", "shop_wallet", BACK_TO_MAIN, STYLE_DANGER, 4, 0),
     _button_default("back_to_main", "shop_back", BACK_TO_MAIN, STYLE_DANGER, 0, 0),
     ButtonDefinition("back_to_main", "shop_buy", "بازگشت به منوی اصلی", None, None, 99, 0, "6039539366177541657"),
 )
@@ -321,6 +323,26 @@ DEFAULT_MESSAGES: dict[str, str] = {
         "کد پیگیری: `{tracking_code}`\n"
         "زمان ثبت: **{created_at}**\n\n"
         "رسید کاربر در پیام بعدی ارسال شده است."
+    ),
+    "hooshpay_amount_prompt": (
+        "**درگاه هوش‌پی**\n\n"
+        "مبلغی که می‌خواهید کیف پول شما شارژ شود را به تومان وارد کنید.\n"
+        "این پرداخت آنی، بدون احراز و همراه با کارمزد درگاه است.\n\n"
+        "حداقل پرداخت: **{minimum} تومان**"
+    ),
+    "hooshpay_amount_invalid": "مبلغ معتبر نیست. حداقل مبلغ پرداخت با هوش‌پی **{minimum} تومان** است.",
+    "hooshpay_unavailable": (
+        "درگاه هوش‌پی در حال حاضر قابل استفاده نیست.\n\n"
+        "جزئیات: `{error}`"
+    ),
+    "hooshpay_invoice_created": (
+        "**فاکتور هوش‌پی ساخته شد**\n\n"
+        "مبلغ شارژ کیف پول: **{amount} تومان**\n"
+        "مبلغ قابل پرداخت: **{payable_amount} تومان**\n"
+        "کارمزد: **{fee_amount} تومان**\n"
+        "حالت کارمزد: `{fee_mode}`\n"
+        "کد پیگیری: `{tracking_code}`\n\n"
+        "برای پرداخت، روی دکمه زیر بزنید. پس از تأیید پرداخت، کیف پول شما به‌صورت خودکار شارژ می‌شود."
     ),
     TARIFFS_MESSAGE_KEY: (
         '<tg-emoji emoji-id="4990387969408893849">⚡️</tg-emoji> <b>Phantom Express - فانتوم اکسپرس</b>\n'

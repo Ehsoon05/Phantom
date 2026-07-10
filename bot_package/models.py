@@ -359,6 +359,35 @@ class RialPaymentRequest(Base):
     user = relationship("User")
 
 
+class HooshPayInvoice(Base):
+    __tablename__ = "hooshpay_invoices"
+
+    id = Column(Integer, primary_key=True)
+    uid = Column(String, unique=True, nullable=True)
+    order_id = Column(String, unique=True, nullable=False)
+    user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
+    amount_toman = Column(Integer, nullable=False)
+    payable_amount = Column(Integer, nullable=True)
+    merchant_credit = Column(Integer, nullable=True)
+    fee_amount = Column(Integer, nullable=True)
+    fee_percent = Column(Integer, nullable=True)
+    fee_mode = Column(String, nullable=False, default="split")
+    payment_url = Column(Text, nullable=True)
+    card_number = Column(String, nullable=True)
+    card_holder = Column(String, nullable=True)
+    bank_name = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="pending")
+    tracking_code = Column(String, nullable=True)
+    paid_at = Column(DateTime, nullable=True)
+    raw_payload = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime, nullable=True)
+    credited_at = Column(DateTime, nullable=True)
+
+    user = relationship("User")
+
+
 class CryptoInvoice(Base):
     """A single crypto top-up request and its on-chain settlement state.
 

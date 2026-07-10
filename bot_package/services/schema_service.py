@@ -169,6 +169,29 @@ class SchemaService:
                         "updated_at": "DATETIME",
                     },
                 )
+            if "hooshpay_invoices" in tables:
+                await SchemaService._add_missing_columns(
+                    conn,
+                    "hooshpay_invoices",
+                    {
+                        "uid": "VARCHAR",
+                        "payable_amount": "INTEGER",
+                        "merchant_credit": "INTEGER",
+                        "fee_amount": "INTEGER",
+                        "fee_percent": "INTEGER",
+                        "fee_mode": "VARCHAR DEFAULT 'split' NOT NULL",
+                        "payment_url": "TEXT",
+                        "card_number": "VARCHAR",
+                        "card_holder": "VARCHAR",
+                        "bank_name": "VARCHAR",
+                        "tracking_code": "VARCHAR",
+                        "paid_at": "DATETIME",
+                        "raw_payload": "TEXT",
+                        "updated_at": "DATETIME",
+                        "expires_at": "DATETIME",
+                        "credited_at": "DATETIME",
+                    },
+                )
 
     @staticmethod
     async def _add_missing_columns(conn, table_name: str, columns: dict[str, str]) -> None:
