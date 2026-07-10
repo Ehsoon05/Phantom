@@ -109,9 +109,10 @@ async def _handle_amount(update: Update, context: ContextTypes.DEFAULT_TYPE, val
             fee_mode=invoice.fee_mode,
             tracking_code=invoice.order_id,
         )
+        pay_button_text = await SettingsService.get_hooshpay_pay_button(session)
     clear_state(context)
     keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("پرداخت با درگاه هوش‌پی", url=invoice.payment_url)]]
+        [[InlineKeyboardButton(pay_button_text, url=invoice.payment_url)]]
     )
     await update.message.reply_text(
         text,

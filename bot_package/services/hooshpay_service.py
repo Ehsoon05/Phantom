@@ -26,7 +26,7 @@ def verify_hooshpay_signature(payload: dict, signature: str, secret: str) -> boo
 class HooshPayService:
     @staticmethod
     def order_id(invoice_id: int) -> str:
-        return f"phantom-hp-{invoice_id}"
+        return f"HP{int(invoice_id)}"
 
     @staticmethod
     async def create_invoice(

@@ -493,6 +493,13 @@ function HooshPayTab() {
   const [invoice, setInvoice] = useState<HooshPayInvoice | null>(null);
   const minAmount = methods?.hooshpay.min_amount_toman ?? 0;
   const enabled = methods?.hooshpay.enabled ?? false;
+  const hooshpayTitle = methods?.hooshpay.title || "درگاه هوش‌پی";
+  const hooshpaySubtitle =
+    methods?.hooshpay.subtitle ||
+    "پرداخت کارت‌به‌کارت آنی، بدون احراز و همراه با کارمزد.";
+  const amountLabel = methods?.hooshpay.amount_label || "مبلغ شارژ کیف پول (تومان)";
+  const createButtonLabel = methods?.hooshpay.create_button || "ساخت لینک پرداخت هوش‌پی";
+  const payButtonLabel = methods?.hooshpay.pay_button || "پرداخت با هوش‌پی";
 
   const create = useMutation({
     mutationFn: () => createHooshPayInvoice(parseAmount(amount)),
@@ -532,13 +539,13 @@ function HooshPayTab() {
       <Card>
         <CardContent className="space-y-4 p-4">
           <div>
-            <p className="text-sm font-bold">⚡️ درگاه هوش‌پی</p>
+            <p className="text-sm font-bold">⚡️ {hooshpayTitle}</p>
             <p className="mt-1 text-xs leading-6 text-muted-foreground">
-              پرداخت کارت‌به‌کارت آنی، بدون احراز و همراه با کارمزد. کارمزد فعلی به صورت split محاسبه می‌شود.
+              {hooshpaySubtitle}
             </p>
           </div>
           <div className="space-y-2">
-            <p className="text-sm font-semibold">مبلغ شارژ کیف پول (تومان)</p>
+            <p className="text-sm font-semibold">{amountLabel}</p>
             <Input
               inputMode="numeric"
               dir="ltr"
@@ -550,7 +557,7 @@ function HooshPayTab() {
           </div>
           {errorMessage && <p className="text-sm text-destructive">{errorMessage}</p>}
           <Button className="w-full" disabled={!valid || create.isPending} onClick={() => create.mutate()}>
-            {create.isPending ? "در حال ساخت فاکتور…" : "ساخت لینک پرداخت هوش‌پی"}
+            {create.isPending ? "در حال ساخت فاکتور…" : createButtonLabel}
           </Button>
         </CardContent>
       </Card>
@@ -587,12 +594,11 @@ function HooshPayTab() {
                 className="w-full"
                 onClick={() => {
                   const tg = getWebApp();
-                  const opener = tg as unknown as { openLink?: (url: string) => void };
-                  if (opener?.openLink) opener.openLink(activeInvoice.payment_url!);
+                  if (tg?.openLink) tg.openLink(activeInvoice.payment_url!);
                   else window.location.href = activeInvoice.payment_url!;
                 }}
               >
-                پرداخت با هوش‌پی
+                {payButtonLabel}
               </Button>
             )}
             <Button
@@ -717,15 +723,15 @@ function WalletContent() {
       <CouponCard />
 
       <Tabs defaultValue="crypto">
-        <TabsList className="w-full">
+        <TabsList className="w-full flex-row-reverse">
+          <TabsTrigger value="hooshpay" className="flex-1">
+            ⚡️ هوش‌پی
+          </TabsTrigger>
           <TabsTrigger value="crypto" className="flex-1">
             💎 کریپتو
           </TabsTrigger>
           <TabsTrigger value="rial" className="flex-1">
             🏦 کارت‌به‌کارت
-          </TabsTrigger>
-          <TabsTrigger value="hooshpay" className="flex-1">
-            ⚡️ هوش‌پی
           </TabsTrigger>
         </TabsList>
         <TabsContent value="crypto" className="pt-3">

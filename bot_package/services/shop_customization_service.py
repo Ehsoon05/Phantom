@@ -154,12 +154,12 @@ DEFAULT_BUTTONS: tuple[ButtonDefinition, ...] = (
     ButtonDefinition("support", "shop_main", "پشتیبانی", None, None, 4, 0, "6037421444789440735"),
     ButtonDefinition("help", "shop_main", "آموزش اتصال", None, None, 4, 1, "5776233299424843260"),
     _button_default("charge_rial", "shop_wallet", CHARGE_RIAL, STYLE_SUCCESS, 0, 0),
-    _button_default("charge_crypto", "shop_wallet", CHARGE_CRYPTO, STYLE_SUCCESS, 0, 1),
-    _button_default("charge_hooshpay", "shop_wallet", CHARGE_HOOSHPAY, STYLE_PRIMARY, 1, 0),
-    _button_default("apply_coupon", "shop_wallet", APPLY_COUPON, STYLE_SUCCESS, 2, 0),
-    _button_default("referrals", "shop_wallet", REFERRALS, STYLE_PRIMARY, 2, 1),
-    _button_default("support", "shop_wallet", SUPPORT, STYLE_SUCCESS, 3, 0),
-    _button_default("back_to_main", "shop_wallet", BACK_TO_MAIN, STYLE_DANGER, 4, 0),
+    _button_default("charge_crypto", "shop_wallet", CHARGE_CRYPTO, STYLE_SUCCESS, 1, 0),
+    _button_default("charge_hooshpay", "shop_wallet", CHARGE_HOOSHPAY, STYLE_PRIMARY, 2, 0),
+    _button_default("apply_coupon", "shop_wallet", APPLY_COUPON, STYLE_SUCCESS, 3, 0),
+    _button_default("referrals", "shop_wallet", REFERRALS, STYLE_PRIMARY, 3, 1),
+    _button_default("support", "shop_wallet", SUPPORT, STYLE_SUCCESS, 4, 0),
+    _button_default("back_to_main", "shop_wallet", BACK_TO_MAIN, STYLE_DANGER, 5, 0),
     _button_default("back_to_main", "shop_back", BACK_TO_MAIN, STYLE_DANGER, 0, 0),
     ButtonDefinition("back_to_main", "shop_buy", "بازگشت به منوی اصلی", None, None, 99, 0, "6039539366177541657"),
 )
@@ -340,7 +340,6 @@ DEFAULT_MESSAGES: dict[str, str] = {
         "مبلغ شارژ کیف پول: **{amount} تومان**\n"
         "مبلغ قابل پرداخت: **{payable_amount} تومان**\n"
         "کارمزد: **{fee_amount} تومان**\n"
-        "حالت کارمزد: `{fee_mode}`\n"
         "کد پیگیری: `{tracking_code}`\n\n"
         "برای پرداخت، روی دکمه زیر بزنید. پس از تأیید پرداخت، کیف پول شما به‌صورت خودکار شارژ می‌شود."
     ),
@@ -637,6 +636,29 @@ class ShopCustomizationService:
                 position = wallet_positions.get(button.action)
                 if position:
                     button.row, button.col = position
+
+        wallet_layout_key = "shop_wallet_layout:hooshpay_single_rows:v1"
+        wallet_layout_migrated = (
+            await session.execute(
+                select(BotSetting).where(BotSetting.key == wallet_layout_key)
+            )
+        ).scalar_one_or_none()
+        if wallet_layout_migrated is None:
+            wallet_positions = {
+                "charge_rial": (0, 0),
+                "charge_crypto": (1, 0),
+                "charge_hooshpay": (2, 0),
+                "apply_coupon": (3, 0),
+                "referrals": (3, 1),
+                "support": (4, 0),
+                "back_to_main": (5, 0),
+            }
+            result = await session.execute(select(ShopButton).where(ShopButton.menu == "shop_wallet"))
+            for button in result.scalars().all():
+                position = wallet_positions.get(button.action)
+                if position:
+                    button.row, button.col = position
+            session.add(BotSetting(key=wallet_layout_key, value="true"))
 
         layout_migration_key = "shop_main_layout:restore_original:v2"
         layout_migrated = (

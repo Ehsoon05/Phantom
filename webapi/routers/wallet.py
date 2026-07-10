@@ -118,6 +118,11 @@ async def payment_methods(
             "enabled": await SettingsService.hooshpay_enabled(session),
             "min_amount_toman": await SettingsService.get_hooshpay_min_amount(session),
             "fee_mode": await SettingsService.get_hooshpay_fee_mode(session),
+            "title": await SettingsService.get_hooshpay_title(session),
+            "subtitle": await SettingsService.get_hooshpay_subtitle(session),
+            "amount_label": await SettingsService.get_hooshpay_amount_label(session),
+            "create_button": await SettingsService.get_hooshpay_create_button(session),
+            "pay_button": await SettingsService.get_hooshpay_pay_button(session),
         },
     }
 

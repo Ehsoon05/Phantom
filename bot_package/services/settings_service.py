@@ -30,6 +30,11 @@ HOOSHPAY_API_BASE_URL = "hooshpay_api_base_url"
 HOOSHPAY_CALLBACK_BASE_URL = "hooshpay_callback_base_url"
 HOOSHPAY_FEE_MODE = "hooshpay_fee_mode"
 HOOSHPAY_MIN_AMOUNT = "hooshpay_min_amount"
+HOOSHPAY_TITLE = "hooshpay_title"
+HOOSHPAY_SUBTITLE = "hooshpay_subtitle"
+HOOSHPAY_AMOUNT_LABEL = "hooshpay_amount_label"
+HOOSHPAY_CREATE_BUTTON = "hooshpay_create_button"
+HOOSHPAY_PAY_BUTTON = "hooshpay_pay_button"
 TRIAL_ENABLED = "trial_enabled"
 TRIAL_VOLUME_MB = "trial_volume_mb"
 TRIAL_DURATION_HOURS = "trial_duration_hours"
@@ -65,6 +70,11 @@ DEFAULTS = {
     HOOSHPAY_CALLBACK_BASE_URL: "https://webapi.phantomhubs.shop",
     HOOSHPAY_FEE_MODE: "split",
     HOOSHPAY_MIN_AMOUNT: "100000",
+    HOOSHPAY_TITLE: "درگاه هوش‌پی",
+    HOOSHPAY_SUBTITLE: "پرداخت کارت‌به‌کارت آنی، بدون احراز و همراه با کارمزد. کارمزد فعلی به صورت split محاسبه می‌شود.",
+    HOOSHPAY_AMOUNT_LABEL: "مبلغ شارژ کیف پول (تومان)",
+    HOOSHPAY_CREATE_BUTTON: "ساخت لینک پرداخت هوش‌پی",
+    HOOSHPAY_PAY_BUTTON: "پرداخت با هوش‌پی",
     TRIAL_ENABLED: "true",
     TRIAL_VOLUME_MB: "500",
     TRIAL_DURATION_HOURS: "24",
@@ -339,6 +349,50 @@ class SettingsService:
     @staticmethod
     async def set_hooshpay_min_amount(session: AsyncSession, amount: int) -> None:
         await SettingsService.set(session, HOOSHPAY_MIN_AMOUNT, str(max(1000, int(amount))))
+
+    @staticmethod
+    async def get_hooshpay_title(session: AsyncSession) -> str:
+        return (await SettingsService.get(session, HOOSHPAY_TITLE, "درگاه هوش‌پی") or "درگاه هوش‌پی").strip()
+
+    @staticmethod
+    async def set_hooshpay_title(session: AsyncSession, value: str) -> None:
+        await SettingsService.set(session, HOOSHPAY_TITLE, value.strip() or "درگاه هوش‌پی")
+
+    @staticmethod
+    async def get_hooshpay_subtitle(session: AsyncSession) -> str:
+        default = DEFAULTS[HOOSHPAY_SUBTITLE]
+        return (await SettingsService.get(session, HOOSHPAY_SUBTITLE, default) or default).strip()
+
+    @staticmethod
+    async def set_hooshpay_subtitle(session: AsyncSession, value: str) -> None:
+        await SettingsService.set(session, HOOSHPAY_SUBTITLE, value.strip())
+
+    @staticmethod
+    async def get_hooshpay_amount_label(session: AsyncSession) -> str:
+        default = DEFAULTS[HOOSHPAY_AMOUNT_LABEL]
+        return (await SettingsService.get(session, HOOSHPAY_AMOUNT_LABEL, default) or default).strip()
+
+    @staticmethod
+    async def set_hooshpay_amount_label(session: AsyncSession, value: str) -> None:
+        await SettingsService.set(session, HOOSHPAY_AMOUNT_LABEL, value.strip() or DEFAULTS[HOOSHPAY_AMOUNT_LABEL])
+
+    @staticmethod
+    async def get_hooshpay_create_button(session: AsyncSession) -> str:
+        default = DEFAULTS[HOOSHPAY_CREATE_BUTTON]
+        return (await SettingsService.get(session, HOOSHPAY_CREATE_BUTTON, default) or default).strip()
+
+    @staticmethod
+    async def set_hooshpay_create_button(session: AsyncSession, value: str) -> None:
+        await SettingsService.set(session, HOOSHPAY_CREATE_BUTTON, value.strip() or DEFAULTS[HOOSHPAY_CREATE_BUTTON])
+
+    @staticmethod
+    async def get_hooshpay_pay_button(session: AsyncSession) -> str:
+        default = DEFAULTS[HOOSHPAY_PAY_BUTTON]
+        return (await SettingsService.get(session, HOOSHPAY_PAY_BUTTON, default) or default).strip()
+
+    @staticmethod
+    async def set_hooshpay_pay_button(session: AsyncSession, value: str) -> None:
+        await SettingsService.set(session, HOOSHPAY_PAY_BUTTON, value.strip() or DEFAULTS[HOOSHPAY_PAY_BUTTON])
 
     @staticmethod
     async def trial_enabled(session: AsyncSession) -> bool:

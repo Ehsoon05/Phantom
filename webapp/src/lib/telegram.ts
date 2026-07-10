@@ -10,6 +10,7 @@ export interface TelegramWebApp {
   onEvent: (event: string, cb: () => void) => void;
   HapticFeedback?: { notificationOccurred: (type: "success" | "error" | "warning") => void };
   openTelegramLink: (url: string) => void;
+  openLink?: (url: string) => void;
 }
 
 declare global {

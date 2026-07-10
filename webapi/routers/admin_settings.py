@@ -110,6 +110,11 @@ async def get_hooshpay_settings(
         "fee_mode": await SettingsService.get_hooshpay_fee_mode(session),
         "api_base_url": await SettingsService.get_hooshpay_api_base_url(session),
         "callback_base_url": await SettingsService.get_hooshpay_callback_base_url(session),
+        "title": await SettingsService.get_hooshpay_title(session),
+        "subtitle": await SettingsService.get_hooshpay_subtitle(session),
+        "amount_label": await SettingsService.get_hooshpay_amount_label(session),
+        "create_button": await SettingsService.get_hooshpay_create_button(session),
+        "pay_button": await SettingsService.get_hooshpay_pay_button(session),
         "api_key_configured": bool(api_key),
         "api_secret_configured": bool(api_secret),
     }
@@ -123,6 +128,11 @@ class HooshPaySettingsRequest(BaseModel):
     api_secret: str | None = None
     api_base_url: str | None = None
     callback_base_url: str | None = None
+    title: str | None = None
+    subtitle: str | None = None
+    amount_label: str | None = None
+    create_button: str | None = None
+    pay_button: str | None = None
 
 
 @router.put("/settings/hooshpay")
@@ -147,6 +157,16 @@ async def set_hooshpay_settings(
         await SettingsService.set_hooshpay_api_base_url(session, body.api_base_url)
     if body.callback_base_url is not None:
         await SettingsService.set_hooshpay_callback_base_url(session, body.callback_base_url)
+    if body.title is not None:
+        await SettingsService.set_hooshpay_title(session, body.title)
+    if body.subtitle is not None:
+        await SettingsService.set_hooshpay_subtitle(session, body.subtitle)
+    if body.amount_label is not None:
+        await SettingsService.set_hooshpay_amount_label(session, body.amount_label)
+    if body.create_button is not None:
+        await SettingsService.set_hooshpay_create_button(session, body.create_button)
+    if body.pay_button is not None:
+        await SettingsService.set_hooshpay_pay_button(session, body.pay_button)
     return await get_hooshpay_settings(session, admin)
 
 

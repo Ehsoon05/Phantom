@@ -308,6 +308,11 @@ export interface HooshPaySettings {
   fee_mode: "seller" | "buyer" | "split";
   api_base_url: string;
   callback_base_url: string;
+  title: string;
+  subtitle: string;
+  amount_label: string;
+  create_button: string;
+  pay_button: string;
   api_key_configured: boolean;
   api_secret_configured: boolean;
 }

@@ -109,6 +109,11 @@ export interface PaymentMethods {
     enabled: boolean;
     min_amount_toman: number;
     fee_mode: "seller" | "buyer" | "split";
+    title: string;
+    subtitle: string;
+    amount_label: string;
+    create_button: string;
+    pay_button: string;
   };
 }
 
