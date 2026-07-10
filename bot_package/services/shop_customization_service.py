@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import html
 import re
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
@@ -499,6 +499,10 @@ OBSOLETE_CATEGORY_KEYS = {
 
 class ShopCustomizationService:
     @staticmethod
+    def _deleted_button_key(menu: str, action: str) -> str:
+        return f"deleted_shop_button:{menu}:{action}"
+
+    @staticmethod
     async def _migrate_legacy_tariffs_key(session: AsyncSession) -> None:
         legacy_message = (
             await session.execute(select(ShopMessage).where(ShopMessage.key == LEGACY_TARIFFS_MESSAGE_KEY))
@@ -592,21 +596,16 @@ class ShopCustomizationService:
             if existing is None:
                 session.add(ShopMessageButton(**definition))
 
-        trial_result = await session.execute(
-            select(ShopButton).where(ShopButton.action == "trial_config", ShopButton.menu == "shop_main")
-        )
-        if trial_result.scalar_one_or_none() is None:
-            existing_main_buttons = await session.execute(select(ShopButton).where(ShopButton.menu == "shop_main"))
-            for button in existing_main_buttons.scalars().all():
-                if button.row >= 1:
-                    button.row += 1
-
-        added_rial_button = False
-        for definition in DEFAULT_BUTTONS:
-            result = await session.execute(select(ShopButton).where(ShopButton.action == definition.action, ShopButton.menu == definition.menu))
-            if result.scalar_one_or_none() is None:
-                if definition.action == "charge_rial":
-                    added_rial_button = True
+        existing_button_count = (
+            await session.execute(select(func.count(ShopButton.id)))
+        ).scalar_one()
+        deleted_button_count = (
+            await session.execute(
+                select(func.count(BotSetting.id)).where(BotSetting.key.like("deleted_shop_button:%"))
+            )
+        ).scalar_one()
+        if existing_button_count == 0 and deleted_button_count == 0:
+            for definition in DEFAULT_BUTTONS:
                 session.add(
                     ShopButton(
                         action=definition.action,
@@ -622,28 +621,13 @@ class ShopCustomizationService:
                     )
                 )
 
-        if added_rial_button:
-            wallet_positions = {
-                "charge_rial": (0, 0),
-                "charge_crypto": (0, 1),
-                "apply_coupon": (1, 0),
-                "referrals": (1, 1),
-                "support": (2, 0),
-                "back_to_main": (3, 0),
-            }
-            result = await session.execute(select(ShopButton).where(ShopButton.menu == "shop_wallet"))
-            for button in result.scalars().all():
-                position = wallet_positions.get(button.action)
-                if position:
-                    button.row, button.col = position
-
         wallet_layout_key = "shop_wallet_layout:hooshpay_single_rows:v1"
         wallet_layout_migrated = (
             await session.execute(
                 select(BotSetting).where(BotSetting.key == wallet_layout_key)
             )
         ).scalar_one_or_none()
-        if wallet_layout_migrated is None:
+        if wallet_layout_migrated is None and existing_button_count == 0:
             wallet_positions = {
                 "charge_rial": (0, 0),
                 "charge_crypto": (1, 0),
@@ -666,7 +650,7 @@ class ShopCustomizationService:
                 select(BotSetting).where(BotSetting.key == layout_migration_key)
             )
         ).scalar_one_or_none()
-        if layout_migrated is None:
+        if layout_migrated is None and existing_button_count == 0:
             main_positions = {
                 TARIFFS_MESSAGE_KEY: (0, 0),
                 "buy_subscription": (0, 1),
@@ -772,7 +756,13 @@ class ShopCustomizationService:
             await session.delete(category)
 
         deleted_markers = await session.execute(
-            select(BotSetting).where(BotSetting.key.like("deleted_shop_plan:%"))
+            select(BotSetting).where(
+                or_(
+                    BotSetting.key.like("deleted_shop_plan:%"),
+                    BotSetting.key.like("deleted_shop_button:%"),
+                    BotSetting.key.like("shop_%_layout:%"),
+                )
+            )
         )
         for marker in deleted_markers.scalars().all():
             await session.delete(marker)
@@ -948,6 +938,12 @@ class ShopCustomizationService:
         button = await ShopCustomizationService.get_button(session, button_id)
         if not button:
             return False
+        deleted_key = ShopCustomizationService._deleted_button_key(button.menu, button.action)
+        existing_marker = (
+            await session.execute(select(BotSetting).where(BotSetting.key == deleted_key))
+        ).scalar_one_or_none()
+        if existing_marker is None:
+            session.add(BotSetting(key=deleted_key, value="true"))
         if button.action.startswith("custom_message:"):
             message = await ShopCustomizationService.get_message_row(session, button.action)
             if message:
@@ -1413,10 +1409,19 @@ class ShopCustomizationService:
             if ShopCustomizationService.button_label(button) == text:
                 return button.action
 
-        for definition in DEFAULT_BUTTONS:
-            label = ShopCustomizationService.definition_label(definition)
-            if label == text:
-                return definition.action
+        persisted_count = (
+            await session.execute(select(func.count(ShopButton.id)))
+        ).scalar_one()
+        deleted_count = (
+            await session.execute(
+                select(func.count(BotSetting.id)).where(BotSetting.key.like("deleted_shop_button:%"))
+            )
+        ).scalar_one()
+        if persisted_count == 0 and deleted_count == 0:
+            for definition in DEFAULT_BUTTONS:
+                label = ShopCustomizationService.definition_label(definition)
+                if label == text:
+                    return definition.action
         return None
 
     @staticmethod
@@ -1462,7 +1467,20 @@ class ShopCustomizationService:
     async def _menu_keyboard(session: AsyncSession, menu: str) -> ReplyKeyboardMarkup:
         buttons = await ShopCustomizationService._buttons_for_menu(session, menu)
         if not buttons:
-            buttons = ShopCustomizationService._default_buttons_for_menu(menu)
+            persisted_count = (
+                await session.execute(
+                    select(func.count(ShopButton.id)).where(ShopButton.menu == menu)
+                )
+            ).scalar_one()
+            deleted_count = (
+                await session.execute(
+                    select(func.count(BotSetting.id)).where(
+                        BotSetting.key.like(f"deleted_shop_button:{menu}:%")
+                    )
+                )
+            ).scalar_one()
+            if persisted_count == 0 and deleted_count == 0:
+                buttons = ShopCustomizationService._default_buttons_for_menu(menu)
 
         rows: dict[int, list[ShopButton | ButtonDefinition]] = {}
         for button in buttons:
