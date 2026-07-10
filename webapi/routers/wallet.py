@@ -123,6 +123,7 @@ async def payment_methods(
             "amount_label": await SettingsService.get_hooshpay_amount_label(session),
             "create_button": await SettingsService.get_hooshpay_create_button(session),
             "pay_button": await SettingsService.get_hooshpay_pay_button(session),
+            "preset_amounts": await SettingsService.get_hooshpay_preset_amounts(session),
         },
     }
 

@@ -35,6 +35,7 @@ HOOSHPAY_SUBTITLE = "hooshpay_subtitle"
 HOOSHPAY_AMOUNT_LABEL = "hooshpay_amount_label"
 HOOSHPAY_CREATE_BUTTON = "hooshpay_create_button"
 HOOSHPAY_PAY_BUTTON = "hooshpay_pay_button"
+HOOSHPAY_PRESET_AMOUNTS = "hooshpay_preset_amounts"
 TRIAL_ENABLED = "trial_enabled"
 TRIAL_VOLUME_MB = "trial_volume_mb"
 TRIAL_DURATION_HOURS = "trial_duration_hours"
@@ -75,6 +76,7 @@ DEFAULTS = {
     HOOSHPAY_AMOUNT_LABEL: "مبلغ شارژ کیف پول (تومان)",
     HOOSHPAY_CREATE_BUTTON: "ساخت لینک پرداخت هوش‌پی",
     HOOSHPAY_PAY_BUTTON: "پرداخت با هوش‌پی",
+    HOOSHPAY_PRESET_AMOUNTS: "100000,200000,500000,1000000",
     TRIAL_ENABLED: "true",
     TRIAL_VOLUME_MB: "500",
     TRIAL_DURATION_HOURS: "24",
@@ -393,6 +395,28 @@ class SettingsService:
     @staticmethod
     async def set_hooshpay_pay_button(session: AsyncSession, value: str) -> None:
         await SettingsService.set(session, HOOSHPAY_PAY_BUTTON, value.strip() or DEFAULTS[HOOSHPAY_PAY_BUTTON])
+
+    @staticmethod
+    async def get_hooshpay_preset_amounts(session: AsyncSession) -> list[int]:
+        raw = await SettingsService.get(session, HOOSHPAY_PRESET_AMOUNTS, DEFAULTS[HOOSHPAY_PRESET_AMOUNTS])
+        values: list[int] = []
+        for part in str(raw or "").replace("،", ",").split(","):
+            try:
+                amount = int(part.strip())
+            except ValueError:
+                continue
+            if amount > 0 and amount not in values:
+                values.append(amount)
+        return values
+
+    @staticmethod
+    async def set_hooshpay_preset_amounts(session: AsyncSession, values: list[int]) -> None:
+        cleaned = []
+        for value in values:
+            amount = int(value)
+            if amount > 0 and amount not in cleaned:
+                cleaned.append(amount)
+        await SettingsService.set(session, HOOSHPAY_PRESET_AMOUNTS, ",".join(str(value) for value in cleaned))
 
     @staticmethod
     async def trial_enabled(session: AsyncSession) -> bool:

@@ -115,6 +115,7 @@ async def get_hooshpay_settings(
         "amount_label": await SettingsService.get_hooshpay_amount_label(session),
         "create_button": await SettingsService.get_hooshpay_create_button(session),
         "pay_button": await SettingsService.get_hooshpay_pay_button(session),
+        "preset_amounts": await SettingsService.get_hooshpay_preset_amounts(session),
         "api_key_configured": bool(api_key),
         "api_secret_configured": bool(api_secret),
     }
@@ -133,6 +134,7 @@ class HooshPaySettingsRequest(BaseModel):
     amount_label: str | None = None
     create_button: str | None = None
     pay_button: str | None = None
+    preset_amounts: list[int] | None = None
 
 
 @router.put("/settings/hooshpay")
@@ -167,6 +169,8 @@ async def set_hooshpay_settings(
         await SettingsService.set_hooshpay_create_button(session, body.create_button)
     if body.pay_button is not None:
         await SettingsService.set_hooshpay_pay_button(session, body.pay_button)
+    if body.preset_amounts is not None:
+        await SettingsService.set_hooshpay_preset_amounts(session, body.preset_amounts)
     return await get_hooshpay_settings(session, admin)
 
 

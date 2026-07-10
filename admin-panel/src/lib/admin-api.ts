@@ -313,6 +313,7 @@ export interface HooshPaySettings {
   amount_label: string;
   create_button: string;
   pay_button: string;
+  preset_amounts: number[];
   api_key_configured: boolean;
   api_secret_configured: boolean;
 }

@@ -114,6 +114,7 @@ export interface PaymentMethods {
     amount_label: string;
     create_button: string;
     pay_button: string;
+    preset_amounts: number[];
   };
 }
 

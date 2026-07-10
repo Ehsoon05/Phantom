@@ -125,6 +125,7 @@ function HooshPaySection() {
   const [amountLabel, setAmountLabel] = useState("");
   const [createButton, setCreateButton] = useState("");
   const [payButton, setPayButton] = useState("");
+  const [presetAmounts, setPresetAmounts] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
   useEffect(() => {
@@ -137,6 +138,7 @@ function HooshPaySection() {
       setAmountLabel(data.amount_label ?? "");
       setCreateButton(data.create_button ?? "");
       setPayButton(data.pay_button ?? "");
+      setPresetAmounts((data.preset_amounts ?? []).join(","));
     }
   }, [data]);
   const save = useMutation({ mutationFn: (b: Record<string, unknown>) => setHooshPaySettings(b), onSuccess: inv });
@@ -159,6 +161,22 @@ function HooshPaySection() {
         <div className="flex gap-1 md:col-span-2"><Input placeholder="عنوان فیلد مبلغ" value={amountLabel} onChange={(e) => setAmountLabel(e.target.value)} /><Button size="sm" onClick={() => save.mutate({ amount_label: amountLabel })}>ثبت</Button></div>
         <div className="flex gap-1"><Input placeholder="متن دکمه ساخت" value={createButton} onChange={(e) => setCreateButton(e.target.value)} /><Button size="sm" onClick={() => save.mutate({ create_button: createButton })}>ثبت</Button></div>
         <div className="flex gap-1"><Input placeholder="متن دکمه پرداخت" value={payButton} onChange={(e) => setPayButton(e.target.value)} /><Button size="sm" onClick={() => save.mutate({ pay_button: payButton })}>ثبت</Button></div>
+        <div className="flex gap-1 md:col-span-3">
+          <Input placeholder="مبلغ‌های آماده مینی‌اپ با کاما، مثال: 100000,200000,500000" dir="ltr" value={presetAmounts} onChange={(e) => setPresetAmounts(e.target.value)} />
+          <Button
+            size="sm"
+            onClick={() =>
+              save.mutate({
+                preset_amounts: presetAmounts
+                  .split(/[،,\\s]+/)
+                  .map((value) => parseInt(value, 10))
+                  .filter((value) => Number.isFinite(value) && value > 0),
+              })
+            }
+          >
+            ثبت
+          </Button>
+        </div>
         <div className="flex gap-1 md:col-span-2"><Input placeholder="API Base URL" dir="ltr" value={apiBase} onChange={(e) => setApiBase(e.target.value)} /><Button size="sm" onClick={() => save.mutate({ api_base_url: apiBase })}>ثبت</Button></div>
         <div className="flex gap-1 md:col-span-2"><Input placeholder="Callback Base URL" dir="ltr" value={callbackBase} onChange={(e) => setCallbackBase(e.target.value)} /><Button size="sm" onClick={() => save.mutate({ callback_base_url: callbackBase })}>ثبت</Button></div>
         <div className="flex gap-1 md:col-span-2">

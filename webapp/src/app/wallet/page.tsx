@@ -500,6 +500,7 @@ function HooshPayTab() {
   const amountLabel = methods?.hooshpay.amount_label || "مبلغ شارژ کیف پول (تومان)";
   const createButtonLabel = methods?.hooshpay.create_button || "ساخت لینک پرداخت هوش‌پی";
   const payButtonLabel = methods?.hooshpay.pay_button || "پرداخت با هوش‌پی";
+  const presetAmounts = methods?.hooshpay.preset_amounts ?? [];
 
   const create = useMutation({
     mutationFn: () => createHooshPayInvoice(parseAmount(amount)),
@@ -554,6 +555,21 @@ function HooshPayTab() {
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
             />
+            {presetAmounts.length > 0 && (
+              <div className="grid grid-cols-2 gap-2">
+                {presetAmounts.map((preset) => (
+                  <Button
+                    key={preset}
+                    type="button"
+                    variant={parseAmount(amount) === preset ? "default" : "secondary"}
+                    className="min-h-11"
+                    onClick={() => setAmount(String(preset))}
+                  >
+                    {formatToman(preset)}
+                  </Button>
+                ))}
+              </div>
+            )}
           </div>
           {errorMessage && <p className="text-sm text-destructive">{errorMessage}</p>}
           <Button className="w-full" disabled={!valid || create.isPending} onClick={() => create.mutate()}>
@@ -578,12 +594,6 @@ function HooshPayTab() {
                 <span className="text-muted-foreground">مبلغ قابل پرداخت</span>
                 <span>{formatToman(activeInvoice.payable_amount ?? activeInvoice.amount_toman)}</span>
               </div>
-              {!!activeInvoice.fee_amount && (
-                <div className="flex justify-between gap-2">
-                  <span className="text-muted-foreground">کارمزد</span>
-                  <span>{formatToman(activeInvoice.fee_amount)}</span>
-                </div>
-              )}
               <div className="flex justify-between gap-2">
                 <span className="text-muted-foreground">کد پیگیری</span>
                 <span dir="ltr">{activeInvoice.order_id}</span>
@@ -723,15 +733,15 @@ function WalletContent() {
       <CouponCard />
 
       <Tabs defaultValue="crypto">
-        <TabsList className="w-full flex-row-reverse">
-          <TabsTrigger value="hooshpay" className="flex-1">
-            ⚡️ هوش‌پی
-          </TabsTrigger>
+        <TabsList className="w-full" dir="rtl">
           <TabsTrigger value="crypto" className="flex-1">
             💎 کریپتو
           </TabsTrigger>
           <TabsTrigger value="rial" className="flex-1">
             🏦 کارت‌به‌کارت
+          </TabsTrigger>
+          <TabsTrigger value="hooshpay" className="flex-1">
+            ⚡️ هوش‌پی
           </TabsTrigger>
         </TabsList>
         <TabsContent value="crypto" className="pt-3">
