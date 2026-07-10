@@ -9,6 +9,7 @@ from ..database import async_session
 from ..services.hooshpay_service import HooshPayError, HooshPayService
 from ..services.settings_service import SettingsService
 from ..services.shop_customization_service import ShopCustomizationService
+from ..utils.datetime_format import format_tehran_time
 from ..utils.keyboards import BACK_TO_MAIN
 
 
@@ -108,6 +109,7 @@ async def _handle_amount(update: Update, context: ContextTypes.DEFAULT_TYPE, val
             fee_amount=f"{(invoice.fee_amount or 0):,}",
             fee_mode=invoice.fee_mode,
             tracking_code=invoice.order_id,
+            expires_at=format_tehran_time(invoice.expires_at),
         )
         pay_button_text = await SettingsService.get_hooshpay_pay_button(session)
     clear_state(context)

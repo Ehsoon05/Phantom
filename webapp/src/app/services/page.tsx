@@ -141,12 +141,13 @@ function ServicesContent() {
       {purchases?.map((purchase) => (
         <Card key={purchase.id}>
           <CardContent className="space-y-3 p-4">
-            <div className="flex items-center justify-between">
+            <div className="space-y-1">
               <p className="font-bold">
                 {purchase.service_name ?? `${purchase.volume_gb} گیگ`}
               </p>
-              <p className="text-xs text-muted-foreground">
-                {formatTehranDateTime(purchase.purchased_at, false)}
+              <p className="text-xs leading-5 text-muted-foreground">
+                <span className="font-medium text-foreground">تاریخ خرید: </span>
+                <span>{formatTehranDateTime(purchase.purchased_at, false)}</span>
               </p>
             </div>
             <p className="text-xs text-muted-foreground">

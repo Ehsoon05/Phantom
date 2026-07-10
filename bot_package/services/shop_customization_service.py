@@ -340,6 +340,8 @@ DEFAULT_MESSAGES: dict[str, str] = {
         "مبلغ شارژ کیف پول: **{amount} تومان**\n"
         "مبلغ قابل پرداخت: **{payable_amount} تومان**\n"
         "کد پیگیری: `{tracking_code}`\n\n"
+        "⏳ مهلت پرداخت تا ساعت **{expires_at} تهران** است.\n"
+        "⚠️ حتماً مبلغ قابل پرداخت را دقیق واریز کنید؛ مسئولیت واریز مبلغ اشتباه یا کارت اشتباه با شماست.\n\n"
         "برای پرداخت، روی دکمه زیر بزنید. پس از تأیید پرداخت، کیف پول شما به‌صورت خودکار شارژ می‌شود."
     ),
     TARIFFS_MESSAGE_KEY: (
@@ -581,6 +583,15 @@ class ShopCustomizationService:
                     "موجودی فعلی کیف پول: {wallet_balance} تومان\n"
                     "مبلغ موردنیاز:",
                 )
+            elif key == "hooshpay_invoice_created":
+                message.text = re.sub(r"^.*کارمزد.*\n?", "", message.text, flags=re.MULTILINE)
+                if "{expires_at}" not in message.text:
+                    message.text = message.text.replace(
+                        "برای پرداخت، روی دکمه زیر بزنید.",
+                        "⏳ مهلت پرداخت تا ساعت **{expires_at} تهران** است.\n"
+                        "⚠️ حتماً مبلغ قابل پرداخت را دقیق واریز کنید؛ مسئولیت واریز مبلغ اشتباه یا کارت اشتباه با شماست.\n\n"
+                        "برای پرداخت، روی دکمه زیر بزنید.",
+                    )
 
         for definition in DEFAULT_MESSAGE_BUTTONS:
             existing = (

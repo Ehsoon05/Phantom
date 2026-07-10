@@ -485,6 +485,25 @@ function HooshPayStatus({ invoice }: { invoice: HooshPayInvoice }) {
   return <Badge variant={tone}>{label}</Badge>;
 }
 
+function HooshPayCountdown({ expiresAt }: { expiresAt: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const end = new Date(/(?:Z|[+-]\d{2}:\d{2})$/.test(expiresAt) ? expiresAt : `${expiresAt}Z`).getTime();
+  const remaining = Math.max(0, end - now);
+  const hours = Math.floor(remaining / 3_600_000);
+  const minutes = Math.floor((remaining % 3_600_000) / 60_000);
+  const seconds = Math.floor((remaining % 60_000) / 1000);
+  return (
+    <span dir="ltr" className="font-mono text-lg font-bold tabular-nums text-primary">
+      {hours > 0 ? `${String(hours).padStart(2, "0")}:` : ""}
+      {String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}
+    </span>
+  );
+}
+
 function HooshPayTab() {
   const queryClient = useQueryClient();
   const { data: methods } = useQuery({ queryKey: ["methods"], queryFn: getPaymentMethods });
@@ -586,18 +605,30 @@ function HooshPayTab() {
               <HooshPayStatus invoice={activeInvoice} />
             </div>
             <div className="grid gap-2 text-sm">
-              <div className="flex justify-between gap-2">
-                <span className="text-muted-foreground">مبلغ شارژ</span>
+              <div className="flex justify-between gap-2 text-right" dir="rtl">
+                <span className="text-muted-foreground">مبلغ شارژ:</span>
                 <span>{formatToman(activeInvoice.amount_toman)}</span>
               </div>
-              <div className="flex justify-between gap-2">
-                <span className="text-muted-foreground">مبلغ قابل پرداخت</span>
+              <div className="flex justify-between gap-2 text-right" dir="rtl">
+                <span className="text-muted-foreground">مبلغ قابل پرداخت:</span>
                 <span>{formatToman(activeInvoice.payable_amount ?? activeInvoice.amount_toman)}</span>
               </div>
-              <div className="flex justify-between gap-2">
-                <span className="text-muted-foreground">کد پیگیری</span>
+              <div className="flex justify-between gap-2 text-right" dir="rtl">
+                <span className="text-muted-foreground">کد پیگیری:</span>
                 <span dir="ltr">{activeInvoice.order_id}</span>
               </div>
+              {activeInvoice.expires_at && !activeInvoice.credited_at && (
+                <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-center">
+                  <p className="text-xs font-medium text-muted-foreground">مهلت پرداخت باقی‌مانده</p>
+                  <HooshPayCountdown expiresAt={activeInvoice.expires_at} />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    اعتبار پرداخت تا ساعت <span dir="ltr">{formatTehranTime(activeInvoice.expires_at)}</span> تهران است.
+                  </p>
+                </div>
+              )}
+              <p className="rounded-lg bg-destructive/10 p-3 text-xs leading-6 text-destructive">
+                حتماً مبلغ قابل پرداخت را دقیق واریز کنید؛ مسئولیت واریز مبلغ اشتباه یا کارت اشتباه با شماست.
+              </p>
             </div>
             {activeInvoice.payment_url && !activeInvoice.credited_at && (
               <Button
