@@ -59,6 +59,13 @@ function cryptoAssetLabel(value?: string | null) {
   return value?.toUpperCase() === "TON" ? "گرام(تون)" : value ?? "";
 }
 
+function dateMs(value?: string | null): number | null {
+  if (!value) return null;
+  const normalized = /(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? value : `${value}Z`;
+  const parsed = new Date(normalized).getTime();
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
 function Countdown({ expiresAt }: { expiresAt: string }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -479,9 +486,22 @@ function RialTab() {
   );
 }
 
-function HooshPayStatus({ invoice }: { invoice: HooshPayInvoice }) {
-  const tone = invoice.status === "paid" || invoice.credited_at ? "default" : invoice.status === "failed" ? "destructive" : "secondary";
-  const label = invoice.credited_at ? "شارژ شد" : invoice.status === "paid" ? "پرداخت شد" : invoice.status === "pending" ? "در انتظار پرداخت" : invoice.status;
+function HooshPayStatus({ invoice, expired }: { invoice: HooshPayInvoice; expired?: boolean }) {
+  const tone =
+    invoice.status === "paid" || invoice.credited_at
+      ? "default"
+      : expired || invoice.status === "failed"
+        ? "destructive"
+        : "secondary";
+  const label = invoice.credited_at
+    ? "شارژ شد"
+    : invoice.status === "paid"
+      ? "پرداخت شد"
+      : expired
+        ? "منقضی شد"
+        : invoice.status === "pending"
+          ? "در انتظار پرداخت"
+          : invoice.status;
   return <Badge variant={tone}>{label}</Badge>;
 }
 
@@ -491,8 +511,15 @@ function HooshPayCountdown({ expiresAt }: { expiresAt: string }) {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
-  const end = new Date(/(?:Z|[+-]\d{2}:\d{2})$/.test(expiresAt) ? expiresAt : `${expiresAt}Z`).getTime();
+  const end = dateMs(expiresAt) ?? now;
   const remaining = Math.max(0, end - now);
+  if (remaining <= 0) {
+    return (
+      <span className="text-sm font-bold text-destructive">
+        مهلت پرداخت تمام شده است
+      </span>
+    );
+  }
   const hours = Math.floor(remaining / 3_600_000);
   const minutes = Math.floor((remaining % 3_600_000) / 60_000);
   const seconds = Math.floor((remaining % 60_000) / 1000);
@@ -522,7 +549,7 @@ function HooshPayTab() {
   const presetAmounts = methods?.hooshpay.preset_amounts ?? [];
 
   const create = useMutation({
-    mutationFn: () => createHooshPayInvoice(parseAmount(amount)),
+    mutationFn: (amountOverride?: number) => createHooshPayInvoice(amountOverride ?? parseAmount(amount)),
     onSuccess: (data) => {
       setInvoice(data);
       setAmount("");
@@ -539,6 +566,21 @@ function HooshPayTab() {
     },
   });
 
+  const activeInvoice = invoice ?? invoices?.[0] ?? null;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!activeInvoice?.expires_at || activeInvoice.credited_at) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [activeInvoice?.expires_at, activeInvoice?.credited_at]);
+  const activeInvoiceExpiresAt = dateMs(activeInvoice?.expires_at);
+  const activeInvoiceExpired = Boolean(
+    activeInvoiceExpiresAt &&
+      activeInvoiceExpiresAt <= now &&
+      !activeInvoice?.credited_at &&
+      activeInvoice?.status !== "paid"
+  );
+
   if (!enabled) {
     return (
       <Card>
@@ -549,7 +591,6 @@ function HooshPayTab() {
     );
   }
 
-  const activeInvoice = invoice ?? invoices?.[0] ?? null;
   const valid = parseAmount(amount) >= minAmount;
   const errorMessage =
     create.error instanceof ApiError ? create.error.message : create.error ? "ساخت فاکتور انجام نشد" : null;
@@ -591,35 +632,37 @@ function HooshPayTab() {
             )}
           </div>
           {errorMessage && <p className="text-sm text-destructive">{errorMessage}</p>}
-          <Button className="w-full" disabled={!valid || create.isPending} onClick={() => create.mutate()}>
+          <Button className="w-full" disabled={!valid || create.isPending} onClick={() => create.mutate(undefined)}>
             {create.isPending ? "در حال ساخت فاکتور…" : createButtonLabel}
           </Button>
         </CardContent>
       </Card>
 
       {activeInvoice && (
-        <Card className="border-primary/40">
+        <Card className="border-primary/40 text-right" dir="rtl">
           <CardContent className="space-y-3 p-4">
             <div className="flex items-center justify-between gap-2">
               <p className="text-sm font-bold">آخرین فاکتور هوش‌پی</p>
-              <HooshPayStatus invoice={activeInvoice} />
+              <HooshPayStatus invoice={activeInvoice} expired={activeInvoiceExpired} />
             </div>
             <div className="grid gap-2 text-sm">
-              <div className="flex justify-between gap-2 text-right" dir="rtl">
+              <div className="flex justify-between gap-2">
                 <span className="text-muted-foreground">مبلغ شارژ:</span>
                 <span>{formatToman(activeInvoice.amount_toman)}</span>
               </div>
-              <div className="flex justify-between gap-2 text-right" dir="rtl">
+              <div className="flex justify-between gap-2">
                 <span className="text-muted-foreground">مبلغ قابل پرداخت:</span>
                 <span>{formatToman(activeInvoice.payable_amount ?? activeInvoice.amount_toman)}</span>
               </div>
-              <div className="flex justify-between gap-2 text-right" dir="rtl">
+              <div className="flex justify-between gap-2">
                 <span className="text-muted-foreground">کد پیگیری:</span>
                 <span dir="ltr">{activeInvoice.order_id}</span>
               </div>
               {activeInvoice.expires_at && !activeInvoice.credited_at && (
                 <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-center">
-                  <p className="text-xs font-medium text-muted-foreground">مهلت پرداخت باقی‌مانده</p>
+                  <p className="text-xs font-medium text-muted-foreground">
+                    {activeInvoiceExpired ? "وضعیت مهلت پرداخت" : "مهلت پرداخت باقی‌مانده"}
+                  </p>
                   <HooshPayCountdown expiresAt={activeInvoice.expires_at} />
                   <p className="mt-1 text-xs text-muted-foreground">
                     اعتبار پرداخت تا ساعت <span dir="ltr">{formatTehranTime(activeInvoice.expires_at)}</span> تهران است.
@@ -630,7 +673,7 @@ function HooshPayTab() {
                 حتماً مبلغ قابل پرداخت را دقیق واریز کنید؛ مسئولیت واریز مبلغ اشتباه یا کارت اشتباه با شماست.
               </p>
             </div>
-            {activeInvoice.payment_url && !activeInvoice.credited_at && (
+            {activeInvoice.payment_url && !activeInvoice.credited_at && !activeInvoiceExpired && (
               <Button
                 className="w-full"
                 onClick={() => {
@@ -640,6 +683,15 @@ function HooshPayTab() {
                 }}
               >
                 {payButtonLabel}
+              </Button>
+            )}
+            {activeInvoiceExpired && !activeInvoice.credited_at && (
+              <Button
+                className="w-full"
+                disabled={create.isPending}
+                onClick={() => create.mutate(activeInvoice.amount_toman)}
+              >
+                {create.isPending ? "در حال ساخت لینک جدید…" : "مهلت فاکتور تمام شده؛ ساخت لینک پرداخت جدید"}
               </Button>
             )}
             <Button
