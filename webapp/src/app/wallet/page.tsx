@@ -910,8 +910,6 @@ function WalletContent() {
         </CardContent>
       </Card>
 
-      <CouponCard />
-
       <Tabs defaultValue="crypto">
         <TabsList className="w-full" dir="rtl">
           <TabsTrigger value="crypto" className="flex-1">
@@ -934,6 +932,8 @@ function WalletContent() {
           <HooshPayTab />
         </TabsContent>
       </Tabs>
+
+      <CouponCard />
 
       <TransactionsList />
     </div>
