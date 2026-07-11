@@ -528,6 +528,13 @@ class ShopCustomizationService:
         return f"deleted_shop_button:{menu}:{action}"
 
     @staticmethod
+    def _message_button_marker_key(message_key: str, button_type: str, text: str) -> str:
+        safe_key = re.sub(r"[^A-Za-z0-9_:-]+", "_", message_key).strip("_")[:120]
+        safe_type = re.sub(r"[^A-Za-z0-9_:-]+", "_", button_type).strip("_")[:40]
+        safe_text = re.sub(r"[^A-Za-z0-9_:-]+", "_", text).strip("_")[:120]
+        return f"deleted_shop_message_button:{safe_key}:{safe_type}:{safe_text}"
+
+    @staticmethod
     async def _migrate_legacy_tariffs_key(session: AsyncSession) -> None:
         legacy_message = (
             await session.execute(select(ShopMessage).where(ShopMessage.key == LEGACY_TARIFFS_MESSAGE_KEY))
@@ -617,7 +624,28 @@ class ShopCustomizationService:
                         "برای پرداخت، روی دکمه زیر بزنید.",
                     )
 
+        message_button_counts: dict[str, int] = {
+            key: count
+            for key, count in (
+                await session.execute(
+                    select(ShopMessageButton.message_key, func.count(ShopMessageButton.id))
+                    .group_by(ShopMessageButton.message_key)
+                )
+            ).all()
+        }
         for definition in DEFAULT_MESSAGE_BUTTONS:
+            if message_button_counts.get(definition["message_key"], 0) > 0:
+                continue
+            marker_key = ShopCustomizationService._message_button_marker_key(
+                definition["message_key"],
+                definition["button_type"],
+                definition["text"],
+            )
+            deleted_marker = (
+                await session.execute(select(BotSetting).where(BotSetting.key == marker_key))
+            ).scalar_one_or_none()
+            if deleted_marker is not None:
+                continue
             existing = (
                 await session.execute(
                     select(ShopMessageButton).where(
@@ -794,6 +822,7 @@ class ShopCustomizationService:
                 or_(
                     BotSetting.key.like("deleted_shop_plan:%"),
                     BotSetting.key.like("deleted_shop_button:%"),
+                    BotSetting.key.like("deleted_shop_message_button:%"),
                     BotSetting.key.like("shop_%_layout:%"),
                 )
             )
@@ -855,6 +884,19 @@ class ShopCustomizationService:
         button = await session.get(ShopMessageButton, button_id)
         if button is None:
             return False
+        marker_key = ShopCustomizationService._message_button_marker_key(
+            button.message_key,
+            button.button_type,
+            button.text,
+        )
+        marker = (
+            await session.execute(select(BotSetting).where(BotSetting.key == marker_key))
+        ).scalar_one_or_none()
+        if marker is None:
+            session.add(BotSetting(key=marker_key, value="1"))
+        else:
+            marker.value = "1"
+            marker.updated_at = datetime.now(timezone.utc)
         await session.delete(button)
         await session.commit()
         return True
