@@ -139,6 +139,7 @@ class RialRequestOut(BaseModel):
     tracking_code: str
     amount_toman: int
     status: str
+    receipt_status: str | None = None
     payment_mode: str | None = None
     support_handle: str
     request_text: str

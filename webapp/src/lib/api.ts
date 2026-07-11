@@ -136,6 +136,7 @@ export interface RialRequest {
   tracking_code: string;
   amount_toman: number;
   status: string;
+  receipt_status: string | null;
   payment_mode: "receipt_bot" | "direct_support";
   support_handle: string;
   request_text: string;
@@ -213,6 +214,7 @@ export interface RialSummary {
   tracking_code: string;
   amount_toman: number;
   status: string;
+  receipt_status?: string | null;
   payment_mode?: string;
   expires_at?: string | null;
   created_at: string;

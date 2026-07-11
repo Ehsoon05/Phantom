@@ -17,7 +17,6 @@ import {
   ApiError,
   applyCoupon,
   cancelCryptoInvoice,
-  cancelRialRequest,
   createCryptoInvoice,
   createHooshPayInvoice,
   createRialRequest,
@@ -104,6 +103,40 @@ function CopyRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+function formatCardNumber(value: string) {
+  return value.replace(/\D/g, "").replace(/(.{4})/g, "$1 ").trim();
+}
+
+function DestinationCardBox({
+  card,
+  holder,
+}: {
+  card: string;
+  holder?: string | null;
+}) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      className="w-full rounded-xl border border-primary/35 bg-primary/5 p-4 text-center"
+      onClick={() => {
+        navigator.clipboard.writeText(card);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+    >
+      <p className="text-xs font-medium text-muted-foreground">
+        برای کپی شماره کارت، روی این بخش لمس کنید
+      </p>
+      <p className="mt-2 font-mono text-xl font-bold tracking-wide text-primary tabular-nums" dir="ltr">
+        {formatCardNumber(card)}
+      </p>
+      {holder && <p className="mt-2 text-xs text-muted-foreground">{holder}</p>}
+      {copied && <p className="mt-2 text-xs font-bold text-primary">کپی شد ✓</p>}
+    </button>
+  );
+}
+
 function InvoiceView({ invoice, onClose }: { invoice: CryptoInvoice; onClose: () => void }) {
   const queryClient = useQueryClient();
   // Live status: poll while the invoice is still settling.
@@ -138,7 +171,7 @@ function InvoiceView({ invoice, onClose }: { invoice: CryptoInvoice; onClose: ()
 
   return (
     <Card>
-      <CardContent className="space-y-4 p-4">
+      <CardContent className="space-y-4 p-4 text-right" dir="rtl">
         <div className="flex items-center justify-between">
           <p className="font-bold">
             {cryptoAssetLabel(live.coin)} · {cryptoAssetLabel(live.network)}
@@ -228,7 +261,7 @@ function CryptoTab() {
     create.error instanceof ApiError ? create.error.message : create.error ? "خطا در ایجاد فاکتور" : null;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 text-right" dir="rtl">
       {pending.length > 0 && (
         <Card className="border-primary/50">
           <CardContent className="space-y-2 p-4">
@@ -308,7 +341,13 @@ function RialTab() {
 
   const queryClient = useQueryClient();
   const { data: rialRequests } = useQuery({ queryKey: ["rial-requests"], queryFn: getRialRequests });
-  const pendingRequests = rialRequests?.filter((r) => r.status === "pending") ?? [];
+  const submittedRequests =
+    rialRequests?.filter(
+      (r) =>
+        r.status === "pending" &&
+        r.payment_mode === "receipt_bot" &&
+        r.receipt_status === "submitted"
+    ) ?? [];
 
   const submit = useMutation({
     mutationFn: () =>
@@ -322,11 +361,6 @@ function RialTab() {
     },
   });
 
-  const cancelRequest = useMutation({
-    mutationFn: (id: number) => cancelRialRequest(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["rial-requests"] }),
-  });
-
   if (result) {
     // The customizable rial_payment_request template is Markdown; strip the
     // bold/code markers for clean display in the webview.
@@ -334,26 +368,34 @@ function RialTab() {
     const copyText = result.copy_text ?? result.request_text;
     const isReceiptBot = result.payment_mode === "receipt_bot";
     return (
-      <Card>
+      <Card className="text-right" dir="rtl">
         <CardContent className="space-y-4 p-4">
-          <p className="font-bold">✅ درخواست ثبت شد</p>
+          <p className="font-bold">
+            {isReceiptBot ? "✅ اطلاعات پرداخت آماده شد" : "✅ درخواست ثبت شد"}
+          </p>
           <p className="text-sm leading-6 text-muted-foreground">
             {isReceiptBot
               ? "مبلغ را به کارت نمایش داده‌شده واریز کنید و سپس رسید را داخل بات اصلی ارسال کنید."
               : "متن زیر را بدون تغییر برای ادمین ارسال کنید تا پس از بررسی، کیف پولتان شارژ شود."}
           </p>
-          {messageText && (
-            <div className="whitespace-pre-wrap rounded-lg bg-muted p-3 text-xs leading-6">
-              {messageText}
-            </div>
-          )}
+          <div className="rounded-lg bg-muted/70 p-3 text-xs text-muted-foreground">
+            تاریخ ثبت: <span className="text-foreground">{formatTehranDateTime(result.created_at, false)}</span>
+          </div>
           {isReceiptBot && result.destination_card && (
-            <CopyRow label="شماره کارت مقصد" value={result.destination_card} />
+            <DestinationCardBox
+              card={result.destination_card}
+              holder={result.destination_holder}
+            />
           )}
           {isReceiptBot && result.expires_at && (
             <p className="rounded-lg bg-destructive/10 p-3 text-xs font-medium text-destructive">
               اعتبار پرداخت تا ساعت <span dir="ltr">{formatTehranTime(result.expires_at)}</span> تهران است.
             </p>
+          )}
+          {messageText && (
+            <div className="whitespace-pre-wrap rounded-lg bg-muted p-3 text-xs leading-6">
+              {messageText}
+            </div>
           )}
           {!isReceiptBot && <CopyRow label="متن آماده برای ارسال به ادمین" value={copyText} />}
           {result.receipt_bot_url && (
@@ -387,9 +429,9 @@ function RialTab() {
     const verifyUrl = methods?.rial.verify_phone_url;
     return (
       <Card>
-        <CardContent className="space-y-4 p-4 text-center">
+        <CardContent className="space-y-4 p-4 text-right" dir="rtl">
           <div className="space-y-2">
-            <p className="text-2xl">📱</p>
+            <p className="text-center text-2xl">📱</p>
             <p className="font-bold">تایید شماره اکانت تلگرام</p>
             <p className="text-sm leading-6 text-muted-foreground">
               برای پرداخت کارت‌به‌کارت باید شماره ایران متعلق به همین اکانت را داخل ربات ارسال و تایید کنید.
@@ -428,29 +470,25 @@ function RialTab() {
     submit.error instanceof ApiError ? submit.error.message : submit.error ? "خطا در ثبت درخواست" : null;
 
   return (
-    <div className="space-y-4">
-      {pendingRequests.length > 0 && (
+    <div className="space-y-4 text-right" dir="rtl">
+      {submittedRequests.length > 0 && (
         <Card className="border-primary/50">
-          <CardContent className="space-y-2 p-4">
-            <p className="text-sm font-bold">⏳ درخواست‌های در انتظار</p>
-            {pendingRequests.map((req) => (
-              <div key={req.id} className="flex items-center justify-between gap-2 text-sm">
-                <span>
-                  {formatToman(req.amount_toman)}
-                  <span className="block text-xs text-muted-foreground" dir="ltr">
-                    {req.tracking_code}
-                  </span>
-                </span>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  disabled={cancelRequest.isPending}
-                  onClick={() => {
-                    if (confirm("لغو این درخواست؟")) cancelRequest.mutate(req.id);
-                  }}
-                >
-                  لغو
-                </Button>
+          <CardContent className="space-y-3 p-4">
+            <p className="text-sm font-bold">⏳ رسیدهای ارسال‌شده در انتظار بررسی</p>
+            {submittedRequests.map((req) => (
+              <div key={req.id} className="rounded-lg bg-muted/70 p-3 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground">مبلغ:</span>
+                  <span className="font-bold">{formatToman(req.amount_toman)}</span>
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground">کد پیگیری:</span>
+                  <span className="font-mono text-xs" dir="ltr">{req.tracking_code}</span>
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground">تاریخ ثبت:</span>
+                  <span className="text-xs">{formatTehranDateTime(req.created_at, false)}</span>
+                </div>
               </div>
             ))}
           </CardContent>
@@ -596,7 +634,7 @@ function HooshPayTab() {
     create.error instanceof ApiError ? create.error.message : create.error ? "ساخت فاکتور انجام نشد" : null;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 text-right" dir="rtl">
       <Card>
         <CardContent className="space-y-4 p-4">
           <div>

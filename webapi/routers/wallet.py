@@ -228,12 +228,18 @@ async def create_rial_request(
     if not source_card:
         raise HTTPException(status_code=400, detail="شماره کارت مبدا معتبر نیست.")
 
+    payment_mode = await SettingsService.get_rial_payment_mode(session)
     # Only one pending rial request per user.
+    pending_filters = [
+        RialPaymentRequest.user_id == user.telegram_id,
+        RialPaymentRequest.status == "pending",
+    ]
+    if payment_mode == "receipt_bot":
+        pending_filters.append(RialPaymentRequest.receipt_status == "submitted")
     existing_pending = (
         await session.execute(
             select(RialPaymentRequest.id).where(
-                RialPaymentRequest.user_id == user.telegram_id,
-                RialPaymentRequest.status == "pending",
+                *pending_filters,
             )
         )
     ).first()
@@ -243,7 +249,6 @@ async def create_rial_request(
         )
 
     support_handle = await SettingsService.get_rial_support_handle(session)
-    payment_mode = await SettingsService.get_rial_payment_mode(session)
     destination_card = await SettingsService.get_rial_destination_card_number(session)
     destination_holder = await SettingsService.get_rial_destination_card_holder(session)
     valid_minutes = await SettingsService.get_rial_receipt_valid_minutes(session)
@@ -292,6 +297,7 @@ async def create_rial_request(
             tracking_code=request.tracking_code,
             amount_toman=request.amount_toman,
             status=request.status,
+            receipt_status=request.receipt_status,
             payment_mode=request.payment_mode,
             support_handle=request.support_handle,
             request_text=direct_text,
@@ -336,6 +342,7 @@ async def create_rial_request(
         tracking_code=request.tracking_code,
         amount_toman=request.amount_toman,
         status=request.status,
+        receipt_status=request.receipt_status,
         payment_mode=request.payment_mode,
         support_handle=request.support_handle,
         request_text=direct_text,
@@ -478,6 +485,7 @@ async def list_rial_requests(
             "tracking_code": r.tracking_code,
             "amount_toman": r.amount_toman,
             "status": r.status,
+            "receipt_status": r.receipt_status,
             "payment_mode": r.payment_mode,
             "expires_at": r.expires_at,
             "created_at": r.created_at,
