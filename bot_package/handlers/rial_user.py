@@ -33,15 +33,25 @@ VERIFY_PHONE_KEY = "verify_phone_for_webapp"
 RECEIPT_REQUEST_KEY = "rial_receipt_request_id"
 
 
-def _back_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup([[KeyboardButton(BACK_TO_MAIN)]], resize_keyboard=True)
+def _keyboard_rows(markup: ReplyKeyboardMarkup) -> list[list[KeyboardButton]]:
+    rows = getattr(markup, "keyboard", None) or []
+    return [list(row) for row in rows]
 
 
-def _contact_keyboard() -> ReplyKeyboardMarkup:
+async def _back_keyboard(session) -> ReplyKeyboardMarkup:
+    return await ShopCustomizationService.back_keyboard(session)
+
+
+async def _back_rows(session) -> list[list[KeyboardButton]]:
+    rows = _keyboard_rows(await _back_keyboard(session))
+    return rows or [[KeyboardButton(BACK_TO_MAIN)]]
+
+
+async def _contact_keyboard(session) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("📱 اشتراک شماره تماس", request_contact=True)],
-            [KeyboardButton(BACK_TO_MAIN)],
+            *await _back_rows(session),
         ],
         resize_keyboard=True,
         one_time_keyboard=True,
@@ -125,10 +135,11 @@ async def start_receipt_upload(update: Update, context: ContextTypes.DEFAULT_TYP
             tracking_code=request.tracking_code,
             expires_at=format_tehran_datetime(request.expires_at),
         )
+        keyboard = await _back_keyboard(session)
     context.user_data[RECEIPT_REQUEST_KEY] = request.id
     await update.effective_message.reply_text(
         text,
-        reply_markup=_back_keyboard(),
+        reply_markup=keyboard,
         parse_mode=getattr(text, "parse_mode", None),
     )
 
@@ -143,9 +154,10 @@ async def charge_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "rial_amount_prompt",
             minimum=f"{minimum:,}",
         )
+        keyboard = await _back_keyboard(session)
     await update.effective_message.reply_text(
         text,
-        reply_markup=_back_keyboard(),
+        reply_markup=keyboard,
         parse_mode=getattr(text, "parse_mode", None),
     )
 
@@ -168,11 +180,12 @@ async def verify_phone_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 )
             )
             await session.commit()
+        keyboard = await _contact_keyboard(session)
     await update.effective_message.reply_text(
         "**تایید شماره برای پرداخت کارت‌به‌کارت**\n\n"
         "شماره متعلق به همین اکانت تلگرام را با دکمه زیر ارسال کنید.\n"
         "فقط شماره موبایل ایران پذیرفته می‌شود.",
-        reply_markup=_contact_keyboard(),
+        reply_markup=keyboard,
         parse_mode="Markdown",
     )
 
@@ -193,9 +206,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     elif step == "card":
         await _handle_card(update, context, text)
     elif step == "phone":
+        async with async_session() as session:
+            keyboard = await _contact_keyboard(session)
         await update.message.reply_text(
             "برای تایید مالکیت شماره، فقط از دکمه «اشتراک شماره تماس» استفاده کنید.",
-            reply_markup=_contact_keyboard(),
+            reply_markup=keyboard,
         )
 
 
@@ -217,7 +232,7 @@ async def _handle_amount(update: Update, context: ContextTypes.DEFAULT_TYPE, val
             )
             await update.message.reply_text(
                 text,
-                reply_markup=_back_keyboard(),
+                reply_markup=await _back_keyboard(session),
                 parse_mode=getattr(text, "parse_mode", None),
             )
             return
@@ -225,13 +240,13 @@ async def _handle_amount(update: Update, context: ContextTypes.DEFAULT_TYPE, val
         if require_phone and not (user and user.verified_phone_number):
             context.user_data[STEP_KEY] = "phone"
             text = await ShopCustomizationService.get_message(session, "rial_phone_prompt")
-            keyboard = _contact_keyboard()
+            keyboard = await _contact_keyboard(session)
         else:
             if user and user.verified_phone_number:
                 context.user_data[PHONE_KEY] = user.verified_phone_number
             context.user_data[STEP_KEY] = "card"
             text = await ShopCustomizationService.get_message(session, "rial_card_prompt")
-            keyboard = _back_keyboard()
+            keyboard = await _back_keyboard(session)
     await update.message.reply_text(text, reply_markup=keyboard, parse_mode=getattr(text, "parse_mode", None))
 
 
@@ -276,7 +291,8 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data[STEP_KEY] = "card"
     async with async_session() as session:
         text = await ShopCustomizationService.get_message(session, "rial_card_prompt")
-    await update.message.reply_text(text, reply_markup=_back_keyboard(), parse_mode=getattr(text, "parse_mode", None))
+        keyboard = await _back_keyboard(session)
+    await update.message.reply_text(text, reply_markup=keyboard, parse_mode=getattr(text, "parse_mode", None))
 
 
 async def _handle_card(update: Update, context: ContextTypes.DEFAULT_TYPE, value: str) -> None:
@@ -284,7 +300,8 @@ async def _handle_card(update: Update, context: ContextTypes.DEFAULT_TYPE, value
     if not source_card:
         async with async_session() as session:
             text = await ShopCustomizationService.get_message(session, "rial_card_invalid")
-        await update.message.reply_text(text, reply_markup=_back_keyboard(), parse_mode=getattr(text, "parse_mode", None))
+            keyboard = await _back_keyboard(session)
+        await update.message.reply_text(text, reply_markup=keyboard, parse_mode=getattr(text, "parse_mode", None))
         return
 
     amount = context.user_data.get(AMOUNT_KEY)

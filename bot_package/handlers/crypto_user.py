@@ -47,21 +47,31 @@ def _display_label(key: str) -> str:
     return label
 
 
-def _coin_keyboard() -> ReplyKeyboardMarkup:
+def _keyboard_rows(markup: ReplyKeyboardMarkup) -> list[list[KeyboardButton]]:
+    rows = getattr(markup, "keyboard", None) or []
+    return [list(row) for row in rows]
+
+
+async def _back_rows(session) -> list[list[KeyboardButton]]:
+    rows = _keyboard_rows(await ShopCustomizationService.back_keyboard(session))
+    return rows or [[KeyboardButton(BACK_TO_MAIN)]]
+
+
+async def _coin_keyboard(session) -> ReplyKeyboardMarkup:
     # List the recommended coin first so it's the most prominent option.
     keys = sorted(available_coins(), key=lambda k: 0 if k == RECOMMENDED_COIN_KEY else 1)
     rows = [[KeyboardButton(_display_label(key))] for key in keys]
-    rows.append([KeyboardButton(BACK_TO_MAIN)])
+    rows.extend(await _back_rows(session))
     return ReplyKeyboardMarkup(rows, resize_keyboard=True, one_time_keyboard=True)
 
 
-def _back_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup([[KeyboardButton(BACK_TO_MAIN)]], resize_keyboard=True)
+async def _back_keyboard(session) -> ReplyKeyboardMarkup:
+    return await ShopCustomizationService.back_keyboard(session)
 
 
-def _pending_keyboard() -> ReplyKeyboardMarkup:
+async def _pending_keyboard(session) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        [[KeyboardButton(CANCEL_PENDING_LABEL)], [KeyboardButton(BACK_TO_MAIN)]],
+        [[KeyboardButton(CANCEL_PENDING_LABEL)], *await _back_rows(session)],
         resize_keyboard=True,
         one_time_keyboard=True,
     )
@@ -104,12 +114,14 @@ async def charge_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def _prompt_pending_decision(update: Update, context: ContextTypes.DEFAULT_TYPE, invoice) -> None:
     context.user_data[STEP_KEY] = "pending_decision"
     context.user_data.pop(COIN_KEY, None)
+    async with async_session() as session:
+        keyboard = await _pending_keyboard(session)
     await update.message.reply_text(
         "⚠️ *شما یک پرداخت در انتظار دارید*\n\n"
         f"مبلغ: *{invoice.quoted_toman:,} تومان* | ارز: *{_asset_label(invoice.coin)}*\n\n"
         "اگر هنوز واریز نکرده‌اید، می‌توانید این پرداخت را لغو کنید و از نو شروع کنید. "
         "اگر واریز کرده‌اید، چند لحظه صبر کنید تا به‌صورت خودکار تایید شود.",
-        reply_markup=_pending_keyboard(),
+        reply_markup=keyboard,
         parse_mode=constants.ParseMode.MARKDOWN,
     )
 
@@ -120,9 +132,11 @@ async def _prompt_coin_selection(update: Update, context: ContextTypes.DEFAULT_T
     note = ""
     if RECOMMENDED_COIN_KEY in available_coins():
         note = "\n\n🌟 *پیشنهاد ما: گرام(تون)* — سریع‌تر، کم‌هزینه‌تر و مطمئن‌تر."
+    async with async_session() as session:
+        keyboard = await _coin_keyboard(session)
     await update.message.reply_text(
         "💎 *شارژ کیف پول با ارز دیجیتال*\n\nارز مورد نظر خود را انتخاب کنید:" + note,
-        reply_markup=_coin_keyboard(),
+        reply_markup=keyboard,
         parse_mode=constants.ParseMode.MARKDOWN,
     )
 
@@ -156,9 +170,11 @@ async def handle_step(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def _handle_pending_decision(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
     if text != CANCEL_PENDING_LABEL:
+        async with async_session() as session:
+            keyboard = await _pending_keyboard(session)
         await update.message.reply_text(
             "لطفا یکی از گزینه‌های زیر را انتخاب کنید.",
-            reply_markup=_pending_keyboard(),
+            reply_markup=keyboard,
         )
         return
     async with async_session() as session:
@@ -172,18 +188,22 @@ async def _handle_pending_decision(update: Update, context: ContextTypes.DEFAULT
 async def _handle_choose_coin(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
     coin_key = _coin_key_for_label(text)
     if not coin_key:
+        async with async_session() as session:
+            keyboard = await _coin_keyboard(session)
         await update.message.reply_text(
             "لطفا یکی از ارزهای موجود را از دکمه‌های زیر انتخاب کنید.",
-            reply_markup=_coin_keyboard(),
+            reply_markup=keyboard,
         )
         return
     context.user_data[COIN_KEY] = coin_key
     context.user_data[STEP_KEY] = "enter_amount"
+    async with async_session() as session:
+        keyboard = await _back_keyboard(session)
     await update.message.reply_text(
         f"ارز انتخاب‌شده: *{SUPPORTED_COINS[coin_key]['label']}*\n\n"
         "مبلغی که می‌خواهید کیف پول شما شارژ شود را به *تومان* وارد کنید:\n"
         f"(حداقل {_MIN_TOMAN:,} تومان)",
-        reply_markup=_back_keyboard(),
+        reply_markup=keyboard,
         parse_mode=constants.ParseMode.MARKDOWN,
     )
 
@@ -191,9 +211,11 @@ async def _handle_choose_coin(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def _handle_enter_amount(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
     toman = _parse_toman(text)
     if toman is None or toman < _MIN_TOMAN:
+        async with async_session() as session:
+            keyboard = await _back_keyboard(session)
         await update.message.reply_text(
             f"مبلغ نامعتبر است. یک عدد بزرگ‌تر از {_MIN_TOMAN:,} تومان وارد کنید.",
-            reply_markup=_back_keyboard(),
+            reply_markup=keyboard,
         )
         return
 

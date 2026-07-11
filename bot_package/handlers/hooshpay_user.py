@@ -16,8 +16,8 @@ from ..utils.keyboards import BACK_TO_MAIN
 STEP_KEY = "hooshpay_step"
 
 
-def _back_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup([[KeyboardButton(BACK_TO_MAIN)]], resize_keyboard=True)
+async def _back_keyboard(session) -> ReplyKeyboardMarkup:
+    return await ShopCustomizationService.back_keyboard(session)
 
 
 def clear_state(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -43,9 +43,10 @@ async def charge_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "hooshpay_amount_prompt",
             minimum=f"{minimum:,}",
         )
+        keyboard = await _back_keyboard(session)
     await update.effective_message.reply_text(
         text,
-        reply_markup=_back_keyboard(),
+        reply_markup=keyboard,
         parse_mode=getattr(text, "parse_mode", None),
     )
 
@@ -79,7 +80,7 @@ async def _handle_amount(update: Update, context: ContextTypes.DEFAULT_TYPE, val
             )
             await update.message.reply_text(
                 text,
-                reply_markup=_back_keyboard(),
+                reply_markup=await _back_keyboard(session),
                 parse_mode=getattr(text, "parse_mode", None),
             )
             return
@@ -97,7 +98,7 @@ async def _handle_amount(update: Update, context: ContextTypes.DEFAULT_TYPE, val
             )
             await update.message.reply_text(
                 text,
-                reply_markup=_back_keyboard(),
+                reply_markup=await _back_keyboard(session),
                 parse_mode=getattr(text, "parse_mode", None),
             )
             return
