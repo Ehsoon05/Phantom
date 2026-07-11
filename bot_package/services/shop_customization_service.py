@@ -464,6 +464,30 @@ DEFAULT_MESSAGE_BUTTONS: tuple[dict, ...] = (
         "row": 1,
         "col": 0,
     },
+    {
+        "message_key": "rial_card_payment_instructions",
+        "button_type": "inline_copy",
+        "text": "📋 کپی شماره کارت",
+        "payload": "{destination_card}",
+        "row": 0,
+        "col": 0,
+    },
+    {
+        "message_key": "rial_card_payment_instructions",
+        "button_type": "inline_copy",
+        "text": "📋 کپی مبلغ تومان",
+        "payload": "{amount_toman}",
+        "row": 1,
+        "col": 0,
+    },
+    {
+        "message_key": "rial_card_payment_instructions",
+        "button_type": "inline_copy",
+        "text": "📋 کپی مبلغ ریال",
+        "payload": "{amount_rial}",
+        "row": 2,
+        "col": 0,
+    },
 )
 
 DEFAULT_MESSAGE_PARSE_MODES = {

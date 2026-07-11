@@ -107,6 +107,40 @@ function formatCardNumber(value: string) {
   return value.replace(/\D/g, "").replace(/(.{4})/g, "$1 ").trim();
 }
 
+function cleanMessageText(value: string | null | undefined) {
+  if (!value) return "";
+  const withoutTags = value
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|h[1-6]|li)>/gi, "\n")
+    .replace(/<tg-emoji[^>]*>(.*?)<\/tg-emoji>/gi, "$1")
+    .replace(/<[^>]+>/g, "")
+    .replace(/```/g, "")
+    .replace(/\*\*/g, "")
+    .trim();
+  if (typeof document === "undefined") return withoutTags;
+  const textarea = document.createElement("textarea");
+  textarea.innerHTML = withoutTags;
+  return textarea.value.trim();
+}
+
+function CopyValueButton({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <Button
+      type="button"
+      variant="secondary"
+      className="min-h-11 w-full"
+      onClick={() => {
+        navigator.clipboard.writeText(value);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+    >
+      {copied ? "کپی شد ✓" : label}
+    </Button>
+  );
+}
+
 function DestinationCardBox({
   card,
   holder,
@@ -134,6 +168,23 @@ function DestinationCardBox({
       {holder && <p className="mt-2 text-xs text-muted-foreground">{holder}</p>}
       {copied && <p className="mt-2 text-xs font-bold text-primary">کپی شد ✓</p>}
     </button>
+  );
+}
+
+function PayableAmountBox({ amountToman }: { amountToman: number }) {
+  const amountRial = amountToman * 10;
+  return (
+    <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 p-4 text-center">
+      <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
+        مبلغ قابل پرداخت
+      </p>
+      <p className="mt-2 text-xl font-bold text-emerald-700 dark:text-emerald-300">
+        {amountToman.toLocaleString("fa-IR")} تومان
+      </p>
+      <p className="mt-1 font-mono text-sm text-emerald-700/80 dark:text-emerald-300/80" dir="ltr">
+        {amountRial.toLocaleString("en-US")} ریال
+      </p>
+    </div>
   );
 }
 
@@ -362,11 +413,11 @@ function RialTab() {
   });
 
   if (result) {
-    // The customizable rial_payment_request template is Markdown; strip the
-    // bold/code markers for clean display in the webview.
-    const messageText = (result.message_text ?? "").replace(/```/g, "").replace(/\*\*/g, "").trim();
+    const messageText = cleanMessageText(result.message_text);
     const copyText = result.copy_text ?? result.request_text;
     const isReceiptBot = result.payment_mode === "receipt_bot";
+    const amountToman = result.amount_toman;
+    const amountRial = amountToman * 10;
     return (
       <Card className="text-right" dir="rtl">
         <CardContent className="space-y-4 p-4">
@@ -386,6 +437,14 @@ function RialTab() {
               card={result.destination_card}
               holder={result.destination_holder}
             />
+          )}
+          {isReceiptBot && <PayableAmountBox amountToman={amountToman} />}
+          {isReceiptBot && result.destination_card && (
+            <div className="grid gap-2 sm:grid-cols-3">
+              <CopyValueButton label="کپی شماره کارت" value={result.destination_card} />
+              <CopyValueButton label="کپی مبلغ تومان" value={String(amountToman)} />
+              <CopyValueButton label="کپی مبلغ ریال" value={String(amountRial)} />
+            </div>
           )}
           {isReceiptBot && result.expires_at && (
             <p className="rounded-lg bg-destructive/10 p-3 text-xs font-medium text-destructive">

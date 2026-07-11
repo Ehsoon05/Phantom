@@ -372,10 +372,28 @@ async def _handle_card(update: Update, context: ContextTypes.DEFAULT_TYPE, value
             await RialPaymentService.update_request_text(session, request, direct_text)
 
     if payment_mode == "receipt_bot":
-        keyboard = InlineKeyboardMarkup(
+        amount_toman_text = str(amount)
+        amount_rial_text = str(amount * 10)
+        fallback_keyboard = InlineKeyboardMarkup(
             [
                 [InlineKeyboardButton("📋 کپی شماره کارت", api_kwargs={"copy_text": {"text": destination_card}})],
+                [InlineKeyboardButton("📋 کپی مبلغ تومان", api_kwargs={"copy_text": {"text": amount_toman_text}})],
+                [InlineKeyboardButton("📋 کپی مبلغ ریال", api_kwargs={"copy_text": {"text": amount_rial_text}})],
             ]
+        )
+        keyboard = await ShopCustomizationService.message_reply_markup(
+            session,
+            "rial_card_payment_instructions",
+            fallback_markup=fallback_keyboard,
+            copy_text=destination_card,
+            context={
+                "destination_card": destination_card,
+                "destination_holder": destination_holder,
+                "amount": f"{amount:,}",
+                "amount_toman": amount_toman_text,
+                "amount_rial": amount_rial_text,
+                "tracking_code": request.tracking_code,
+            },
         )
     else:
         username = support_handle.lstrip("@")
