@@ -20,6 +20,13 @@ async def _back_keyboard(session) -> ReplyKeyboardMarkup:
     return await ShopCustomizationService.back_keyboard(session)
 
 
+async def _is_back_to_main_text(text: str) -> bool:
+    if text == BACK_TO_MAIN:
+        return True
+    async with async_session() as session:
+        return await ShopCustomizationService.action_for_text(session, text) == "back_to_main"
+
+
 def clear_state(context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop(STEP_KEY, None)
 
@@ -53,7 +60,7 @@ async def charge_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = (update.message.text or "").strip()
-    if text == BACK_TO_MAIN:
+    if await _is_back_to_main_text(text):
         clear_state(context)
         async with async_session() as session:
             message = await ShopCustomizationService.get_message(session, "main_menu")

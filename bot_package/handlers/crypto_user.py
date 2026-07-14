@@ -77,6 +77,13 @@ async def _pending_keyboard(session) -> ReplyKeyboardMarkup:
     )
 
 
+async def _is_back_to_main_text(text: str) -> bool:
+    if text == BACK_TO_MAIN:
+        return True
+    async with async_session() as session:
+        return await ShopCustomizationService.action_for_text(session, text) == "back_to_main"
+
+
 def _coin_key_for_label(label: str) -> str | None:
     for key in available_coins():
         if _display_label(key) == label:
@@ -153,7 +160,7 @@ async def _cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def handle_step(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Process the next message while a crypto charge is in progress."""
     text = (update.message.text or "").strip()
-    if text == BACK_TO_MAIN:
+    if await _is_back_to_main_text(text):
         await _cancel(update, context)
         return
 

@@ -58,6 +58,13 @@ async def _contact_keyboard(session) -> ReplyKeyboardMarkup:
     )
 
 
+async def _is_back_to_main_text(text: str) -> bool:
+    if text == BACK_TO_MAIN:
+        return True
+    async with async_session() as session:
+        return await ShopCustomizationService.action_for_text(session, text) == "back_to_main"
+
+
 def _normalize_digits(value: str) -> str:
     return value.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
 
@@ -192,7 +199,7 @@ async def verify_phone_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = (update.message.text or "").strip()
-    if text == BACK_TO_MAIN:
+    if await _is_back_to_main_text(text):
         await _cancel(update, context)
         return
 
