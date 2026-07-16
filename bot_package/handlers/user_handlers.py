@@ -186,8 +186,16 @@ async def ensure_required_membership(update: Update, context: ContextTypes.DEFAU
     if not missing:
         return True
 
-    await update.effective_message.reply_text(
-        "برای استفاده از ربات، ابتدا در کانال‌های زیر عضو شوید و سپس دوباره /start را بزنید.",
+    async with async_session() as session:
+        text = await ShopCustomizationService.get_message(
+            session,
+            "required_channel_join_prompt",
+            channel_count=len(missing),
+        )
+
+    await _reply_with_rendered_message(
+        update.effective_message,
+        text,
         reply_markup=RequiredChannelService.join_keyboard(missing),
     )
     return False

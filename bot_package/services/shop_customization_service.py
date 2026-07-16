@@ -191,6 +191,9 @@ DEFAULT_MESSAGES: dict[str, str] = {
         "برای ادامه، قوانین را تایید کنید."
     ),
     "rules_accepted": "قوانین تایید شد. خوش آمدید.",
+    "required_channel_join_prompt": (
+        "برای استفاده از ربات، ابتدا در کانال‌های زیر عضو شوید و سپس دوباره /start را بزنید."
+    ),
     "wallet": (
         "**کیف پول شما**\n\n"
         "موجودی فعلی: **{wallet_balance} تومان**\n\n"
