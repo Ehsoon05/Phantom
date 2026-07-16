@@ -35,7 +35,7 @@ async def setup_main_bot():
     )
     await app.bot.set_chat_menu_button(
         menu_button=MenuButtonWebApp(
-            text="🛍 فروشگاه",
+            text="فروشگاه",
             web_app=WebAppInfo(url=BotConfig.WEBAPP_URL),
         )
     )
