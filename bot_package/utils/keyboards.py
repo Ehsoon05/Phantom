@@ -56,6 +56,9 @@ ADMIN_SET_WALLET = "✏️ تنظیم موجودی کیف پول"
 ADMIN_USER_STATS = "📈 آمار کاربران"
 ADMIN_REFERRAL_REPORT = "👥 گزارش دعوت‌ها"
 ADMIN_REFERRAL_REWARDS = "🎁 پاداش‌های رفرال"
+ADMIN_START_LINKS = "🔗 لینک‌های ورودی"
+ADMIN_START_LINK_CREATE = "➕ ساخت لینک ورودی"
+ADMIN_START_LINK_LIST = "📋 لیست لینک‌های ورودی"
 ADMIN_REFERRAL_ADD_RULE = "➕ قانون پاداش جدید"
 ADMIN_REFERRAL_RECALCULATE = "🔄 محاسبه پاداش‌های قبلی"
 ADMIN_REFERRAL_TOGGLE_RULE = "⏯ فعال/غیرفعال"
@@ -381,6 +384,16 @@ def admin_reports_keyboard() -> ReplyKeyboardMarkup:
         [
             [_button(REPORT_TODAY), _button(REPORT_WEEK), _button(REPORT_MONTH)],
             [_button(REPORT_45_DAYS), _button(REPORT_90_DAYS)],
+            [_button(ADMIN_START_LINKS)],
+            [_button(ADMIN_BACK)],
+        ]
+    )
+
+
+def admin_start_links_keyboard() -> ReplyKeyboardMarkup:
+    return _keyboard(
+        [
+            [_button(ADMIN_START_LINK_CREATE), _button(ADMIN_START_LINK_LIST)],
             [_button(ADMIN_BACK)],
         ]
     )

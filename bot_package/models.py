@@ -139,6 +139,37 @@ class ReferralRewardGrant(Base):
 
     rule = relationship("ReferralRewardRule", back_populates="grants")
 
+
+class StartLink(Base):
+    __tablename__ = "start_links"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    code = Column(String, unique=True, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_by = Column(BigInteger, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    visits = relationship("StartLinkVisit", back_populates="link", cascade="all, delete-orphan")
+
+
+class StartLinkVisit(Base):
+    __tablename__ = "start_link_visits"
+    __table_args__ = (
+        UniqueConstraint("start_link_id", "user_id", name="uq_start_link_visit_user"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    start_link_id = Column(Integer, ForeignKey("start_links.id"), nullable=False)
+    user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
+    first_seen_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_seen_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    hit_count = Column(Integer, nullable=False, default=1)
+
+    link = relationship("StartLink", back_populates="visits")
+    user = relationship("User")
+
 class Price(Base):
     __tablename__ = "prices"
     id = Column(Integer, primary_key=True)

@@ -28,7 +28,7 @@ from telegram.helpers import escape_markdown
 from ..auth import AuthManager
 from ..config_loader import BotConfig
 from ..database import async_session
-from ..models import Config, ProvisionPanel, Purchase, ReferralRewardRule, User
+from ..models import Config, ProvisionPanel, Purchase, ReferralRewardRule, StartLink, User
 from ..services.admin_service import ALL_PERMISSIONS, AdminService, normalize_permissions
 from ..services.broadcast_service import BroadcastService
 from ..services.coupon_service import CouponError, CouponService
@@ -43,6 +43,7 @@ from ..services.provisioning_service import ProvisioningError, ProvisioningServi
 from ..services.referral_service import ReferralService
 from ..services.required_channel_service import RequiredChannelService
 from ..services.shop_customization_service import ShopCustomizationService, clean_custom_variable_name
+from ..services.start_link_service import StartLinkService
 from ..services.subscription_link_service import SubscriptionLinkService
 from ..services.user_service import UserService
 from ..utils.datetime_format import TEHRAN_TZ, format_tehran_datetime
@@ -126,6 +127,9 @@ from ..utils.keyboards import (
     ADMIN_REFERRAL_RECALCULATE,
     ADMIN_REFERRAL_TOGGLE_RULE,
     ADMIN_REFERRAL_DELETE_RULE,
+    ADMIN_START_LINKS,
+    ADMIN_START_LINK_CREATE,
+    ADMIN_START_LINK_LIST,
     ADMIN_REFRESH_ADMINS,
     ADMIN_REQUIRED_CHANNELS,
     ADMIN_REMOVE_ADMIN,
@@ -193,6 +197,7 @@ from ..utils.keyboards import (
     admin_management_keyboard,
     admin_prices_keyboard,
     admin_reports_keyboard,
+    admin_start_links_keyboard,
     admin_shop_button_edit_keyboard,
     admin_shop_category_edit_keyboard,
     admin_shop_menus_keyboard,
@@ -249,6 +254,7 @@ SHOP_PLAN_CALLBACK_PREFIX = "admin_planmgr"
 PROVISION_INBOUND_CALLBACK_PREFIX = "admin_inb"
 PROVISION_PROTOCOL_CALLBACK_PREFIX = "admin_proto"
 RIAL_REQUEST_CALLBACK_PREFIX = "admin_rial"
+START_LINK_CALLBACK_PREFIX = "admin_startlink"
 PROVISION_PROTOCOL_CHOICES = [
     "vless",
     "vmess",
@@ -343,7 +349,9 @@ PROVISION_PROTOCOL_CHOICES = [
     SERVICE_REMINDER_VOLUME_VALUE,
     SERVICE_REMINDER_DAYS_VALUE,
     SERVICE_REMINDER_HOURS_VALUE,
-) = range(82)
+    START_LINK_SELECT,
+    START_LINK_NAME,
+) = range(84)
 
 
 SHOP_MENU_LABELS = {
@@ -2009,6 +2017,204 @@ async def referral_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "\n".join(lines),
         reply_markup=admin_users_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
+    )
+
+
+def _start_link_label(link: StartLink, visit_count: int | None = None) -> str:
+    status = "✅" if link.is_active else "⏸"
+    suffix = f" | {visit_count} ورودی" if visit_count is not None else ""
+    return f"#{link.id} {status} {link.name}{suffix}"
+
+
+def _parse_start_link_id(text: str) -> int | None:
+    match = re.search(r"#(\d+)", text or "")
+    return int(match.group(1)) if match else None
+
+
+async def _start_link_details_text(session, link: StartLink) -> str:
+    visits = await StartLinkService.visits_for_link(session, link.id, limit=30)
+    visit_count = await StartLinkService.visit_count(session, link.id)
+    status = "فعال" if link.is_active else "غیرفعال"
+    url = StartLinkService.url_for(link.code)
+    lines = [
+        f"**لینک ورودی #{link.id}**",
+        "",
+        f"نام: **{escape_markdown(link.name, version=1)}**",
+        f"کد: `{link.code}`",
+        f"وضعیت: **{status}**",
+        f"تعداد کاربران ورودی: **{visit_count}**",
+        "",
+        "لینک:",
+        f"`{url}`",
+    ]
+    if visits:
+        lines.extend(["", "**آخرین کاربران واردشده:**"])
+        for visit in visits[:20]:
+            user = visit.user
+            username = f"@{user.username.lstrip('@')}" if user and user.username else "-"
+            first_name = escape_markdown(user.first_name if user else "-", version=1)
+            when = format_tehran_datetime(visit.first_seen_at)
+            lines.append(
+                f"`{visit.user_id}` | {first_name} | {username} | {when} | {visit.hit_count} بار"
+            )
+    else:
+        lines.extend(["", "هنوز کاربری با این لینک وارد نشده است."])
+    return "\n".join(lines)
+
+
+def _start_link_actions(link: StartLink) -> InlineKeyboardMarkup:
+    toggle_text = "⏸ قطع/غیرفعال کردن لینک" if link.is_active else "✅ فعال کردن لینک"
+    url = StartLinkService.url_for(link.code)
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(toggle_text, callback_data=f"{START_LINK_CALLBACK_PREFIX}:toggle:{link.id}"),
+            ],
+            [
+                InlineKeyboardButton("🗑 حذف لینک", callback_data=f"{START_LINK_CALLBACK_PREFIX}:delete:{link.id}"),
+            ],
+            [
+                InlineKeyboardButton("باز کردن لینک", url=url),
+                InlineKeyboardButton("کپی لینک", api_kwargs={"copy_text": {"text": url}}),
+            ],
+        ]
+    )
+
+
+@require_auth(permission="reports")
+async def start_links_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("start_link_id", None)
+    async with async_session() as session:
+        rows = await StartLinkService.list_links(session)
+    total_visits = sum(count for _, count in rows)
+    active_count = sum(1 for link, _ in rows if link.is_active)
+    text = (
+        "**لینک‌های ورودی**\n\n"
+        "برای کمپین‌ها، تبلیغات، کانال‌ها یا هر مسیر ورودی یک لینک جدا بسازید تا ببینید چند نفر و چه کسانی با آن وارد ربات شده‌اند.\n\n"
+        f"تعداد لینک‌ها: **{len(rows)}**\n"
+        f"لینک‌های فعال: **{active_count}**\n"
+        f"کل ورودی‌های ثبت‌شده: **{total_visits}**"
+    )
+    await update.message.reply_text(
+        text,
+        reply_markup=admin_start_links_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return START_LINK_SELECT
+
+
+@require_auth(permission="reports")
+async def start_link_create_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "**ساخت لینک ورودی**\n\n"
+        "یک اسم برای لینک بفرستید؛ مثلا:\n"
+        "`تبلیغ کانال X`\n"
+        "`استوری اینستاگرام تیرماه`",
+        reply_markup=_rows([CANCEL, ADMIN_BACK], width=2),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return START_LINK_NAME
+
+
+@require_auth(permission="reports")
+async def start_link_create_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    name = (update.message.text or "").strip()
+    try:
+        async with async_session() as session:
+            link = await StartLinkService.create_link(session, name, created_by=update.effective_user.id)
+            text = await _start_link_details_text(session, link)
+    except ValueError:
+        await update.message.reply_text("اسم لینک نمی‌تواند خالی باشد. یک اسم معتبر بفرستید.")
+        return START_LINK_NAME
+    await update.message.reply_text(
+        text,
+        reply_markup=_start_link_actions(link),
+        parse_mode=constants.ParseMode.MARKDOWN,
+        disable_web_page_preview=True,
+    )
+    await update.message.reply_text("لینک ساخته شد.", reply_markup=admin_start_links_keyboard())
+    return START_LINK_SELECT
+
+
+@require_auth(permission="reports")
+async def start_link_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        rows = await StartLinkService.list_links(session)
+    if not rows:
+        await update.message.reply_text(
+            "هنوز لینک ورودی ساخته نشده است.",
+            reply_markup=admin_start_links_keyboard(),
+        )
+        return START_LINK_SELECT
+    labels = [ADMIN_START_LINK_CREATE, *[_start_link_label(link, count) for link, count in rows], ADMIN_BACK]
+    await update.message.reply_text(
+        "**لیست لینک‌های ورودی**\n\n"
+        "روی لینک مورد نظر بزنید تا جزئیات، کاربران ورودی و دکمه‌های قطع/حذف را ببینید.",
+        reply_markup=_rows(labels, width=1),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return START_LINK_SELECT
+
+
+@require_auth(permission="reports")
+async def start_link_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    if text == ADMIN_START_LINK_CREATE:
+        return await start_link_create_start(update, context)
+    if text == ADMIN_START_LINK_LIST:
+        return await start_link_list(update, context)
+    link_id = _parse_start_link_id(text)
+    if not link_id:
+        await update.message.reply_text("گزینه معتبر نیست.", reply_markup=admin_start_links_keyboard())
+        return START_LINK_SELECT
+    async with async_session() as session:
+        link = await StartLinkService.get_link(session, link_id)
+        if not link:
+            await update.message.reply_text("لینک پیدا نشد.", reply_markup=admin_start_links_keyboard())
+            return START_LINK_SELECT
+        details = await _start_link_details_text(session, link)
+    await update.message.reply_text(
+        details,
+        reply_markup=_start_link_actions(link),
+        parse_mode=constants.ParseMode.MARKDOWN,
+        disable_web_page_preview=True,
+    )
+    return START_LINK_SELECT
+
+
+@require_auth(permission="reports")
+async def start_link_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = (query.data or "").split(":")
+    action = parts[1] if len(parts) > 1 else ""
+    try:
+        link_id = int(parts[2])
+    except (IndexError, ValueError):
+        await query.message.reply_text("دکمه معتبر نیست.")
+        return
+    async with async_session() as session:
+        if action == "toggle":
+            link = await StartLinkService.toggle_link(session, link_id)
+        elif action == "delete":
+            ok = await StartLinkService.delete_link(session, link_id)
+            if not ok:
+                await query.message.reply_text("لینک پیدا نشد.", reply_markup=admin_start_links_keyboard())
+                return
+            await query.message.reply_text("لینک ورودی حذف شد.", reply_markup=admin_start_links_keyboard())
+            return
+        else:
+            await query.message.reply_text("دکمه معتبر نیست.")
+            return
+        if not link:
+            await query.message.reply_text("لینک پیدا نشد.", reply_markup=admin_start_links_keyboard())
+            return
+        details = await _start_link_details_text(session, link)
+    await query.message.reply_text(
+        details,
+        reply_markup=_start_link_actions(link),
+        parse_mode=constants.ParseMode.MARKDOWN,
+        disable_web_page_preview=True,
     )
 
 
@@ -6511,6 +6717,28 @@ referral_rewards_conv = ConversationHandler(
     allow_reentry=True,
 )
 
+start_links_conv = ConversationHandler(
+    entry_points=[
+        MessageHandler(_exact_filter(ADMIN_START_LINKS), start_links_menu),
+        MessageHandler(_exact_filter(ADMIN_START_LINK_CREATE), start_link_create_start),
+        MessageHandler(_exact_filter(ADMIN_START_LINK_LIST), start_link_list),
+    ],
+    states={
+        START_LINK_SELECT: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, start_link_select),
+        ],
+        START_LINK_NAME: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), start_links_menu),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, start_link_create_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+    allow_reentry=True,
+)
+
 broadcast_conv = ConversationHandler(
     entry_points=[
         MessageHandler(_exact_filter(ADMIN_BROADCAST), broadcast_start),
@@ -6574,10 +6802,15 @@ admin_handlers = [
     service_reminder_hours_conv,
     shop_reset_defaults_conv,
     referral_rewards_conv,
+    start_links_conv,
     broadcast_conv,
     CallbackQueryHandler(
         rial_request_decision_callback,
         pattern=rf"^{RIAL_REQUEST_CALLBACK_PREFIX}:",
+    ),
+    CallbackQueryHandler(
+        start_link_action_callback,
+        pattern=rf"^{START_LINK_CALLBACK_PREFIX}:",
     ),
     MessageHandler(_exact_filter(ADMIN_CRYPTO), crypto_menu),
     MessageHandler(_exact_filter(ADMIN_CRYPTO_HISTORY), crypto_history),

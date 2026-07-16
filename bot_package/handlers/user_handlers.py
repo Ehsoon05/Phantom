@@ -44,6 +44,7 @@ from ..services.purchase_service import (
 from ..services.referral_service import ReferralService
 from ..services.required_channel_service import REQUIRED_CHANNEL_CHECK_CALLBACK, RequiredChannelService
 from ..services.shop_customization_service import ShopCustomizationService
+from ..services.start_link_service import StartLinkService
 from ..services.subscription_link_service import SubscriptionLinkService
 from ..services.user_service import UserService
 from ..utils.datetime_format import format_tehran_datetime, format_tehran_timestamp
@@ -85,6 +86,7 @@ async def get_or_create_user(telegram_id: int, name: str, username: str | None, 
         user.first_name = name or user.first_name
         user.username = username
         await ReferralService.ensure_referral_code(session, user)
+        await StartLinkService.record_start(session, user, payload)
         referral_applied = await ReferralService.apply_start_payload(session, user, payload)
         referrer_id = user.referred_by_user_id if referral_applied else None
         await session.commit()
