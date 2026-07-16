@@ -31,7 +31,7 @@ from ..database import async_session
 from ..models import Config, Purchase, User
 from ..services.coupon_service import CouponError, CouponService
 from ..services.settings_service import SettingsService
-from ..services.marzban_trial_service import MarzbanTrialError, MarzbanTrialService
+from ..services.marzban_trial_service import MarzbanTrialService
 from ..services.price_service import PriceService
 from ..services.purchase_service import (
     InsufficientBalance,
@@ -41,6 +41,7 @@ from ..services.purchase_service import (
     purchase_plan,
     renew_purchase,
 )
+from ..services.provisioning_service import ProvisioningError, ProvisioningService
 from ..services.referral_service import ReferralService
 from ..services.required_channel_service import REQUIRED_CHANNEL_CHECK_CALLBACK, RequiredChannelService
 from ..services.shop_customization_service import ShopCustomizationService
@@ -643,13 +644,18 @@ async def trial_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         volume_mb = await SettingsService.get_trial_volume_mb(session)
         duration_hours = await SettingsService.get_trial_duration_hours(session)
+        panel_key = await SettingsService.get_trial_panel_key(session)
+        time_mode = await SettingsService.get_trial_time_mode(session)
         try:
-            trial = await MarzbanTrialService.create_or_get(
-                user.telegram_id,
-                volume_mb,
-                duration_hours,
+            trial = await ProvisioningService.create_trial(
+                session,
+                panel_key=panel_key,
+                username=MarzbanTrialService.username_for(user.telegram_id),
+                volume_mb=volume_mb,
+                duration_hours=duration_hours,
+                time_mode=time_mode,
             )
-        except MarzbanTrialError:
+        except ProvisioningError:
             await session.rollback()
             async with async_session() as error_session:
                 text = await ShopCustomizationService.get_message(error_session, "trial_unavailable")
@@ -667,7 +673,7 @@ async def trial_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 is_sold=True,
                 sold_to_user_id=user.telegram_id,
                 sold_at=datetime.now(timezone.utc),
-                panel_key="alien",
+                panel_key=trial.panel_key,
                 panel_username=trial.username,
                 provision_source="panel",
             )
@@ -677,7 +683,7 @@ async def trial_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
             config.is_sold = True
             config.sold_to_user_id = config.sold_to_user_id or user.telegram_id
             config.sold_at = config.sold_at or datetime.now(timezone.utc)
-            config.panel_key = config.panel_key or "alien"
+            config.panel_key = config.panel_key or trial.panel_key
             config.panel_username = config.panel_username or trial.username
             config.provision_source = config.provision_source or "panel"
 

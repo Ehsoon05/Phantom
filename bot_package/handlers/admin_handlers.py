@@ -161,6 +161,8 @@ from ..utils.keyboards import (
     ADMIN_TOGGLE_BRANDED_LINKS,
     ADMIN_TRIAL_SETTINGS,
     ADMIN_TRIAL_SET_DURATION,
+    ADMIN_TRIAL_SET_PANEL,
+    ADMIN_TRIAL_SET_TIME_MODE,
     ADMIN_TRIAL_SET_VOLUME,
     ADMIN_TRIAL_TOGGLE,
     ADMIN_SERVICE_REMINDERS,
@@ -333,6 +335,8 @@ PROVISION_PROTOCOL_CHOICES = [
     SHOP_RESET_PASSWORD,
     TRIAL_SET_VOLUME_VALUE,
     TRIAL_SET_DURATION_VALUE,
+    TRIAL_SET_PANEL_VALUE,
+    TRIAL_SET_TIME_MODE_VALUE,
     REFERRAL_RULE_SELECT,
     REFERRAL_RULE_TITLE,
     REFERRAL_RULE_QUALIFICATION,
@@ -351,7 +355,7 @@ PROVISION_PROTOCOL_CHOICES = [
     SERVICE_REMINDER_HOURS_VALUE,
     START_LINK_SELECT,
     START_LINK_NAME,
-) = range(84)
+) = range(86)
 
 
 SHOP_MENU_LABELS = {
@@ -3171,11 +3175,19 @@ async def trial_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
         enabled = await SettingsService.trial_enabled(session)
         volume_mb = await SettingsService.get_trial_volume_mb(session)
         duration_hours = await SettingsService.get_trial_duration_hours(session)
+        panel_key = await SettingsService.get_trial_panel_key(session)
+        time_mode = await SettingsService.get_trial_time_mode(session)
+        panel = (
+            await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == panel_key))
+        ).scalar_one_or_none()
+        panel_label = f"{panel.title} ({panel.key})" if panel else panel_key or "-"
     await update.message.reply_text(
         "**تنظیمات کانفیگ تست**\n\n"
         f"وضعیت: **{'روشن' if enabled else 'خاموش'}**\n"
         f"حجم: **{volume_mb} مگابایت**\n"
-        f"مدت: **{duration_hours} ساعت از اولین اتصال**\n"
+        f"مدت: **{duration_hours} ساعت**\n"
+        f"نوع زمان: **{_provision_time_mode_label(time_mode)}**\n"
+        f"پنل ساخت: `{panel_label}`\n"
         "هر حساب تلگرام فقط یک‌بار می‌تواند تست دریافت کند.",
         reply_markup=admin_trial_settings_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
@@ -3239,6 +3251,78 @@ async def trial_set_duration_save(update: Update, context: ContextTypes.DEFAULT_
     async with async_session() as session:
         await SettingsService.set_trial_duration_hours(session, value)
     await update.message.reply_text("مدت کانفیگ تست ذخیره شد.")
+    await trial_settings_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="shop")
+async def trial_set_panel_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        panels = (
+            await session.execute(
+                select(ProvisionPanel).where(ProvisionPanel.is_enabled.is_(True)).order_by(ProvisionPanel.key)
+            )
+        ).scalars().all()
+    if not panels:
+        await update.message.reply_text(
+            "هیچ پنل ساخت فعالی وجود ندارد. اول از بخش «مدیریت پنل‌های ساخت» یک پنل را فعال کنید.",
+            reply_markup=admin_trial_settings_keyboard(),
+        )
+        return ConversationHandler.END
+    labels = [f"{panel.title} ({panel.key})" for panel in panels]
+    await update.message.reply_text(
+        "**انتخاب پنل ساخت تست**\n\n"
+        "پنلی را انتخاب کنید که کانفیگ تست از آن ساخته شود.",
+        reply_markup=_rows([*labels, CANCEL, ADMIN_BACK], width=1),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return TRIAL_SET_PANEL_VALUE
+
+
+@require_auth(permission="shop")
+async def trial_set_panel_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text or ""
+    match = re.search(r"\(([^()]+)\)\s*$", text)
+    panel_key = match.group(1).strip() if match else text.strip()
+    async with async_session() as session:
+        panel = (
+            await session.execute(
+                select(ProvisionPanel).where(
+                    ProvisionPanel.key == panel_key,
+                    ProvisionPanel.is_enabled.is_(True),
+                )
+            )
+        ).scalar_one_or_none()
+        if not panel:
+            await update.message.reply_text("پنل انتخاب‌شده معتبر یا فعال نیست.")
+            return TRIAL_SET_PANEL_VALUE
+        await SettingsService.set_trial_panel_key(session, panel.key)
+    await update.message.reply_text("پنل ساخت تست ذخیره شد.")
+    await trial_settings_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="shop")
+async def trial_set_time_mode_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "**نوع زمان کانفیگ تست**\n\n"
+        "برای تست، گزینه «تاریخ‌دار از زمان ساخت» پیشنهاد می‌شود تا تست همان لحظه شروع و بعد از مدت تعیین‌شده تمام شود.",
+        reply_markup=admin_provision_time_mode_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return TRIAL_SET_TIME_MODE_VALUE
+
+
+@require_auth(permission="shop")
+async def trial_set_time_mode_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    raw = (update.message.text or "").strip()
+    value = PROVISION_TIME_MODE_VALUES.get(raw, raw)
+    if value not in {"date", "on_hold", "unlimited"}:
+        await update.message.reply_text("نوع زمان معتبر نیست.", reply_markup=admin_provision_time_mode_keyboard())
+        return TRIAL_SET_TIME_MODE_VALUE
+    async with async_session() as session:
+        await SettingsService.set_trial_time_mode(session, value)
+    await update.message.reply_text("نوع زمان کانفیگ تست ذخیره شد.")
     await trial_settings_menu(update, context)
     return ConversationHandler.END
 
@@ -6615,6 +6699,30 @@ trial_set_duration_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
 )
 
+trial_set_panel_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_TRIAL_SET_PANEL), trial_set_panel_start)],
+    states={
+        TRIAL_SET_PANEL_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, trial_set_panel_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+trial_set_time_mode_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_TRIAL_SET_TIME_MODE), trial_set_time_mode_start)],
+    states={
+        TRIAL_SET_TIME_MODE_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, trial_set_time_mode_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
 service_reminder_volume_conv = ConversationHandler(
     entry_points=[MessageHandler(_exact_filter(ADMIN_SERVICE_REMINDER_SET_VOLUME), service_reminder_volume_start)],
     states={
@@ -6797,6 +6905,8 @@ admin_handlers = [
     rial_set_receipt_admins_conv,
     trial_set_volume_conv,
     trial_set_duration_conv,
+    trial_set_panel_conv,
+    trial_set_time_mode_conv,
     service_reminder_volume_conv,
     service_reminder_days_conv,
     service_reminder_hours_conv,

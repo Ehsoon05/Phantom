@@ -192,10 +192,13 @@ class ServiceReminderService:
                 return False
             try:
                 if ServiceReminderService._is_trial(purchase, db_config):
-                    username = db_config.panel_username or MarzbanTrialService.username_for(purchase.user_id)
-                    await MarzbanTrialService.delete(username)
-                    db_config.panel_deleted_at = datetime.now(timezone.utc)
-                    await session.flush()
+                    if db_config.panel_key:
+                        await ProvisioningService.delete_config(session, db_config)
+                    else:
+                        username = db_config.panel_username or MarzbanTrialService.username_for(purchase.user_id)
+                        await MarzbanTrialService.delete(username)
+                        db_config.panel_deleted_at = datetime.now(timezone.utc)
+                        await session.flush()
                 else:
                     await ProvisioningService.delete_config(session, db_config)
                 await session.commit()

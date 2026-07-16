@@ -170,7 +170,7 @@ DEFAULT_MESSAGES: dict[str, str] = {
     "trial_success": (
         "**کانفیگ تست شما آماده شد**\n\n"
         "حجم: **{volume_mb} مگابایت**\n"
-        "مدت: **{duration_hours} ساعت از اولین اتصال**\n\n"
+        "مدت: **{duration_hours} ساعت**\n\n"
         "سرویس با نام **تست رایگان** در بخش «سرویس‌های من» ثبت شد."
     ),
     "trial_already_claimed": (

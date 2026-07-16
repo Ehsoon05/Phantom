@@ -445,6 +445,64 @@ class ProvisioningService:
         )
 
     @staticmethod
+    async def create_trial(
+        session: AsyncSession,
+        *,
+        panel_key: str,
+        username: str,
+        volume_mb: int,
+        duration_hours: int,
+        time_mode: str = "date",
+    ) -> ProvisionedSubscription:
+        panel = await ProvisioningService.get_panel(session, panel_key)
+        if panel is None:
+            raise ProvisioningError("برای کانفیگ تست پنل فعال و معتبر تنظیم نشده است.")
+        mode = time_mode if time_mode in {"date", "on_hold", "unlimited"} else "date"
+        if mode == "unlimited":
+            timing = {"status": "active", "expire": 0, "on_hold_expire_duration": None}
+        elif mode == "on_hold":
+            timing = {
+                "status": "on_hold",
+                "expire": 0,
+                "on_hold_expire_duration": int(duration_hours) * 3600,
+            }
+        else:
+            timing = {
+                "status": "active",
+                "expire": int((datetime.now(timezone.utc) + timedelta(hours=duration_hours)).timestamp()),
+                "on_hold_expire_duration": None,
+            }
+        async with httpx.AsyncClient(
+            base_url=panel.base_url.rstrip("/"),
+            timeout=httpx.Timeout(35, connect=15),
+            verify=False,
+        ) as client:
+            token = await ProvisioningService._token(client, panel)
+            headers = {"Authorization": f"Bearer {token}"}
+            access_fields = await ProvisioningService._access_fields(client, panel, headers)
+            response = await client.post(
+                "/api/user",
+                headers=headers,
+                json={
+                    "username": username,
+                    "data_limit": int(volume_mb) * 1024 * 1024,
+                    "data_limit_reset_strategy": "no_reset",
+                    **timing,
+                    **access_fields,
+                },
+            )
+            if response.status_code == 409:
+                response = await client.get(f"/api/user/{username}", headers=headers)
+            if response.is_error:
+                raise _panel_error(response, "ساخت کانفیگ تست از پنل")
+            payload = response.json()
+        return ProvisionedSubscription(
+            panel_key=panel.key,
+            username=str(payload.get("username") or username),
+            subscription_url=_subscription_url(panel.base_url, payload),
+        )
+
+    @staticmethod
     async def renew_config(session: AsyncSession, config: Config, plan: ShopPlan) -> None:
         panel = await ProvisioningService.get_panel(session, config.panel_key)
         if panel is None:

@@ -39,6 +39,8 @@ HOOSHPAY_PRESET_AMOUNTS = "hooshpay_preset_amounts"
 TRIAL_ENABLED = "trial_enabled"
 TRIAL_VOLUME_MB = "trial_volume_mb"
 TRIAL_DURATION_HOURS = "trial_duration_hours"
+TRIAL_PANEL_KEY = "trial_panel_key"
+TRIAL_TIME_MODE = "trial_time_mode"
 SERVICE_REMINDERS_ENABLED = "service_reminders_enabled"
 SERVICE_REMINDER_VOLUME_PERCENTS = "service_reminder_volume_percents"
 SERVICE_REMINDER_TIME_DAYS = "service_reminder_time_days"
@@ -80,6 +82,8 @@ DEFAULTS = {
     TRIAL_ENABLED: "true",
     TRIAL_VOLUME_MB: "500",
     TRIAL_DURATION_HOURS: "24",
+    TRIAL_PANEL_KEY: "asan",
+    TRIAL_TIME_MODE: "date",
     SERVICE_REMINDERS_ENABLED: "true",
     SERVICE_REMINDER_VOLUME_PERCENTS: "20,10",
     SERVICE_REMINDER_TIME_DAYS: "3,1",
@@ -468,6 +472,26 @@ class SettingsService:
     @staticmethod
     async def set_trial_duration_hours(session: AsyncSession, hours: int) -> None:
         await SettingsService.set(session, TRIAL_DURATION_HOURS, str(max(1, int(hours))))
+
+    @staticmethod
+    async def get_trial_panel_key(session: AsyncSession) -> str:
+        return str(await SettingsService.get(session, TRIAL_PANEL_KEY, "asan") or "asan").strip()
+
+    @staticmethod
+    async def set_trial_panel_key(session: AsyncSession, panel_key: str) -> None:
+        await SettingsService.set(session, TRIAL_PANEL_KEY, str(panel_key or "").strip())
+
+    @staticmethod
+    async def get_trial_time_mode(session: AsyncSession) -> str:
+        mode = str(await SettingsService.get(session, TRIAL_TIME_MODE, "date") or "date").strip()
+        return mode if mode in {"date", "on_hold", "unlimited"} else "date"
+
+    @staticmethod
+    async def set_trial_time_mode(session: AsyncSession, mode: str) -> None:
+        mode = str(mode or "date").strip()
+        if mode not in {"date", "on_hold", "unlimited"}:
+            mode = "date"
+        await SettingsService.set(session, TRIAL_TIME_MODE, mode)
 
     @staticmethod
     async def service_reminders_enabled(session: AsyncSession) -> bool:

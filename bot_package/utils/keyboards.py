@@ -83,6 +83,8 @@ ADMIN_TRIAL_SETTINGS = "🧪 تنظیمات کانفیگ تست"
 ADMIN_TRIAL_TOGGLE = "⏯ روشن/خاموش کردن تست"
 ADMIN_TRIAL_SET_VOLUME = "📦 حجم تست (مگابایت)"
 ADMIN_TRIAL_SET_DURATION = "⏱ مدت تست (ساعت)"
+ADMIN_TRIAL_SET_PANEL = "🖥 پنل ساخت تست"
+ADMIN_TRIAL_SET_TIME_MODE = "🕒 نوع زمان تست"
 ADMIN_SERVICE_REMINDERS = "🔔 هشدار تمدید سرویس"
 ADMIN_SERVICE_REMINDER_TOGGLE = "⏯ روشن/خاموش هشدارها"
 ADMIN_SERVICE_REMINDER_SET_VOLUME = "📉 درصدهای هشدار حجم"
@@ -441,6 +443,7 @@ def admin_trial_settings_keyboard() -> ReplyKeyboardMarkup:
         [
             [_button(ADMIN_TRIAL_TOGGLE)],
             [_button(ADMIN_TRIAL_SET_VOLUME), _button(ADMIN_TRIAL_SET_DURATION)],
+            [_button(ADMIN_TRIAL_SET_PANEL), _button(ADMIN_TRIAL_SET_TIME_MODE)],
             [_button(ADMIN_BACK)],
         ]
     )
