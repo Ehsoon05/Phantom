@@ -42,7 +42,7 @@ from ..services.purchase_service import (
     renew_purchase,
 )
 from ..services.referral_service import ReferralService
-from ..services.required_channel_service import RequiredChannelService
+from ..services.required_channel_service import REQUIRED_CHANNEL_CHECK_CALLBACK, RequiredChannelService
 from ..services.shop_customization_service import ShopCustomizationService
 from ..services.subscription_link_service import SubscriptionLinkService
 from ..services.user_service import UserService
@@ -199,6 +199,34 @@ async def ensure_required_membership(update: Update, context: ContextTypes.DEFAU
         reply_markup=RequiredChannelService.join_keyboard(missing),
     )
     return False
+
+
+async def required_channel_check_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    async with async_session() as session:
+        channels = await RequiredChannelService.list_channels(session, active_only=True)
+    missing = await RequiredChannelService.missing_channels(context.bot, query.from_user.id, channels)
+    if missing:
+        await query.answer("هنوز عضویت شما تایید نشده است. بعد از عضویت دوباره «عضو شدم» را بزنید.", show_alert=True)
+        return
+
+    await query.answer("عضویت شما تایید شد.")
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except BadRequest:
+        pass
+
+    callback_update = SimpleNamespace(
+        message=query.message,
+        effective_message=query.message,
+        effective_user=query.from_user,
+        callback_query=query,
+    )
+    user = await get_or_create_user(query.from_user.id, query.from_user.first_name, query.from_user.username)
+    if user.accepted_rules_at is None:
+        await rules_menu(callback_update, context)
+        return
+    await main_menu(callback_update, context)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1172,6 +1200,7 @@ user_handlers = [
     CommandHandler("help", help_menu),
     CommandHandler("support", support_menu),
     CommandHandler("cancel", cancel_coupon),
+    CallbackQueryHandler(required_channel_check_callback, pattern=rf"^{re.escape(REQUIRED_CHANNEL_CHECK_CALLBACK)}$"),
     CallbackQueryHandler(response_button_callback, pattern=r"^shop_response(_button)?:\d+$"),
     CallbackQueryHandler(service_details_callback, pattern=r"^(service:\d+|service_qr:\d+|services:list)$"),
     CallbackQueryHandler(renew_service_callback, pattern=r"^renew_(confirm|do):\d+$"),
