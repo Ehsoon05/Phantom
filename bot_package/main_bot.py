@@ -1,6 +1,6 @@
 import logging
 
-from telegram import BotCommand, MenuButtonWebApp, WebAppInfo
+from telegram import BotCommand, MenuButtonCommands
 from telegram.ext import Application
 from .config_loader import BotConfig
 from .database import engine
@@ -33,12 +33,7 @@ async def setup_main_bot():
             BotCommand("support", "پشتیبانی"),
         ]
     )
-    await app.bot.set_chat_menu_button(
-        menu_button=MenuButtonWebApp(
-            text="فروشگاه",
-            web_app=WebAppInfo(url=BotConfig.WEBAPP_URL),
-        )
-    )
+    await app.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
     for handler in user_handlers:
         app.add_handler(handler)
     app.add_error_handler(log_error)
