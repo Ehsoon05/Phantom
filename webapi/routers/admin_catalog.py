@@ -238,6 +238,7 @@ class PlanUpsertRequest(BaseModel):
 
 
 class PlanUpdateRequest(BaseModel):
+    volume_gb: int | None = Field(default=None, ge=0)
     title: str | None = None
     price: int | None = None
     emoji: str | None = None

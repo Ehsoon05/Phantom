@@ -1252,6 +1252,7 @@ class ShopCustomizationService:
             return None
 
         allowed = {
+            "volume_gb",
             "title",
             "price",
             "emoji",

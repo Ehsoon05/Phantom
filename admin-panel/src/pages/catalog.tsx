@@ -28,6 +28,13 @@ import {
 } from "@/lib/admin-api";
 
 type ProvisionForm = {
+  title: string;
+  emoji: string;
+  style: string;
+  category_key: string;
+  price: string;
+  volume_gb: string;
+  display_order: string;
   provision_mode: string;
   provision_panel_key: string;
   name_prefix: string;
@@ -43,6 +50,13 @@ type ProvisionForm = {
 function provisionFormFromPlan(plan: Plan): ProvisionForm {
   const legacyUnlimited = plan.provision_time_mode === "unlimited";
   return {
+    title: plan.title ?? "",
+    emoji: plan.emoji ?? "",
+    style: plan.style ?? "success",
+    category_key: plan.category_key || "default",
+    price: plan.price != null ? String(plan.price) : "",
+    volume_gb: String(plan.volume_gb ?? 0),
+    display_order: String(plan.display_order ?? 0),
     provision_mode: plan.provision_mode || "inventory_then_panel",
     provision_panel_key: plan.provision_panel_key ?? "",
     name_prefix: plan.name_prefix ?? `PhantomHubs_${plan.category_key}_${plan.volume_gb}GB`,
@@ -98,6 +112,13 @@ function PlansTab() {
       provision_panel_key: string | null;
       provision_enabled: boolean;
       renew_enabled: boolean;
+      title: string;
+      emoji: string | null;
+      style: string | null;
+      category_key: string;
+      price: number | null;
+      volume_gb: number;
+      display_order: number;
       duration_days: number;
       provision_volume_gb: number | null;
       provision_duration_days: number | null;
@@ -170,7 +191,7 @@ function PlansTab() {
                         }
                       }}
                     >
-                      تامین
+                      ویرایش کامل
                     </Button>
                     <Button size="sm" variant="secondary" onClick={() => toggle.mutate({ id: p.id, is_active: p.is_active })}>{p.is_active ? "غیرفعال" : "فعال"}</Button>
                     <Button size="sm" variant="destructive" onClick={() => { if (confirm("حذف پلن؟")) remove.mutate(p.id); }}>حذف</Button>
@@ -180,6 +201,78 @@ function PlansTab() {
                   <tr className="border-b bg-muted/30">
                     <td colSpan={8} className="py-3">
                       <div className="grid gap-3 rounded-lg border bg-background p-3 md:grid-cols-4">
+                        <div className="space-y-1 md:col-span-4">
+                          <p className="text-sm font-semibold">ویرایش کامل پلن و تنظیمات ساخت</p>
+                          <p className="text-xs text-muted-foreground">
+                            اطلاعات نمایشی برای فروشگاه است؛ فیلدهای ساخت مشخص می‌کنند اگر پلن از پنل ساخته شود با چه نام، حجم، زمان و محدودیتی ساخته شود.
+                          </p>
+                        </div>
+                        <label className="space-y-1 text-xs md:col-span-2">
+                          <span className="text-muted-foreground">اسم نمایشی پلن</span>
+                          <Input
+                            value={provisionForm.title}
+                            onChange={(e) => setProvisionForm({ ...provisionForm, title: e.target.value })}
+                          />
+                        </label>
+                        <label className="space-y-1 text-xs">
+                          <span className="text-muted-foreground">ایموجی پلن</span>
+                          <Input
+                            value={provisionForm.emoji}
+                            onChange={(e) => setProvisionForm({ ...provisionForm, emoji: e.target.value })}
+                          />
+                        </label>
+                        <label className="space-y-1 text-xs">
+                          <span className="text-muted-foreground">رنگ/استایل دکمه</span>
+                          <select
+                            className="min-h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+                            value={provisionForm.style}
+                            onChange={(e) => setProvisionForm({ ...provisionForm, style: e.target.value })}
+                          >
+                            <option value="primary">Primary</option>
+                            <option value="success">Success</option>
+                            <option value="danger">Danger</option>
+                            <option value="secondary">Secondary</option>
+                            <option value="outline">Outline</option>
+                          </select>
+                        </label>
+                        <label className="space-y-1 text-xs">
+                          <span className="text-muted-foreground">دسته سرویس</span>
+                          <select
+                            className="min-h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+                            value={provisionForm.category_key}
+                            onChange={(e) => setProvisionForm({ ...provisionForm, category_key: e.target.value })}
+                          >
+                            <option value="default">پیش‌فرض</option>
+                            {categories?.filter((category) => category.key !== "default").map((category) => (
+                              <option key={category.id} value={category.key}>{category.emoji} {category.title}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="space-y-1 text-xs">
+                          <span className="text-muted-foreground">قیمت فروش (تومان)</span>
+                          <Input
+                            inputMode="numeric"
+                            value={provisionForm.price}
+                            onChange={(e) => setProvisionForm({ ...provisionForm, price: e.target.value })}
+                          />
+                        </label>
+                        <label className="space-y-1 text-xs">
+                          <span className="text-muted-foreground">حجم نمایشی/فروش (GB)</span>
+                          <Input
+                            inputMode="numeric"
+                            placeholder="0 یعنی نامحدود"
+                            value={provisionForm.volume_gb}
+                            onChange={(e) => setProvisionForm({ ...provisionForm, volume_gb: e.target.value })}
+                          />
+                        </label>
+                        <label className="space-y-1 text-xs">
+                          <span className="text-muted-foreground">ترتیب نمایش</span>
+                          <Input
+                            inputMode="numeric"
+                            value={provisionForm.display_order}
+                            onChange={(e) => setProvisionForm({ ...provisionForm, display_order: e.target.value })}
+                          />
+                        </label>
                         <label className="space-y-1 text-xs">
                           <span className="text-muted-foreground">حالت تامین</span>
                           <select
@@ -206,9 +299,10 @@ function PlansTab() {
                           </select>
                         </label>
                         <label className="space-y-1 text-xs md:col-span-2">
-                          <span className="text-muted-foreground">پیشوند نام ساب</span>
+                          <span className="text-muted-foreground">اسم ساخت در پنل / شروع شمارنده</span>
                           <Input
                             dir="ltr"
+                            placeholder="مثال: PhantomExpress10GB-VIP1"
                             value={provisionForm.name_prefix}
                             onChange={(e) => setProvisionForm({ ...provisionForm, name_prefix: e.target.value })}
                           />
@@ -280,6 +374,9 @@ function PlansTab() {
                             disabled={provision.isPending}
                             onClick={() => {
                               const duration = parseInt(provisionForm.duration_days, 10);
+                              const volumeGb = parseInt(provisionForm.volume_gb, 10);
+                              const displayOrder = parseInt(provisionForm.display_order, 10);
+                              const priceValue = provisionForm.price.trim() ? parseInt(provisionForm.price, 10) : null;
                               const provisionDuration = provisionForm.provision_duration_days.trim()
                                 ? parseInt(provisionForm.provision_duration_days, 10)
                                 : null;
@@ -288,6 +385,11 @@ function PlansTab() {
                                 : null;
                               const deviceLimit = parseInt(provisionForm.subscription_device_limit, 10);
                               if (
+                                !provisionForm.title.trim() ||
+                                Number.isNaN(volumeGb) ||
+                                volumeGb < 0 ||
+                                Number.isNaN(displayOrder) ||
+                                (priceValue != null && (Number.isNaN(priceValue) || priceValue < 0)) ||
                                 Number.isNaN(duration) ||
                                 duration < 0 ||
                                 (provisionDuration != null && (Number.isNaN(provisionDuration) || provisionDuration < 0)) ||
@@ -300,6 +402,13 @@ function PlansTab() {
                               }
                               provision.mutate({
                                 id: p.id,
+                                title: provisionForm.title.trim(),
+                                emoji: provisionForm.emoji.trim() || null,
+                                style: provisionForm.style || null,
+                                category_key: provisionForm.category_key || "default",
+                                price: priceValue,
+                                volume_gb: volumeGb,
+                                display_order: displayOrder,
                                 provision_mode: provisionForm.provision_mode,
                                 provision_panel_key: provisionForm.provision_panel_key || null,
                                 provision_enabled: provisionForm.provision_mode !== "inventory",
