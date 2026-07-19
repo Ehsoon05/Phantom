@@ -129,6 +129,7 @@ class SubscriptionLinkService:
             "telegram_user_id": int(telegram_user_id or config.sold_to_user_id or 0) or None,
             "device_limit": max(0, int(device_limit)) if device_limit is not None else None,
             "show_config_preview": show_config_preview,
+            "info_proxies_enabled": (config.panel_key == "svn"),
         }
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
