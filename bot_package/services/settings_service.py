@@ -61,8 +61,8 @@ DEFAULTS = {
     RIAL_REQUIRE_PHONE: "true",
     RIAL_SUPPORT_HANDLE: "@PhantomHubsSupport",
     RIAL_PAYMENT_MODE: "receipt_bot",
-    RIAL_DESTINATION_CARD_NUMBER: "6219861931573371",
-    RIAL_DESTINATION_CARD_HOLDER: "احسان خلج",
+    RIAL_DESTINATION_CARD_NUMBER: "",
+    RIAL_DESTINATION_CARD_HOLDER: "",
     RIAL_RECEIPT_VALID_MINUTES: "120",
     RIAL_RECEIPT_BOT_USERNAME: "PhantomVariziBot",
     RIAL_RECEIPT_ADMIN_IDS: "60585628,6987529339",
@@ -229,15 +229,18 @@ class SettingsService:
 
     @staticmethod
     async def get_rial_destination_card_number(session: AsyncSession) -> str:
-        return (await SettingsService.get(session, RIAL_DESTINATION_CARD_NUMBER, "6219861931573371") or "").strip()
+        return (await SettingsService.get(session, RIAL_DESTINATION_CARD_NUMBER, "") or "").strip()
 
     @staticmethod
     async def set_rial_destination_card_number(session: AsyncSession, card_number: str) -> None:
-        await SettingsService.set(session, RIAL_DESTINATION_CARD_NUMBER, "".join(ch for ch in card_number if ch.isdigit()))
+        cleaned = "".join(ch for ch in card_number if ch.isdigit())
+        if len(cleaned) != 16:
+            return
+        await SettingsService.set(session, RIAL_DESTINATION_CARD_NUMBER, cleaned)
 
     @staticmethod
     async def get_rial_destination_card_holder(session: AsyncSession) -> str:
-        return (await SettingsService.get(session, RIAL_DESTINATION_CARD_HOLDER, "احسان خلج") or "").strip()
+        return (await SettingsService.get(session, RIAL_DESTINATION_CARD_HOLDER, "") or "").strip()
 
     @staticmethod
     async def set_rial_destination_card_holder(session: AsyncSession, holder: str) -> None:

@@ -552,6 +552,57 @@ class ProvisioningService:
         await session.flush()
 
     @staticmethod
+    async def fetch_config_status(session: AsyncSession, config: Config) -> str | None:
+        panel = await ProvisioningService.get_panel(session, config.panel_key)
+        username = config.panel_username or username_from_subscription_url(config.sub_link)
+        if panel is None or not username:
+            return None
+        async with httpx.AsyncClient(
+            base_url=panel.base_url.rstrip("/"),
+            timeout=httpx.Timeout(25, connect=10),
+            verify=False,
+        ) as client:
+            token = await ProvisioningService._token(client, panel)
+            response = await client.get(
+                f"/api/user/{username}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if response.status_code == 404:
+                return "deleted"
+            if response.is_error:
+                raise _panel_error(response, "دریافت وضعیت سرویس از پنل")
+            payload = response.json()
+        config.panel_key = panel.key
+        config.panel_username = username
+        await session.flush()
+        return str(payload.get("status") or "").strip() or None
+
+    @staticmethod
+    async def set_config_enabled(session: AsyncSession, config: Config, enabled: bool) -> str:
+        panel = await ProvisioningService.get_panel(session, config.panel_key)
+        username = config.panel_username or username_from_subscription_url(config.sub_link)
+        if panel is None or not username:
+            raise ProvisioningError("برای تغییر وضعیت سرویس، اطلاعات پنل یا نام کاربری قابل تشخیص نیست.")
+        new_status = "active" if enabled else "disabled"
+        async with httpx.AsyncClient(
+            base_url=panel.base_url.rstrip("/"),
+            timeout=httpx.Timeout(35, connect=15),
+            verify=False,
+        ) as client:
+            token = await ProvisioningService._token(client, panel)
+            response = await client.put(
+                f"/api/user/{username}",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"status": new_status},
+            )
+            if response.is_error:
+                raise _panel_error(response, "تغییر وضعیت سرویس در پنل")
+        config.panel_key = panel.key
+        config.panel_username = username
+        await session.flush()
+        return new_status
+
+    @staticmethod
     async def delete_config(session: AsyncSession, config: Config) -> bool:
         panel = await ProvisioningService.get_panel(session, config.panel_key)
         username = config.panel_username or username_from_subscription_url(config.sub_link)

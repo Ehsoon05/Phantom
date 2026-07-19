@@ -780,7 +780,8 @@ async def service_details_callback(update: Update, context: ContextTypes.DEFAULT
     except (AttributeError, IndexError, ValueError):
         await query.answer("سرویس نامعتبر است.", show_alert=True)
         return
-    await query.answer("در حال دریافت جزئیات...")
+    if action != "service_toggle":
+        await query.answer("در حال دریافت جزئیات...")
 
     async with async_session() as session:
         result = await session.execute(
@@ -792,6 +793,36 @@ async def service_details_callback(update: Update, context: ContextTypes.DEFAULT
         if not purchase:
             await query.message.reply_text("این سرویس پیدا نشد.")
             return
+        if action == "service_toggle":
+            if not purchase.config or purchase.config.panel_deleted_at:
+                await query.answer("برای این سرویس امکان تغییر وضعیت وجود ندارد.", show_alert=True)
+                return
+            current_status = await ProvisioningService.fetch_config_status(session, purchase.config)
+            enable = current_status == "disabled"
+            try:
+                await ProvisioningService.set_config_enabled(session, purchase.config, enable)
+                await session.commit()
+            except ProvisioningError as exc:
+                await session.rollback()
+                await query.answer(str(exc), show_alert=True)
+                return
+            await query.answer("سرویس روشن شد." if enable else "سرویس خاموش شد.", show_alert=True)
+            keyboard = InlineKeyboardMarkup(
+                [[InlineKeyboardButton("مشاهده جزئیات سرویس", callback_data=f"service:{purchase_id}")]]
+            )
+            await query.edit_message_text(
+                "وضعیت کانفیگ با موفقیت تغییر کرد.\n"
+                f"وضعیت جدید: {'روشن' if enable else 'خاموش'}",
+                reply_markup=keyboard,
+            )
+            return
+
+        panel_status = None
+        if purchase.config and purchase.config.panel_key and not purchase.config.panel_deleted_at:
+            try:
+                panel_status = await ProvisioningService.fetch_config_status(session, purchase.config)
+            except ProvisioningError:
+                panel_status = None
         if await SettingsService.branded_links_enabled(session):
             sub_link = await SubscriptionLinkService.public_link_for_config(session, purchase.config)
             token = purchase.config.public_sub_token
@@ -819,7 +850,6 @@ async def service_details_callback(update: Update, context: ContextTypes.DEFAULT
         )
         return
 
-    await query.answer()
     metadata = await SubscriptionLinkService.fetch_metadata(token) if token else None
     expiry_text, remaining_time = _format_expiry(metadata.get("expire") if metadata else None)
     original_title = metadata.get("title") if metadata else "نامشخص"
@@ -855,6 +885,11 @@ async def service_details_callback(update: Update, context: ContextTypes.DEFAULT
         [InlineKeyboardButton("کپی لینک", api_kwargs={"copy_text": {"text": sub_link}})],
         [InlineKeyboardButton("ساخت QR Code", callback_data=f"service_qr:{purchase.id}")],
     ]
+    if purchase.config and purchase.config.panel_key and not purchase.config.panel_deleted_at:
+        if panel_status == "disabled":
+            rows.append([InlineKeyboardButton("روشن کردن کانفیگ", callback_data=f"service_toggle:{purchase.id}")])
+        else:
+            rows.append([InlineKeyboardButton("خاموش کردن کانفیگ", callback_data=f"service_toggle:{purchase.id}")])
     if purchase.config and purchase.config.shop_plan_id and not purchase.config.panel_deleted_at:
         rows.append([
             InlineKeyboardButton(
@@ -1210,7 +1245,7 @@ user_handlers = [
     CommandHandler("cancel", cancel_coupon),
     CallbackQueryHandler(required_channel_check_callback, pattern=rf"^{re.escape(REQUIRED_CHANNEL_CHECK_CALLBACK)}$"),
     CallbackQueryHandler(response_button_callback, pattern=r"^shop_response(_button)?:\d+$"),
-    CallbackQueryHandler(service_details_callback, pattern=r"^(service:\d+|service_qr:\d+|services:list)$"),
+    CallbackQueryHandler(service_details_callback, pattern=r"^(service:\d+|service_qr:\d+|service_toggle:\d+|services:list)$"),
     CallbackQueryHandler(renew_service_callback, pattern=r"^renew_(confirm|do):\d+$"),
     MessageHandler(filters.CONTACT, rial_user.handle_contact),
     MessageHandler((filters.PHOTO | filters.Document.ALL | filters.VIDEO) & ~filters.COMMAND, rial_user.handle_receipt_message),

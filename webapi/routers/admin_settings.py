@@ -205,6 +205,9 @@ async def set_rial_settings(
             raise HTTPException(status_code=400, detail="payment_mode must be receipt_bot or direct_support")
         await SettingsService.set_rial_payment_mode(session, body.payment_mode)
     if body.destination_card_number is not None:
+        cleaned_card = "".join(ch for ch in body.destination_card_number if ch.isdigit())
+        if len(cleaned_card) != 16:
+            raise HTTPException(status_code=400, detail="destination_card_number must contain exactly 16 digits")
         await SettingsService.set_rial_destination_card_number(session, body.destination_card_number)
     if body.destination_card_holder is not None:
         await SettingsService.set_rial_destination_card_holder(session, body.destination_card_holder)
