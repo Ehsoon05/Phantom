@@ -126,6 +126,7 @@ class SubscriptionLinkService:
             "category_key": config.category_key or "default",
             "is_sold": bool(config.is_sold),
             "service_name": service_name,
+            "panel_username": config.panel_username,
             "telegram_user_id": int(telegram_user_id or config.sold_to_user_id or 0) or None,
             "device_limit": max(0, int(device_limit)) if device_limit is not None else None,
             "show_config_preview": show_config_preview,
