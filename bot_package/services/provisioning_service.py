@@ -200,6 +200,16 @@ class ProvisioningService:
                 "[1]",
                 BotConfig.MEXICO_NAMAHDOD_PANEL_HWID_LIMIT,
             ),
+            (
+                "svn",
+                "SVN",
+                "marzban",
+                BotConfig.SVN_PANEL_URL,
+                BotConfig.SVN_PANEL_USERNAME,
+                BotConfig.SVN_PANEL_PASSWORD,
+                None,
+                None,
+            ),
         ]
         for key, title, panel_type, base_url, username, password, group_ids, hwid_limit in defaults:
             if not (base_url and username and password):
