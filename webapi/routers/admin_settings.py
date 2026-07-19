@@ -2,9 +2,11 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot_package.models import Admin, RequiredChannel
+from bot_package.models import Admin, ProvisionPanel, RequiredChannel
+from bot_package.services.provisioning_service import ProvisioningService
 from bot_package.services.required_channel_service import RequiredChannelService
 from bot_package.services.settings_service import SettingsService
 from bot_package.services.subscription_link_service import SubscriptionLinkService
@@ -222,17 +224,39 @@ async def get_trial_settings(
     session: AsyncSession = Depends(get_session),
     _admin: Admin = Depends(require_permission("shop")),
 ):
+    await ProvisioningService.ensure_env_panels(session)
+    panel_key = await SettingsService.get_trial_panel_key(session)
+    panels = (
+        await session.execute(
+            select(ProvisionPanel)
+            .where(ProvisionPanel.is_enabled.is_(True))
+            .order_by(ProvisionPanel.id)
+        )
+    ).scalars().all()
     return {
         "enabled": await SettingsService.trial_enabled(session),
         "volume_mb": await SettingsService.get_trial_volume_mb(session),
         "duration_hours": await SettingsService.get_trial_duration_hours(session),
+        "panel_key": panel_key,
+        "time_mode": await SettingsService.get_trial_time_mode(session),
+        "panels": [
+            {
+                "key": panel.key,
+                "title": panel.title,
+                "panel_type": panel.panel_type,
+                "is_enabled": panel.is_enabled,
+            }
+            for panel in panels
+        ],
     }
 
 
 class TrialSettingsRequest(BaseModel):
     enabled: bool | None = None
-    volume_mb: int | None = Field(default=None, ge=0)
-    duration_hours: int | None = Field(default=None, ge=0)
+    volume_mb: int | None = Field(default=None, ge=1)
+    duration_hours: int | None = Field(default=None, ge=1)
+    panel_key: str | None = None
+    time_mode: str | None = None
 
 
 @router.put("/settings/trial")
@@ -247,6 +271,24 @@ async def set_trial_settings(
         await SettingsService.set_trial_volume_mb(session, body.volume_mb)
     if body.duration_hours is not None:
         await SettingsService.set_trial_duration_hours(session, body.duration_hours)
+    if body.panel_key is not None:
+        await ProvisioningService.ensure_env_panels(session)
+        panel_key = body.panel_key.strip()
+        panel = (
+            await session.execute(
+                select(ProvisionPanel).where(
+                    ProvisionPanel.key == panel_key,
+                    ProvisionPanel.is_enabled.is_(True),
+                )
+            )
+        ).scalar_one_or_none()
+        if panel is None:
+            raise HTTPException(status_code=400, detail="panel_key must be an active provision panel")
+        await SettingsService.set_trial_panel_key(session, panel.key)
+    if body.time_mode is not None:
+        if body.time_mode not in {"date", "on_hold", "unlimited"}:
+            raise HTTPException(status_code=400, detail="time_mode must be date, on_hold or unlimited")
+        await SettingsService.set_trial_time_mode(session, body.time_mode)
     return await get_trial_settings(session, _admin)
 
 

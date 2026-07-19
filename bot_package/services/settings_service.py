@@ -82,7 +82,7 @@ DEFAULTS = {
     TRIAL_ENABLED: "true",
     TRIAL_VOLUME_MB: "500",
     TRIAL_DURATION_HOURS: "24",
-    TRIAL_PANEL_KEY: "asan",
+    TRIAL_PANEL_KEY: "easy",
     TRIAL_TIME_MODE: "date",
     SERVICE_REMINDERS_ENABLED: "true",
     SERVICE_REMINDER_VOLUME_PERCENTS: "20,10",
@@ -475,7 +475,8 @@ class SettingsService:
 
     @staticmethod
     async def get_trial_panel_key(session: AsyncSession) -> str:
-        return str(await SettingsService.get(session, TRIAL_PANEL_KEY, "asan") or "asan").strip()
+        panel_key = str(await SettingsService.get(session, TRIAL_PANEL_KEY, "easy") or "easy").strip()
+        return "easy" if panel_key == "asan" else panel_key
 
     @staticmethod
     async def set_trial_panel_key(session: AsyncSession, panel_key: str) -> None:

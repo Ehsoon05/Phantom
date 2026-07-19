@@ -326,6 +326,14 @@ export interface TrialSettings {
   enabled: boolean;
   volume_mb: number;
   duration_hours: number;
+  panel_key: string;
+  time_mode: "date" | "on_hold" | "unlimited";
+  panels: Array<{
+    key: string;
+    title: string;
+    panel_type: string;
+    is_enabled: boolean;
+  }>;
 }
 export const getTrialSettings = () => api<TrialSettings>("/admin/settings/trial");
 export const setTrialSettings = (body: Partial<TrialSettings>) =>

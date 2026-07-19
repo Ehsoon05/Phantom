@@ -201,15 +201,64 @@ function TrialSection() {
   const inv = () => qc.invalidateQueries({ queryKey: ["set-trial"] });
   const [vol, setVol] = useState("");
   const [dur, setDur] = useState("");
-  useEffect(() => { if (data) { setVol(String(data.volume_mb)); setDur(String(data.duration_hours)); } }, [data]);
+  const [panelKey, setPanelKey] = useState("");
+  const [timeMode, setTimeMode] = useState("date");
+  useEffect(() => {
+    if (data) {
+      setVol(String(data.volume_mb));
+      setDur(String(data.duration_hours));
+      setPanelKey(data.panel_key || "");
+      setTimeMode(data.time_mode || "date");
+    }
+  }, [data]);
   const save = useMutation({ mutationFn: (b: Record<string, unknown>) => setTrialSettings(b), onSuccess: inv });
   return (
     <Section title="تنظیمات تست رایگان">
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+      <div className="grid gap-2 md:grid-cols-3">
         <Button size="sm" variant="outline" onClick={() => save.mutate({ enabled: !data?.enabled })}>وضعیت: {data?.enabled ? "فعال" : "غیرفعال"}</Button>
-        <div className="flex gap-1"><Input placeholder="حجم MB" value={vol} onChange={(e) => setVol(e.target.value)} /><Button size="sm" onClick={() => save.mutate({ volume_mb: parseInt(vol, 10) })}>ثبت</Button></div>
-        <div className="flex gap-1"><Input placeholder="مدت (ساعت)" value={dur} onChange={(e) => setDur(e.target.value)} /><Button size="sm" onClick={() => save.mutate({ duration_hours: parseInt(dur, 10) })}>ثبت</Button></div>
+        <label className="space-y-1 text-xs">
+          <span className="text-muted-foreground">پنل ساخت تست</span>
+          <select
+            className="min-h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+            value={panelKey}
+            onChange={(e) => {
+              setPanelKey(e.target.value);
+              if (e.target.value) save.mutate({ panel_key: e.target.value });
+            }}
+          >
+            <option value="">انتخاب پنل</option>
+            {data?.panels?.map((panel) => (
+              <option key={panel.key} value={panel.key}>{panel.title} ({panel.key})</option>
+            ))}
+          </select>
+        </label>
+        <label className="space-y-1 text-xs">
+          <span className="text-muted-foreground">نوع زمان تست</span>
+          <select
+            className="min-h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+            value={timeMode}
+            onChange={(e) => {
+              setTimeMode(e.target.value);
+              save.mutate({ time_mode: e.target.value });
+            }}
+          >
+            <option value="date">تاریخ‌دار از زمان ساخت</option>
+            <option value="on_hold">شروع از اولین اتصال</option>
+            <option value="unlimited">بدون محدودیت زمان</option>
+          </select>
+        </label>
+        <div className="flex gap-1">
+          <Input placeholder="حجم MB" inputMode="numeric" value={vol} onChange={(e) => setVol(e.target.value)} />
+          <Button size="sm" onClick={() => save.mutate({ volume_mb: parseInt(vol, 10) })}>ثبت</Button>
+        </div>
+        <div className="flex gap-1">
+          <Input placeholder="مدت (ساعت)" inputMode="numeric" value={dur} onChange={(e) => setDur(e.target.value)} />
+          <Button size="sm" onClick={() => save.mutate({ duration_hours: parseInt(dur, 10) })}>ثبت</Button>
+        </div>
       </div>
+      <p className="text-xs text-muted-foreground">
+        برای تست‌های تاریخ‌دار، کانفیگ از لحظه ساخت فعال می‌شود. برای حالت شروع از اولین اتصال، زمان از اولین استفاده محاسبه می‌شود.
+      </p>
     </Section>
   );
 }
