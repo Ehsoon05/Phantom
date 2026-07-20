@@ -196,7 +196,7 @@ async def ensure_required_membership(update: Update, context: ContextTypes.DEFAU
             channel_count=len(missing),
         )
 
-    await _reply_with_rendered_message(
+    await _reply_shop_message(
         update.effective_message,
         text,
         reply_markup=RequiredChannelService.join_keyboard(missing),
@@ -225,7 +225,8 @@ async def required_channel_check_callback(update: Update, context: ContextTypes.
         effective_user=query.from_user,
         callback_query=query,
     )
-    user = await get_or_create_user(query.from_user.id, query.from_user.first_name, query.from_user.username)
+    payload = context.user_data.pop("pending_start_payload", None)
+    user = await get_or_create_user(query.from_user.id, query.from_user.first_name, query.from_user.username, payload)
     if user.accepted_rules_at is None:
         await rules_menu(callback_update, context)
         return
@@ -235,6 +236,8 @@ async def required_channel_check_callback(update: Update, context: ContextTypes.
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     payload = context.args[0] if context.args else None
+    if payload:
+        context.user_data["pending_start_payload"] = payload
     context.user_data.pop("awaiting_coupon_code", None)
     context.user_data.pop("awaiting_service_name", None)
     context.user_data.pop("pending_purchase_volume", None)
@@ -243,6 +246,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rial_user.clear_state(context)
     if not await ensure_required_membership(update, context):
         return
+    context.user_data.pop("pending_start_payload", None)
     db_user = await get_or_create_user(user.id, user.first_name, user.username, payload)
     if payload == "verify_phone":
         await rial_user.verify_phone_start(update, context)
