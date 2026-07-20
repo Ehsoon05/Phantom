@@ -262,6 +262,12 @@ async def _decide(update: Update, context: ContextTypes.DEFAULT_TYPE, *, request
         if not request:
             await update.effective_message.reply_text("درخواست پیدا نشد.")
             return
+        if approve and wallet_balance is None and request.status == "approved":
+            await update.effective_message.reply_text("این درخواست قبلاً تایید شده و دوباره شارژ نمی‌شود.")
+            return
+        if not approve and wallet_balance is None and request.status != "rejected":
+            await update.effective_message.reply_text(f"این درخواست قبلاً از حالت انتظار خارج شده است: {request.status}")
+            return
         if approve and wallet_balance is not None:
             user_text = await ShopCustomizationService.get_message(
                 session,

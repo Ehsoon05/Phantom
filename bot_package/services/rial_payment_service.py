@@ -196,7 +196,48 @@ class RialPaymentService:
             return request, None
 
         wallet_balance: int | None = None
+        topup_transaction: Transaction | None = None
         if approve:
+            marker = f"[rial_request:{request.id}]"
+            legacy_marker = f"کارت‌به‌کارت #{request.id}"
+            existing_transaction = (
+                await session.execute(
+                    select(Transaction)
+                    .where(
+                        Transaction.user_id == request.user_id,
+                        Transaction.type == "rial_charge",
+                        Transaction.description.ilike(f"%{legacy_marker}%"),
+                    )
+                    .order_by(Transaction.id.asc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if existing_transaction is None:
+                existing_transaction = (
+                    await session.execute(
+                        select(Transaction)
+                        .where(
+                            Transaction.user_id == request.user_id,
+                            Transaction.type == "rial_charge",
+                            Transaction.description.ilike(f"%{marker}%"),
+                        )
+                        .order_by(Transaction.id.asc())
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+            if existing_transaction is not None:
+                user = (
+                    await session.execute(
+                        select(User).where(User.telegram_id == request.user_id)
+                    )
+                ).scalar_one_or_none()
+                request.status = "approved"
+                request.decided_by = request.decided_by or admin_id
+                request.receipt_status = "approved"
+                request.updated_at = datetime.now(timezone.utc)
+                await session.commit()
+                return request, None
+
             user = (
                 await session.execute(
                     select(User)
@@ -214,7 +255,7 @@ class RialPaymentService:
                 type="rial_charge",
                 description=(
                     f"تایید درخواست کارت‌به‌کارت #{request.id} "
-                    f"توسط ادمین {admin_id}"
+                    f"توسط ادمین {admin_id} {marker}"
                 ),
             )
             session.add(topup_transaction)
