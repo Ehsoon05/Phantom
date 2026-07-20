@@ -244,10 +244,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("pending_purchase_plan_id", None)
     context.user_data.pop("selected_plan_category", None)
     rial_user.clear_state(context)
+    db_user = await get_or_create_user(user.id, user.first_name, user.username, payload)
     if not await ensure_required_membership(update, context):
         return
     context.user_data.pop("pending_start_payload", None)
-    db_user = await get_or_create_user(user.id, user.first_name, user.username, payload)
     if payload == "verify_phone":
         await rial_user.verify_phone_start(update, context)
         return
