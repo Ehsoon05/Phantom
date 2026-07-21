@@ -1,3 +1,4 @@
+import html
 import re
 from datetime import datetime, timezone
 
@@ -17,7 +18,7 @@ from ..database import async_session
 from .inventory_service import InventoryService
 from .settings_service import SettingsService
 from .subscription_link_service import SubscriptionLinkService
-from .shop_customization_service import ShopCustomizationService
+from .shop_customization_service import RenderedMessage, ShopCustomizationService
 
 
 def _base36(value: int) -> str:
@@ -74,18 +75,23 @@ class ReferralService:
         }
 
     @staticmethod
-    async def user_identity_text(session: AsyncSession, user: User) -> str:
-        return str(
-            await ShopCustomizationService.get_message(
-                session,
-                "referral_user_identity",
-                escape_markdown_values=True,
-                **ReferralService.user_raw_values(user),
-            )
+    def _html_template_value(value: str) -> RenderedMessage:
+        return RenderedMessage(html.escape(str(value), quote=False), "HTML")
+
+    @staticmethod
+    async def user_identity_text(session: AsyncSession, user: User) -> RenderedMessage:
+        raw_values = ReferralService.user_raw_values(user)
+        return await ShopCustomizationService.get_message(
+            session,
+            "referral_user_identity",
+            **{
+                key: ReferralService._html_template_value(value)
+                for key, value in raw_values.items()
+            },
         )
 
     @staticmethod
-    async def user_template_values(session: AsyncSession, user: User, prefix: str) -> dict[str, str]:
+    async def user_template_values(session: AsyncSession, user: User, prefix: str) -> dict[str, str | RenderedMessage]:
         raw_values = ReferralService.user_raw_values(user)
         return {
             f"{prefix}_identity": await ReferralService.user_identity_text(session, user),
