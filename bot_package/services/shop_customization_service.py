@@ -401,7 +401,7 @@ DEFAULT_MESSAGES: dict[str, str] = {
         "از لینک دعوت من وارد شو و سرویس‌هایت را راحت‌تر تهیه کن."
     ),
     "referral_commission_text": (
-        "از هر خرید دوستانتان، **{commission_percent} درصد پورسانت** "
+        "از هر شارژ کیف پول دوستانتان، **{commission_percent} درصد پورسانت** "
         "مستقیم به کیف پول شما اضافه می‌شود."
     ),
     "referral_user_identity": (

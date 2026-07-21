@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 
 from sqlalchemy import and_, exists, func, or_, select
@@ -41,7 +42,7 @@ class ReferralService:
         "wallet": "اعتبار کیف پول",
         "service": "سرویس رایگان",
     }
-    TOPUP_TRANSACTION_TYPES = ("charge", "crypto_charge", "rial_charge")
+    TOPUP_TRANSACTION_TYPES = ("charge", "crypto_charge", "rial_charge", "hooshpay_charge")
 
     @staticmethod
     async def commission_settings(session: AsyncSession) -> dict:
@@ -218,7 +219,7 @@ class ReferralService:
     async def grant_topup_commission(session: AsyncSession, transaction: Transaction) -> dict | None:
         if transaction.amount <= 0 or transaction.type not in ReferralService.TOPUP_TRANSACTION_TYPES:
             return None
-        marker = f"[transaction:{transaction.id}]"
+        marker = ReferralService._topup_commission_marker(transaction)
         existing = (
             await session.execute(
                 select(Transaction.id).where(
@@ -236,6 +237,18 @@ class ReferralService:
             source="topup",
             marker=marker,
         )
+
+    @staticmethod
+    def _topup_commission_marker(transaction: Transaction) -> str:
+        description = transaction.description or ""
+        if transaction.type == "rial_charge":
+            request_match = re.search(r"\[rial_request:(\d+)\]", description)
+            if request_match:
+                return f"[rial_request:{request_match.group(1)}]"
+            legacy_match = re.search(r"کارت‌به‌کارت #(\d+)", description)
+            if legacy_match:
+                return f"[rial_request:{legacy_match.group(1)}]"
+        return f"[transaction:{transaction.id}]"
 
     @staticmethod
     async def _grant_commission(
@@ -258,6 +271,17 @@ class ReferralService:
         ).scalar_one_or_none()
         if referrer is None:
             return None
+        tx_type = "referral_commission_purchase" if source == "purchase" else "referral_commission_topup"
+        existing = (
+            await session.execute(
+                select(Transaction.id).where(
+                    Transaction.type == tx_type,
+                    Transaction.description.ilike(f"%{marker}%"),
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return None
         if not await SettingsService.referral_commission_enabled(session):
             return None
         percent = await SettingsService.get_referral_commission_percent(session)
@@ -265,7 +289,6 @@ class ReferralService:
         if percent <= 0 or commission <= 0:
             return None
         referrer.wallet_balance = (referrer.wallet_balance or 0) + commission
-        tx_type = "referral_commission_purchase" if source == "purchase" else "referral_commission_topup"
         source_label = "خرید" if source == "purchase" else "شارژ"
         session.add(
             Transaction(
