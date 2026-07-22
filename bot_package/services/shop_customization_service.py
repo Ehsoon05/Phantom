@@ -183,6 +183,8 @@ DEFAULT_MESSAGES: dict[str, str] = {
         "لطفاً کمی بعد دوباره تلاش کنید یا با پشتیبانی در ارتباط باشید."
     ),
     "trial_disabled": "**دریافت کانفیگ تست در حال حاضر غیرفعال است.**",
+    "buy_category_menu": default_messages.BUY_CATEGORY_MENU_TEXT,
+    "buy_duration_menu": default_messages.BUY_DURATION_MENU_TEXT,
     "buy_menu": default_messages.BUY_MENU_TEXT,
     "rules_text": (
         "**قوانین استفاده از فانتوم**\n\n"

@@ -305,9 +305,9 @@ async def buy_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with async_session() as session:
         prices = await PriceService.get_all_prices(session)
         discounted_prices = await CouponService.prices_with_active_discount(session, update.effective_user.id, prices)
-        text = await ShopCustomizationService.get_message(session, "buy_menu")
+        text = await ShopCustomizationService.get_message(session, "buy_category_menu")
         fallback_keyboard = await ShopCustomizationService.buy_volume_keyboard(session, discounted_prices)
-        keyboard = await _message_markup(session, "buy_menu", fallback_keyboard, copy_text=text)
+        keyboard = await _message_markup(session, "buy_category_menu", fallback_keyboard, copy_text=text)
 
     await _reply_shop_message(update.message, text, reply_markup=keyboard)
 
@@ -317,9 +317,10 @@ async def buy_category_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     context.user_data.pop("selected_plan_duration", None)
     if ShopCustomizationService.duration_options_for_category(category_key):
         async with async_session() as session:
-            text = "لطفاً مدت زمان سرویس را مشخص کنید."
-            keyboard = await ShopCustomizationService.buy_duration_keyboard(session, category_key)
-        await update.message.reply_text(text, reply_markup=keyboard)
+            text = await ShopCustomizationService.get_message(session, "buy_duration_menu")
+            fallback_keyboard = await ShopCustomizationService.buy_duration_keyboard(session, category_key)
+            keyboard = await _message_markup(session, "buy_duration_menu", fallback_keyboard, copy_text=text)
+        await _reply_shop_message(update.message, text, reply_markup=keyboard)
         return
 
     await buy_category_plans_menu(update, context, category_key)
