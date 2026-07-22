@@ -389,6 +389,7 @@ function RialTab() {
   const [result, setResult] = useState<RialRequest | null>(null);
 
   const minAmount = methods?.rial.min_amount_toman ?? 0;
+  const sourceCardRequired = methods?.rial.source_card_required ?? true;
 
   const queryClient = useQueryClient();
   const { data: rialRequests } = useQuery({ queryKey: ["rial-requests"], queryFn: getRialRequests });
@@ -404,7 +405,7 @@ function RialTab() {
     mutationFn: () =>
       createRialRequest({
         amount_toman: parseAmount(amount),
-        source_card: card.replace(/[^0-9]/g, ""),
+        ...(sourceCardRequired ? { source_card: card.replace(/[^0-9]/g, "") } : {}),
       }),
     onSuccess: (data) => {
       setResult(data);
@@ -524,7 +525,7 @@ function RialTab() {
   const cardDigits = card.replace(/[^0-9]/g, "");
   const valid =
     parseAmount(amount) >= minAmount &&
-    cardDigits.length === 16;
+    (!sourceCardRequired || cardDigits.length === 16);
   const errorMessage =
     submit.error instanceof ApiError ? submit.error.message : submit.error ? "خطا در ثبت درخواست" : null;
 
@@ -564,17 +565,19 @@ function RialTab() {
           onChange={(e) => setAmount(e.target.value)}
         />
       </div>
-      <div className="space-y-2">
-        <p className="text-sm font-semibold">شماره کارت مبدا (۱۶ رقم)</p>
-        <Input
-          inputMode="numeric"
-          dir="ltr"
-          className="text-center"
-          placeholder="6037-xxxx-xxxx-xxxx"
-          value={card}
-          onChange={(e) => setCard(e.target.value)}
-        />
-      </div>
+      {sourceCardRequired && (
+        <div className="space-y-2">
+          <p className="text-sm font-semibold">شماره کارت مبدا (۱۶ رقم)</p>
+          <Input
+            inputMode="numeric"
+            dir="ltr"
+            className="text-center"
+            placeholder="6037-xxxx-xxxx-xxxx"
+            value={card}
+            onChange={(e) => setCard(e.target.value)}
+          />
+        </div>
+      )}
       {errorMessage && <p className="text-sm text-destructive">{errorMessage}</p>}
       <Button className="w-full" disabled={!valid || submit.isPending} onClick={() => submit.mutate()}>
         {submit.isPending ? "در حال ثبت…" : "ثبت درخواست"}

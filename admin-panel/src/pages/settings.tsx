@@ -100,6 +100,9 @@ function RialSection() {
         <Button size="sm" variant="outline" onClick={() => save.mutate({ phone_required: !data?.phone_required })}>
           تایید شماره در ربات: {data?.phone_required ? "فعال" : "غیرفعال"}
         </Button>
+        <Button size="sm" variant="outline" onClick={() => save.mutate({ source_card_required: !data?.source_card_required })}>
+          دریافت کارت مبدا: {data?.source_card_required ? "فعال" : "غیرفعال"}
+        </Button>
         <Button size="sm" variant="outline" onClick={() => save.mutate({ payment_mode: data?.payment_mode === "receipt_bot" ? "direct_support" : "receipt_bot" })}>
           روش ریالی: {data?.payment_mode === "receipt_bot" ? "بات رسید" : "پشتیبانی"}
         </Button>

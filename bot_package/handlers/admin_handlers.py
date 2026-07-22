@@ -80,6 +80,7 @@ from ..utils.keyboards import (
     ADMIN_RIAL_SET_SUPPORT,
     ADMIN_RIAL_TOGGLE_MODE,
     ADMIN_RIAL_TOGGLE_PHONE,
+    ADMIN_RIAL_TOGGLE_SOURCE_CARD,
     ADMIN_CREATE_COUPON,
     ADMIN_DEACTIVATE_COUPON,
     ADMIN_DELETE_BUTTON,
@@ -5816,6 +5817,7 @@ async def rial_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     async with async_session() as session:
         minimum = await SettingsService.get_rial_min_amount(session)
         require_phone = await SettingsService.rial_phone_required(session)
+        require_source_card = await SettingsService.rial_source_card_required(session)
         support_handle = await SettingsService.get_rial_support_handle(session)
         payment_mode = await SettingsService.get_rial_payment_mode(session)
         dest_card = await SettingsService.get_rial_destination_card_number(session)
@@ -5827,6 +5829,7 @@ async def rial_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "**تنظیمات کارت‌به‌کارت**\n\n"
         f"حداقل مبلغ: **{minimum:,} تومان**\n"
         f"الزام تایید شماره در ربات: **{'روشن' if require_phone else 'خاموش'}**\n"
+        f"دریافت شماره کارت مبدا: **{'روشن' if require_source_card else 'خاموش'}**\n"
         f"آیدی پشتیبانی: **{support_handle}**\n"
         f"روش فعلی: **{'بات دریافت رسید' if payment_mode == 'receipt_bot' else 'ارسال به پشتیبانی'}**\n"
         f"شماره کارت مقصد: `{dest_card or '-'}`\n"
@@ -5846,6 +5849,18 @@ async def rial_toggle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await SettingsService.set_rial_phone_required(session, enabled)
     await update.message.reply_text(
         f"الزام تایید شماره در ربات برای پرداخت ریالی **{'روشن' if enabled else 'خاموش'}** شد.",
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    await rial_settings_menu(update, context)
+
+
+@require_auth(permission="users")
+async def rial_toggle_source_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        enabled = not await SettingsService.rial_source_card_required(session)
+        await SettingsService.set_rial_source_card_required(session, enabled)
+    await update.message.reply_text(
+        f"دریافت شماره کارت مبدا برای پرداخت ریالی **{'روشن' if enabled else 'خاموش'}** شد.",
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     await rial_settings_menu(update, context)
@@ -6929,6 +6944,7 @@ admin_handlers = [
     MessageHandler(_exact_filter(ADMIN_RIAL_HISTORY), rial_history),
     MessageHandler(_exact_filter(ADMIN_RIAL_SETTINGS), rial_settings_menu),
     MessageHandler(_exact_filter(ADMIN_RIAL_TOGGLE_PHONE), rial_toggle_phone),
+    MessageHandler(_exact_filter(ADMIN_RIAL_TOGGLE_SOURCE_CARD), rial_toggle_source_card),
     MessageHandler(_exact_filter(ADMIN_RIAL_TOGGLE_MODE), rial_toggle_mode),
     MessageHandler(_exact_filter(ADMIN_LOGOUT), admin_logout),
     MessageHandler(_exact_filter(ADMIN_ADMINS), admin_management_menu),

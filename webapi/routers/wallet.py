@@ -95,6 +95,7 @@ async def payment_methods(
     user: User = Depends(get_current_user),
 ):
     phone_required = await SettingsService.rial_phone_required(session)
+    source_card_required = await SettingsService.rial_source_card_required(session)
     return {
         "crypto_coins": [
             {
@@ -108,6 +109,7 @@ async def payment_methods(
         "rial": {
             "min_amount_toman": await SettingsService.get_rial_min_amount(session),
             "phone_required": phone_required,
+            "source_card_required": source_card_required,
             "phone_verified": bool(user.verified_phone_number and user.phone_verified_at),
             "verify_phone_url": (
                 f"https://t.me/{BotConfig.MAIN_BOT_USERNAME}?start=verify_phone"
@@ -224,8 +226,9 @@ async def create_rial_request(
             status_code=403,
             detail="ابتدا شماره ایران متعلق به اکانت تلگرام خود را داخل ربات تایید کنید.",
         )
-    source_card = _normalize_card(body.source_card)
-    if not source_card:
+    require_source_card = await SettingsService.rial_source_card_required(session)
+    source_card = _normalize_card(body.source_card or "") if require_source_card else "دریافت نشد"
+    if require_source_card and not source_card:
         raise HTTPException(status_code=400, detail="شماره کارت مبدا معتبر نیست.")
 
     payment_mode = await SettingsService.get_rial_payment_mode(session)

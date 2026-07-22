@@ -16,6 +16,7 @@ SUBSCRIPTION_PROFILE_TITLE = "subscription_profile_title"
 SUBSCRIPTION_DEVICE_LIMIT = "subscription_device_limit"
 RIAL_MIN_AMOUNT = "rial_min_amount"
 RIAL_REQUIRE_PHONE = "rial_require_phone"
+RIAL_REQUIRE_SOURCE_CARD = "rial_require_source_card"
 RIAL_SUPPORT_HANDLE = "rial_support_handle"
 RIAL_PAYMENT_MODE = "rial_payment_mode"
 RIAL_DESTINATION_CARD_NUMBER = "rial_destination_card_number"
@@ -59,6 +60,7 @@ DEFAULTS = {
     SUBSCRIPTION_DEVICE_LIMIT: "0",
     RIAL_MIN_AMOUNT: "100000",
     RIAL_REQUIRE_PHONE: "true",
+    RIAL_REQUIRE_SOURCE_CARD: "true",
     RIAL_SUPPORT_HANDLE: "@PhantomHubsSupport",
     RIAL_PAYMENT_MODE: "receipt_bot",
     RIAL_DESTINATION_CARD_NUMBER: "",
@@ -205,6 +207,15 @@ class SettingsService:
     @staticmethod
     async def set_rial_phone_required(session: AsyncSession, enabled: bool) -> None:
         await SettingsService.set(session, RIAL_REQUIRE_PHONE, "true" if enabled else "false")
+
+    @staticmethod
+    async def rial_source_card_required(session: AsyncSession) -> bool:
+        value = await SettingsService.get(session, RIAL_REQUIRE_SOURCE_CARD, "true")
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    async def set_rial_source_card_required(session: AsyncSession, enabled: bool) -> None:
+        await SettingsService.set(session, RIAL_REQUIRE_SOURCE_CARD, "true" if enabled else "false")
 
     @staticmethod
     async def get_rial_support_handle(session: AsyncSession) -> str:

@@ -101,6 +101,7 @@ export interface PaymentMethods {
   rial: {
     min_amount_toman: number;
     phone_required: boolean;
+    source_card_required: boolean;
     phone_verified: boolean;
     verify_phone_url: string;
     payment_mode: "receipt_bot" | "direct_support";
@@ -193,7 +194,7 @@ export const createCryptoInvoice = (coinKey: string, amountToman: number) =>
   });
 export const createRialRequest = (input: {
   amount_toman: number;
-  source_card: string;
+  source_card?: string;
 }) =>
   api<RialRequest>("/wallet/rial/requests", {
     method: "POST",

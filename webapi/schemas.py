@@ -131,7 +131,7 @@ class CryptoInvoiceOut(BaseModel):
 
 class RialRequestIn(BaseModel):
     amount_toman: int = Field(gt=0)
-    source_card: str = Field(min_length=16, max_length=19)
+    source_card: str | None = Field(default=None, min_length=16, max_length=19)
 
 
 class RialRequestOut(BaseModel):

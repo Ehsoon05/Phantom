@@ -38,6 +38,7 @@ ADMIN_RIAL_HISTORY = "📋 درخواست‌های کارت‌به‌کارت"
 ADMIN_RIAL_SETTINGS = "💳 تنظیمات کارت‌به‌کارت"
 ADMIN_RIAL_SET_MIN = "✏️ حداقل پرداخت ریالی"
 ADMIN_RIAL_TOGGLE_PHONE = "📱 دریافت شماره تماس"
+ADMIN_RIAL_TOGGLE_SOURCE_CARD = "💳 دریافت کارت مبدا"
 ADMIN_RIAL_SET_SUPPORT = "👤 آیدی پشتیبانی ریالی"
 ADMIN_RIAL_TOGGLE_MODE = "🔁 تغییر روش پرداخت ریالی"
 ADMIN_RIAL_SET_DEST_CARD = "💳 شماره کارت مقصد"
@@ -320,7 +321,7 @@ def admin_rial_settings_keyboard() -> ReplyKeyboardMarkup:
     return _keyboard(
         [
             [_button(ADMIN_RIAL_SET_MIN)],
-            [_button(ADMIN_RIAL_TOGGLE_PHONE)],
+            [_button(ADMIN_RIAL_TOGGLE_PHONE), _button(ADMIN_RIAL_TOGGLE_SOURCE_CARD)],
             [_button(ADMIN_RIAL_SET_SUPPORT)],
             [_button(ADMIN_RIAL_TOGGLE_MODE)],
             [_button(ADMIN_RIAL_SET_DEST_CARD), _button(ADMIN_RIAL_SET_DEST_HOLDER)],

@@ -290,6 +290,7 @@ export const setManualRate = (coin: string, toman_per_unit: number) =>
 export interface RialSettings {
   min_amount_toman: number;
   phone_required: boolean;
+  source_card_required: boolean;
   support_handle: string;
   payment_mode: "receipt_bot" | "direct_support";
   destination_card_number: string;

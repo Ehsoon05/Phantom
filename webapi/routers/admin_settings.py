@@ -89,6 +89,7 @@ async def get_rial_settings(
     return {
         "min_amount_toman": await SettingsService.get_rial_min_amount(session),
         "phone_required": await SettingsService.rial_phone_required(session),
+        "source_card_required": await SettingsService.rial_source_card_required(session),
         "support_handle": await SettingsService.get_rial_support_handle(session),
         "payment_mode": await SettingsService.get_rial_payment_mode(session),
         "destination_card_number": await SettingsService.get_rial_destination_card_number(session),
@@ -179,6 +180,7 @@ async def set_hooshpay_settings(
 class RialSettingsRequest(BaseModel):
     min_amount_toman: int | None = Field(default=None, ge=0)
     phone_required: bool | None = None
+    source_card_required: bool | None = None
     support_handle: str | None = None
     payment_mode: str | None = None
     destination_card_number: str | None = None
@@ -198,6 +200,8 @@ async def set_rial_settings(
         await SettingsService.set_rial_min_amount(session, body.min_amount_toman)
     if body.phone_required is not None:
         await SettingsService.set_rial_phone_required(session, body.phone_required)
+    if body.source_card_required is not None:
+        await SettingsService.set_rial_source_card_required(session, body.source_card_required)
     if body.support_handle is not None:
         await SettingsService.set_rial_support_handle(session, body.support_handle)
     if body.payment_mode is not None:

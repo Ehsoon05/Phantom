@@ -31,6 +31,7 @@ AMOUNT_KEY = "rial_amount"
 PHONE_KEY = "rial_phone"
 VERIFY_PHONE_KEY = "verify_phone_for_webapp"
 RECEIPT_REQUEST_KEY = "rial_receipt_request_id"
+SOURCE_CARD_NOT_REQUIRED = "دریافت نشد"
 
 
 def _keyboard_rows(markup: ReplyKeyboardMarkup) -> list[list[KeyboardButton]]:
@@ -223,9 +224,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def _handle_amount(update: Update, context: ContextTypes.DEFAULT_TYPE, value: str) -> None:
     amount = _parse_toman(value)
+    create_without_source_card = False
     async with async_session() as session:
         minimum = await SettingsService.get_rial_min_amount(session)
         require_phone = await SettingsService.rial_phone_required(session)
+        require_source_card = await SettingsService.rial_source_card_required(session)
         user = (
             await session.execute(
                 select(User).where(User.telegram_id == update.effective_user.id)
@@ -251,9 +254,16 @@ async def _handle_amount(update: Update, context: ContextTypes.DEFAULT_TYPE, val
         else:
             if user and user.verified_phone_number:
                 context.user_data[PHONE_KEY] = user.verified_phone_number
-            context.user_data[STEP_KEY] = "card"
-            text = await ShopCustomizationService.get_message(session, "rial_card_prompt")
-            keyboard = await _back_keyboard(session)
+            if require_source_card:
+                context.user_data[STEP_KEY] = "card"
+                text = await ShopCustomizationService.get_message(session, "rial_card_prompt")
+                keyboard = await _back_keyboard(session)
+            else:
+                context.user_data.pop(STEP_KEY, None)
+                create_without_source_card = True
+    if create_without_source_card:
+        await _create_payment_request(update, context, SOURCE_CARD_NOT_REQUIRED)
+        return
     await update.message.reply_text(text, reply_markup=keyboard, parse_mode=getattr(text, "parse_mode", None))
 
 
@@ -295,10 +305,19 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     context.user_data[PHONE_KEY] = phone
-    context.user_data[STEP_KEY] = "card"
+    create_without_source_card = False
     async with async_session() as session:
-        text = await ShopCustomizationService.get_message(session, "rial_card_prompt")
-        keyboard = await _back_keyboard(session)
+        require_source_card = await SettingsService.rial_source_card_required(session)
+        if require_source_card:
+            context.user_data[STEP_KEY] = "card"
+            text = await ShopCustomizationService.get_message(session, "rial_card_prompt")
+            keyboard = await _back_keyboard(session)
+        else:
+            context.user_data.pop(STEP_KEY, None)
+            create_without_source_card = True
+    if create_without_source_card:
+        await _create_payment_request(update, context, SOURCE_CARD_NOT_REQUIRED)
+        return
     await update.message.reply_text(text, reply_markup=keyboard, parse_mode=getattr(text, "parse_mode", None))
 
 
@@ -315,6 +334,16 @@ async def _handle_card(update: Update, context: ContextTypes.DEFAULT_TYPE, value
     if not isinstance(amount, int):
         await charge_start(update, context)
         return
+
+    await _create_payment_request(update, context, source_card)
+
+
+async def _create_payment_request(update: Update, context: ContextTypes.DEFAULT_TYPE, source_card: str) -> None:
+    amount = context.user_data.get(AMOUNT_KEY)
+    if not isinstance(amount, int):
+        await charge_start(update, context)
+        return
+    source_card_text = source_card or SOURCE_CARD_NOT_REQUIRED
 
     async with async_session() as session:
         user = (
@@ -336,7 +365,7 @@ async def _handle_card(update: Update, context: ContextTypes.DEFAULT_TYPE, value
             user_id=update.effective_user.id,
             amount_toman=amount,
             phone_number=phone,
-            source_card=source_card,
+            source_card=source_card_text,
             support_handle=support_handle,
             request_text="",
             payment_mode=payment_mode,
@@ -358,7 +387,7 @@ async def _handle_card(update: Update, context: ContextTypes.DEFAULT_TYPE, value
             direct_text = (
                 f"درخواست پرداخت کارت‌به‌کارت #{request.id}\n"
                 f"مبلغ: {amount:,} تومان\n"
-                f"کارت مبدا: {source_card}\n"
+                f"کارت مبدا: {source_card_text}\n"
                 f"کارت مقصد: {destination_card}\n"
                 f"صاحب کارت: {destination_holder}\n"
                 f"کد پیگیری: {request.tracking_code}\n"
@@ -372,7 +401,7 @@ async def _handle_card(update: Update, context: ContextTypes.DEFAULT_TYPE, value
         copy_text = (
             "سلام،\n\n"
             f"درخواست شارژ حساب به مبلغ {amount:,} تومان را دارم\n"
-            f"شماره کارت مبدا: {source_card}\n"
+            f"شماره کارت مبدا: {source_card_text}\n"
             "تشکر 🙏"
         )
         direct_text = (
@@ -388,7 +417,7 @@ async def _handle_card(update: Update, context: ContextTypes.DEFAULT_TYPE, value
                 "rial_payment_request",
                 support_handle=support_handle,
                 amount=f"{amount:,}",
-                source_card=source_card,
+                source_card=source_card_text,
                 tracking_code=request.tracking_code,
                 phone_number=phone or "دریافت نشد",
                 copy_text=copy_text,
