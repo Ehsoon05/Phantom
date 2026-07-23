@@ -52,7 +52,7 @@ function provisionFormFromPlan(plan: Plan): ProvisionForm {
   return {
     title: plan.title ?? "",
     emoji: plan.emoji ?? "",
-    style: plan.style ?? "success",
+    style: plan.style ?? "",
     category_key: plan.category_key || "default",
     price: plan.price != null ? String(plan.price) : "",
     volume_gb: String(plan.volume_gb ?? 0),
@@ -228,6 +228,7 @@ function PlansTab() {
                             value={provisionForm.style}
                             onChange={(e) => setProvisionForm({ ...provisionForm, style: e.target.value })}
                           >
+                            <option value="">پیش‌فرض</option>
                             <option value="primary">Primary</option>
                             <option value="success">Success</option>
                             <option value="danger">Danger</option>
