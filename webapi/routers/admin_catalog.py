@@ -308,6 +308,8 @@ async def update_plan(
     _admin: Admin = Depends(require_permission("prices")),
 ):
     values = {k: v for k, v in body.model_dump(exclude_unset=True).items()}
+    if values.get("style") == "default":
+        values["style"] = None
     if "subscription_device_limit" in values and values["subscription_device_limit"] is not None:
         values["subscription_device_limit"] = max(0, int(values["subscription_device_limit"]))
     plan = await ShopCustomizationService.update_plan(session, plan_id, **values)

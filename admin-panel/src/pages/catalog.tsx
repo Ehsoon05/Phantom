@@ -52,7 +52,7 @@ function provisionFormFromPlan(plan: Plan): ProvisionForm {
   return {
     title: plan.title ?? "",
     emoji: plan.emoji ?? "",
-    style: plan.style ?? "",
+    style: plan.style ?? "default",
     category_key: plan.category_key || "default",
     price: plan.price != null ? String(plan.price) : "",
     volume_gb: String(plan.volume_gb ?? 0),
@@ -228,7 +228,7 @@ function PlansTab() {
                             value={provisionForm.style}
                             onChange={(e) => setProvisionForm({ ...provisionForm, style: e.target.value })}
                           >
-                            <option value="">پیش‌فرض</option>
+                            <option value="default">Default (بی‌رنگ تلگرام)</option>
                             <option value="primary">Primary</option>
                             <option value="success">Success</option>
                             <option value="danger">Danger</option>
@@ -405,7 +405,7 @@ function PlansTab() {
                                 id: p.id,
                                 title: provisionForm.title.trim(),
                                 emoji: provisionForm.emoji.trim() || null,
-                                style: provisionForm.style || null,
+                                style: provisionForm.style === "default" ? null : provisionForm.style || null,
                                 category_key: provisionForm.category_key || "default",
                                 price: priceValue,
                                 volume_gb: volumeGb,
