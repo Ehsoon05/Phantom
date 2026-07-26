@@ -127,6 +127,12 @@ def _panel_error(response: httpx.Response, action: str) -> ProvisioningError:
     return ProvisioningError(f"{action} انجام نشد: HTTP {response.status_code} - {detail}")
 
 
+def _panel_api_base_url(panel: ProvisionPanel) -> str:
+    if panel.key == "svn" and BotConfig.SVN_PANEL_API_URL:
+        return BotConfig.SVN_PANEL_API_URL.rstrip("/")
+    return panel.base_url.rstrip("/")
+
+
 def _subscription_url(base_url: str, payload: dict[str, Any]) -> str:
     subscription_url = str(payload.get("subscription_url") or "").strip()
     if not subscription_url:
@@ -315,12 +321,35 @@ class ProvisioningService:
 
     @staticmethod
     async def _token(client: httpx.AsyncClient, panel: ProvisionPanel) -> str:
-        response = await client.post(
-            "/api/admin/token",
-            data={"username": panel.username, "password": panel.password},
+        try:
+            response = await client.post(
+                "/api/admin/token",
+                data={"username": panel.username, "password": panel.password},
+            )
+        except httpx.HTTPError as exc:
+            raise ProvisioningError("ارتباط با API پنل برقرار نشد.") from exc
+
+        challenge = (
+            response.headers.get("cf-mitigated", "").lower() == "challenge"
+            or (
+                "text/html" in response.headers.get("content-type", "").lower()
+                and "just a moment" in response.text.lower()
+            )
         )
-        response.raise_for_status()
-        token = response.json().get("access_token")
+        if challenge:
+            raise ProvisioningError(
+                "Cloudflare دسترسی API پنل را با چالش تعاملی مسدود کرده است؛ "
+                "برای /api/* باید WAF Skip یا یک آدرس مستقیم API تنظیم شود."
+            )
+        if response.status_code in {401, 403}:
+            raise ProvisioningError("نام کاربری یا رمز پنل معتبر نیست، یا دسترسی API محدود شده است.")
+        if response.is_error:
+            raise _panel_error(response, "ورود به پنل")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ProvisioningError("پاسخ ورود پنل JSON معتبر نیست.") from exc
+        token = payload.get("access_token")
         if not token:
             raise ProvisioningError("پنل توکن دسترسی برنگرداند.")
         return str(token)
@@ -390,7 +419,7 @@ class ProvisioningService:
         if panel.panel_type == "easy":
             return {}
         async with httpx.AsyncClient(
-            base_url=panel.base_url.rstrip("/"),
+            base_url=_panel_api_base_url(panel),
             timeout=httpx.Timeout(35, connect=15),
             verify=False,
         ) as client:
@@ -427,7 +456,7 @@ class ProvisioningService:
         volume_gb = effective_volume_gb(plan)
         data_limit = volume_gb * 1024**3 if volume_gb > 0 else 0
         async with httpx.AsyncClient(
-            base_url=panel.base_url.rstrip("/"),
+            base_url=_panel_api_base_url(panel),
             timeout=httpx.Timeout(35, connect=15),
             verify=False,
         ) as client:
@@ -483,7 +512,7 @@ class ProvisioningService:
                 "on_hold_expire_duration": None,
             }
         async with httpx.AsyncClient(
-            base_url=panel.base_url.rstrip("/"),
+            base_url=_panel_api_base_url(panel),
             timeout=httpx.Timeout(35, connect=15),
             verify=False,
         ) as client:
@@ -523,7 +552,7 @@ class ProvisioningService:
         volume_gb = effective_volume_gb(plan)
         data_limit = volume_gb * 1024**3 if volume_gb > 0 else 0
         async with httpx.AsyncClient(
-            base_url=panel.base_url.rstrip("/"),
+            base_url=_panel_api_base_url(panel),
             timeout=httpx.Timeout(35, connect=15),
             verify=False,
         ) as client:
@@ -558,7 +587,7 @@ class ProvisioningService:
         if panel is None or not username:
             return None
         async with httpx.AsyncClient(
-            base_url=panel.base_url.rstrip("/"),
+            base_url=_panel_api_base_url(panel),
             timeout=httpx.Timeout(25, connect=10),
             verify=False,
         ) as client:
@@ -585,7 +614,7 @@ class ProvisioningService:
             raise ProvisioningError("برای تغییر وضعیت سرویس، اطلاعات پنل یا نام کاربری قابل تشخیص نیست.")
         new_status = "active" if enabled else "disabled"
         async with httpx.AsyncClient(
-            base_url=panel.base_url.rstrip("/"),
+            base_url=_panel_api_base_url(panel),
             timeout=httpx.Timeout(35, connect=15),
             verify=False,
         ) as client:
@@ -609,7 +638,7 @@ class ProvisioningService:
         if panel is None or not username:
             raise ProvisioningError("برای حذف سرویس، اطلاعات پنل یا نام کاربری قابل تشخیص نیست.")
         async with httpx.AsyncClient(
-            base_url=panel.base_url.rstrip("/"),
+            base_url=_panel_api_base_url(panel),
             timeout=httpx.Timeout(35, connect=15),
             verify=False,
         ) as client:

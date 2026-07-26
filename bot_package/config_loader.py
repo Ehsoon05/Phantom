@@ -111,6 +111,7 @@ class BotConfig:
     MEXICO_NAMAHDOD_PANEL_PASSWORD = os.getenv("MEXICO_NAMAHDOD_PANEL_PASSWORD", "").strip()
     MEXICO_NAMAHDOD_PANEL_HWID_LIMIT = _parse_int_env("MEXICO_NAMAHDOD_PANEL_HWID_LIMIT", 2)
     SVN_PANEL_URL = os.getenv("SVN_PANEL_URL", "").strip().rstrip("/")
+    SVN_PANEL_API_URL = os.getenv("SVN_PANEL_API_URL", "").strip().rstrip("/")
     SVN_PANEL_USERNAME = os.getenv("SVN_PANEL_USERNAME", "").strip()
     SVN_PANEL_PASSWORD = os.getenv("SVN_PANEL_PASSWORD", "").strip()
     SESSION_TIMEOUT_MINUTES = _parse_int_env("SESSION_TIMEOUT_MINUTES", 60)

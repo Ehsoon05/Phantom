@@ -59,6 +59,9 @@ LOG_LEVEL=INFO
 SUBSCRIPTION_PUBLIC_BASE_URL=https://api.phantomhubs.shop
 SUBSCRIPTION_PANEL_SYNC_URL=https://api.phantomhubs.shop/internal/configs
 SUBSCRIPTION_PANEL_SYNC_TOKEN=یک-توکن-مشترک-قوی
+# Optional: direct, WAF-free management endpoint for the SVN panel.
+# Public subscription links still use SVN_PANEL_URL.
+SVN_PANEL_API_URL=
 ```
 
 Run both bots:
