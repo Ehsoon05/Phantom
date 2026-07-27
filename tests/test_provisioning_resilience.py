@@ -10,6 +10,7 @@ from bot_package.services.provisioning_service import (
     ProvisioningError,
     ProvisioningService,
     _panel_api_base_url,
+    _subscription_url,
 )
 
 
@@ -60,6 +61,19 @@ class ProvisioningResilienceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(_panel_api_base_url(_panel()), "https://direct-api.example")
         finally:
             BotConfig.SVN_PANEL_API_URL = previous
+
+    def test_subscription_url_always_uses_public_panel_base(self) -> None:
+        self.assertEqual(
+            _subscription_url(
+                "https://youpanel.example.com:2053",
+                {
+                    "subscription_url": (
+                        "http://127.0.0.1:18443/sub/example?client=sing-box"
+                    )
+                },
+            ),
+            "https://youpanel.example.com:2053/sub/example?client=sing-box",
+        )
 
 
 if __name__ == "__main__":

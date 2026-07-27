@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunparse
 
 import httpx
 from sqlalchemy import select
@@ -137,6 +137,11 @@ def _subscription_url(base_url: str, payload: dict[str, Any]) -> str:
     subscription_url = str(payload.get("subscription_url") or "").strip()
     if not subscription_url:
         raise ProvisioningError("پنل لینک اشتراک برنگرداند.")
+    parsed = urlparse(subscription_url)
+    if parsed.scheme and parsed.netloc:
+        subscription_url = urlunparse(
+            ("", "", parsed.path, parsed.params, parsed.query, parsed.fragment)
+        )
     return urljoin(f"{base_url.rstrip('/')}/", subscription_url)
 
 
