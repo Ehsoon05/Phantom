@@ -381,6 +381,27 @@ async def test_easy_provision_panel_sends_hwid_limit():
     assert fields["hwid_limit"] == 2
 
 
+@pytest.mark.asyncio
+async def test_pasarguard_groups_override_legacy_inbound_filters():
+    from bot_package.models import ProvisionPanel
+    from bot_package.services.provisioning_service import ProvisioningService
+
+    panel = ProvisionPanel(
+        key="alien",
+        title="Alien",
+        panel_type="pasarguard",
+        base_url="https://example.com",
+        username="admin",
+        password="secret",
+        group_ids="[1, 2]",
+        inbounds_json='{"vless": ["legacy-inbound"]}',
+    )
+
+    fields = await ProvisioningService._access_fields(None, panel, {})
+
+    assert fields == {"group_ids": [1, 2]}
+
+
 def test_provision_username_increments_trailing_number_without_separator():
     from bot_package.services.provisioning_service import _username_base_and_start
 

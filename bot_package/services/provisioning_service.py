@@ -371,7 +371,9 @@ class ProvisioningService:
                 fields["group_ids"] = group_ids
             if panel.hwid_limit is not None and int(panel.hwid_limit) > 0:
                 fields["hwid_limit"] = int(panel.hwid_limit)
-            if panel.panel_type == "easy":
+            # Pasarguard groups own the inbound selection. Sending a legacy
+            # inbound filter alongside them can unintentionally narrow a group.
+            if panel.panel_type == "easy" or fields.get("group_ids"):
                 return fields
 
         allowed_protocols = set(_json_list(panel.protocols_json))
