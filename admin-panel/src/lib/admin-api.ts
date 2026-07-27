@@ -51,9 +51,11 @@ export interface SellerOffer {
   panel_key: string;
   price_toman: number;
   volume_gb: number;
+  lock_volume: boolean;
   default_duration_days: number;
   allowed_time_modes: string[];
   default_time_mode: string;
+  lock_time: boolean;
   name_prefix: string;
   panel_hwid_limit: number | null;
   subscription_device_limit: number;

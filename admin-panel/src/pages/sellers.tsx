@@ -43,9 +43,11 @@ const emptyOffer = {
   panel_key: "",
   price_toman: 0,
   volume_gb: 20,
+  lock_volume: false,
   default_duration_days: 30,
   allowed_time_modes: ["date"],
   default_time_mode: "date",
+  lock_time: false,
   name_prefix: "PhantomSeller_1",
   panel_hwid_limit: null as number | null,
   subscription_device_limit: 0,
@@ -183,9 +185,11 @@ export function SellersPage() {
       panel_key: offer.panel_key,
       price_toman: offer.price_toman,
       volume_gb: offer.volume_gb,
+      lock_volume: offer.lock_volume,
       default_duration_days: offer.default_duration_days,
       allowed_time_modes: [...offer.allowed_time_modes],
       default_time_mode: offer.default_time_mode,
+      lock_time: offer.lock_time,
       name_prefix: offer.name_prefix,
       panel_hwid_limit: offer.panel_hwid_limit,
       subscription_device_limit: offer.subscription_device_limit,
@@ -378,6 +382,8 @@ export function SellersPage() {
                         <div className="flex flex-wrap items-center gap-2">
                           <strong>{offer.title}</strong>
                           <span className="rounded bg-muted px-2 py-0.5 text-xs">{offer.panel_key}</span>
+                          {offer.lock_volume && <span className="rounded bg-primary/10 px-2 py-0.5 text-xs text-primary">حجم ثابت</span>}
+                          {offer.lock_time && <span className="rounded bg-primary/10 px-2 py-0.5 text-xs text-primary">زمان ثابت</span>}
                           {!offer.is_active && <span className="rounded bg-destructive/10 px-2 py-0.5 text-xs text-destructive">غیرفعال</span>}
                         </div>
                         <p className="mt-1 text-xs text-muted-foreground">
@@ -486,6 +492,9 @@ export function SellersPage() {
               </Field>
               <Field label="قیمت همکار (تومان)"><Input dir="ltr" type="number" min={0} value={offerForm.price_toman} onChange={(event) => setOfferForm({ ...offerForm, price_toman: Number(event.target.value) })} /></Field>
               <Field label="حجم ساخت (GB، صفر نامحدود)"><Input dir="ltr" type="number" min={0} value={offerForm.volume_gb} onChange={(event) => setOfferForm({ ...offerForm, volume_gb: Number(event.target.value) })} /></Field>
+              <Field label="قفل حجم برای همکار">
+                <label className="flex h-10 items-center gap-2 rounded-md border px-3 text-sm"><input className="size-4" type="checkbox" checked={offerForm.lock_volume} onChange={(event) => setOfferForm({ ...offerForm, lock_volume: event.target.checked })} /> حجم این پلن قابل ویرایش نباشد</label>
+              </Field>
               <Field label="مدت پیش‌فرض (روز، صفر نامحدود)"><Input dir="ltr" type="number" min={0} value={offerForm.default_duration_days} onChange={(event) => setOfferForm({ ...offerForm, default_duration_days: Number(event.target.value) })} /></Field>
               <Field label="پیشوند و شمارشگر نام"><Input dir="ltr" value={offerForm.name_prefix} onChange={(event) => setOfferForm({ ...offerForm, name_prefix: event.target.value })} /></Field>
               <Field label="HWID پنل (خالی یعنی پیش‌فرض)"><Input dir="ltr" type="number" min={0} value={offerForm.panel_hwid_limit ?? ""} onChange={(event) => setOfferForm({ ...offerForm, panel_hwid_limit: event.target.value === "" ? null : Number(event.target.value) })} /></Field>
@@ -503,6 +512,9 @@ export function SellersPage() {
                 <select className="h-10 rounded-md border bg-background px-3 text-sm" value={offerForm.default_time_mode} onChange={(event) => setOfferForm({ ...offerForm, default_time_mode: event.target.value })}>
                   {offerForm.allowed_time_modes.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
                 </select>
+              </Field>
+              <Field label="قفل زمان برای همکار">
+                <label className="flex h-10 items-center gap-2 rounded-md border px-3 text-sm"><input className="size-4" type="checkbox" checked={offerForm.lock_time} onChange={(event) => setOfferForm({ ...offerForm, lock_time: event.target.checked })} /> نوع و مدت زمان قابل تغییر نباشد</label>
               </Field>
               <Field label="ویژگی‌های لینک ساب">
                 <div className="grid gap-2 rounded-md border p-3 text-xs">
