@@ -8,6 +8,7 @@ import {
   Settings,
   Shield,
   Store,
+  UserRoundCog,
   Users,
 } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
@@ -28,6 +29,7 @@ export function Layout() {
     { to: "/shop", label: "فروشگاه", icon: Store, end: false, show: hasPermission("shop") },
     { to: "/settings", label: "تنظیمات", icon: Settings, end: false, show: hasPermission("shop") },
     { to: "/broadcast", label: "پیام همگانی", icon: Megaphone, end: false, show: hasPermission("users") },
+    { to: "/sellers", label: "همکاران فروش", icon: UserRoundCog, end: false, show: isOwner },
     { to: "/admins", label: "مدیران", icon: Shield, end: false, show: isOwner },
   ].filter((item) => item.show);
 

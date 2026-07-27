@@ -1,4 +1,106 @@
-import { api } from "./api";
+import { api, getToken, logout } from "./api";
+
+const SELLER_API_BASE =
+  import.meta.env.VITE_SELLER_API_URL ?? "https://sellers.phantomhubs.shop";
+
+async function sellerApi<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getToken();
+  const response = await fetch(`${SELLER_API_BASE}/api/admin${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...init?.headers,
+    },
+  });
+  if (response.status === 401) logout();
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      detail = (await response.json()).detail ?? detail;
+    } catch {
+      // Keep HTTP status text.
+    }
+    throw new Error(detail);
+  }
+  return response.json() as Promise<T>;
+}
+
+export interface SellerAccount {
+  id: number;
+  username: string;
+  display_name: string;
+  wallet_balance: number;
+  is_active: boolean;
+  service_count?: number;
+  created_at: string;
+}
+
+export interface SellerPanelOption {
+  key: string;
+  title: string;
+  panel_type: string;
+  hwid_limit: number | null;
+}
+
+export interface SellerOffer {
+  id: number;
+  seller_id: number;
+  title: string;
+  panel_key: string;
+  price_toman: number;
+  volume_gb: number;
+  default_duration_days: number;
+  allowed_time_modes: string[];
+  default_time_mode: string;
+  name_prefix: string;
+  panel_hwid_limit: number | null;
+  subscription_device_limit: number;
+  profile_title: string | null;
+  support_url: string | null;
+  show_header: boolean;
+  show_config_preview: boolean;
+  info_proxies_enabled: boolean;
+  is_active: boolean;
+}
+
+export interface SellerSummary {
+  sellers: number;
+  active_sellers: number;
+  services: number;
+  revenue: number;
+}
+
+export const getSellerSummary = () => sellerApi<SellerSummary>("/summary");
+export const listSellers = (q = "") =>
+  sellerApi<SellerAccount[]>(`/sellers${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+export const createSeller = (body: {
+  username: string;
+  display_name: string;
+  password: string;
+  initial_balance: number;
+}) => sellerApi<SellerAccount>("/sellers", { method: "POST", body: JSON.stringify(body) });
+export const updateSeller = (id: number, body: Record<string, unknown>) =>
+  sellerApi<SellerAccount>(`/sellers/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+export const adjustSellerBalance = (id: number, amount: number, description: string) =>
+  sellerApi<SellerAccount>(`/sellers/${id}/balance`, {
+    method: "POST",
+    body: JSON.stringify({ amount, description }),
+  });
+export const listSellerPanels = () => sellerApi<SellerPanelOption[]>("/panels");
+export const listSellerOffers = (sellerId: number) =>
+  sellerApi<SellerOffer[]>(`/sellers/${sellerId}/offers`);
+export const createSellerOffer = (sellerId: number, body: Record<string, unknown>) =>
+  sellerApi<SellerOffer>(`/sellers/${sellerId}/offers`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+export const updateSellerOffer = (offerId: number, body: Record<string, unknown>) =>
+  sellerApi<SellerOffer>(`/offers/${offerId}`, { method: "PUT", body: JSON.stringify(body) });
+export const deleteSellerOffer = (offerId: number) =>
+  sellerApi<{ deleted: boolean; deactivated: boolean }>(`/offers/${offerId}`, {
+    method: "DELETE",
+  });
 
 // --- Catalog: plans / categories / inventory --------------------------------
 

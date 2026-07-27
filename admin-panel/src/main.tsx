@@ -17,6 +17,7 @@ const PaymentsPage = lazy(() => import("@/pages/payments").then((module) => ({ d
 const PromotionsPage = lazy(() => import("@/pages/promotions").then((module) => ({ default: module.PromotionsPage })));
 const SettingsPage = lazy(() => import("@/pages/settings").then((module) => ({ default: module.SettingsPage })));
 const ShopPage = lazy(() => import("@/pages/shop").then((module) => ({ default: module.ShopPage })));
+const SellersPage = lazy(() => import("@/pages/sellers").then((module) => ({ default: module.SellersPage })));
 const UsersPage = lazy(() => import("@/pages/users").then((module) => ({ default: module.UsersPage })));
 
 const queryClient = new QueryClient({
@@ -52,6 +53,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="settings" element={<SettingsPage />} />
               <Route path="broadcast" element={<BroadcastPage />} />
               <Route path="admins" element={<AdminsPage />} />
+              <Route path="sellers" element={<SellersPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
