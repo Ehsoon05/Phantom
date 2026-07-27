@@ -31,6 +31,7 @@ export interface SellerAccount {
   username: string;
   display_name: string;
   wallet_balance: number;
+  allow_negative_balance: boolean;
   is_active: boolean;
   service_count?: number;
   created_at: string;
@@ -71,6 +72,20 @@ export interface SellerSummary {
   revenue: number;
 }
 
+export interface SellerBuiltService {
+  id: number;
+  offer_id: number;
+  panel_key: string;
+  panel_username: string;
+  public_url: string;
+  volume_gb: number;
+  duration_days: number;
+  time_mode: string;
+  price_toman: number;
+  status: string;
+  created_at: string;
+}
+
 export const getSellerSummary = () => sellerApi<SellerSummary>("/summary");
 export const listSellers = (q = "") =>
   sellerApi<SellerAccount[]>(`/sellers${q ? `?q=${encodeURIComponent(q)}` : ""}`);
@@ -79,6 +94,7 @@ export const createSeller = (body: {
   display_name: string;
   password: string;
   initial_balance: number;
+  allow_negative_balance: boolean;
 }) => sellerApi<SellerAccount>("/sellers", { method: "POST", body: JSON.stringify(body) });
 export const updateSeller = (id: number, body: Record<string, unknown>) =>
   sellerApi<SellerAccount>(`/sellers/${id}`, { method: "PATCH", body: JSON.stringify(body) });
@@ -101,6 +117,10 @@ export const deleteSellerOffer = (offerId: number) =>
   sellerApi<{ deleted: boolean; deactivated: boolean }>(`/offers/${offerId}`, {
     method: "DELETE",
   });
+export const listSellerBuiltServices = (sellerId: number) =>
+  sellerApi<SellerBuiltService[]>(`/services?seller_id=${sellerId}`);
+export const deleteSellerBuiltService = (serviceId: number) =>
+  sellerApi<{ deleted: boolean }>(`/services/${serviceId}`, { method: "DELETE" });
 
 // --- Catalog: plans / categories / inventory --------------------------------
 

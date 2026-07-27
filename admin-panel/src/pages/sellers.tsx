@@ -4,6 +4,7 @@ import {
   Pencil,
   Plus,
   Search,
+  Server,
   ShieldCheck,
   Store,
   Trash2,
@@ -19,12 +20,15 @@ import {
   adjustSellerBalance,
   createSeller,
   createSellerOffer,
+  deleteSellerBuiltService,
   deleteSellerOffer,
   getSellerSummary,
+  listSellerBuiltServices,
   listSellerOffers,
   listSellerPanels,
   listSellers,
   type SellerAccount,
+  type SellerBuiltService,
   type SellerOffer,
   type SellerPanelOption,
   type SellerSummary,
@@ -92,6 +96,7 @@ export function SellersPage() {
   const [panels, setPanels] = useState<SellerPanelOption[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [offers, setOffers] = useState<SellerOffer[]>([]);
+  const [builtServices, setBuiltServices] = useState<SellerBuiltService[]>([]);
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -104,6 +109,7 @@ export function SellersPage() {
     display_name: "",
     password: "",
     initial_balance: 0,
+    allow_negative_balance: false,
   });
   const [offerForm, setOfferForm] = useState<OfferForm>(emptyOffer);
   const selected = useMemo(
@@ -130,7 +136,15 @@ export function SellersPage() {
 
   useEffect(() => {
     if (!selectedId) return;
-    listSellerOffers(selectedId).then(setOffers).catch((reason) => setError(reason.message));
+    Promise.all([
+      listSellerOffers(selectedId),
+      listSellerBuiltServices(selectedId),
+    ])
+      .then(([offerRows, serviceRows]) => {
+        setOffers(offerRows);
+        setBuiltServices(serviceRows);
+      })
+      .catch((reason) => setError(reason.message));
   }, [selectedId]);
 
   async function submitSeller(event: FormEvent) {
@@ -141,7 +155,7 @@ export function SellersPage() {
       const value = await createSeller(sellerForm);
       setSellers((items) => [value, ...items]);
       setSelectedId(value.id);
-      setSellerForm({ username: "", display_name: "", password: "", initial_balance: 0 });
+      setSellerForm({ username: "", display_name: "", password: "", initial_balance: 0, allow_negative_balance: false });
       setShowNewSeller(false);
       setNotice("حساب همکار ساخته شد.");
       await load();
@@ -225,6 +239,31 @@ export function SellersPage() {
     setSellers((items) => items.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
   }
 
+  async function toggleNegativeBalance() {
+    if (!selected) return;
+    try {
+      const updated = await updateSeller(selected.id, {
+        allow_negative_balance: !selected.allow_negative_balance,
+      });
+      setSellers((items) => items.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
+      setNotice(updated.allow_negative_balance ? "امکان بدهکارشدن همکار فعال شد." : "امکان بدهکارشدن همکار غیرفعال شد.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "تغییر مجوز بدهکاری انجام نشد.");
+    }
+  }
+
+  async function removeBuiltService(service: SellerBuiltService) {
+    if (!window.confirm(`یوزر «${service.panel_username}» از پنل سازنده و پنل ساب کاملاً حذف شود؟ این عملیات قابل بازگشت نیست.`)) return;
+    try {
+      await deleteSellerBuiltService(service.id);
+      setBuiltServices((items) => items.filter((item) => item.id !== service.id));
+      setNotice("یوزر از پنل سازنده و پنل ساب حذف شد.");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "حذف یوزر انجام نشد.");
+    }
+  }
+
   const toggleMode = (mode: string) => {
     const values = offerForm.allowed_time_modes.includes(mode)
       ? offerForm.allowed_time_modes.filter((value) => value !== mode)
@@ -286,7 +325,7 @@ export function SellersPage() {
                     @{seller.username}
                   </span>
                 </div>
-                <span className="text-xs font-bold">{toman(seller.wallet_balance)}</span>
+                <span className={`text-xs font-bold ${seller.wallet_balance < 0 ? "text-destructive" : ""}`}>{toman(seller.wallet_balance)}</span>
               </button>
             ))}
             {!sellers.length && <p className="p-6 text-center text-sm text-muted-foreground">همکاری ثبت نشده است.</p>}
@@ -303,6 +342,7 @@ export function SellersPage() {
                     <span className={`rounded-full px-2 py-0.5 text-xs ${selected.is_active ? "bg-emerald-500/10 text-emerald-600" : "bg-destructive/10 text-destructive"}`}>
                       {selected.is_active ? "فعال" : "غیرفعال"}
                     </span>
+                    {selected.allow_negative_balance && <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-600">اعتبار منفی مجاز</span>}
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
                     @{selected.username} · {selected.service_count ?? 0} سرویس ساخته‌شده
@@ -311,6 +351,9 @@ export function SellersPage() {
                 <div className="flex flex-wrap gap-2">
                   <Button variant="outline" onClick={changeBalance}>
                     <CircleDollarSign className="size-4" /> تغییر موجودی
+                  </Button>
+                  <Button variant="outline" onClick={toggleNegativeBalance}>
+                    {selected.allow_negative_balance ? "بستن اعتبار منفی" : "اجازه اعتبار منفی"}
                   </Button>
                   <Button variant={selected.is_active ? "destructive" : "secondary"} onClick={toggleSeller}>
                     {selected.is_active ? "غیرفعال‌کردن حساب" : "فعال‌کردن حساب"}
@@ -366,6 +409,34 @@ export function SellersPage() {
                   )}
                 </div>
               </section>
+
+              <section className="overflow-hidden rounded-lg border bg-card">
+                <div className="border-b p-4">
+                  <h2 className="font-bold">یوزرهای ساخته‌شده</h2>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    حذف از این بخش، یوزر را از پنل سازنده و لینک را از پنل ساب پاک می‌کند.
+                  </p>
+                </div>
+                <div className="divide-y">
+                  {builtServices.map((service) => (
+                    <article key={service.id} className="grid gap-3 p-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="grid size-9 shrink-0 place-items-center rounded-md bg-primary/10 text-primary"><Server className="size-4" /></span>
+                        <div className="min-w-0">
+                          <strong className="block truncate font-mono text-sm" dir="ltr">{service.panel_username}</strong>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {service.panel_key} · {service.volume_gb ? `${service.volume_gb}GB` : "حجم نامحدود"} · {service.duration_days ? `${service.duration_days} روز` : "زمان نامحدود"} · {service.status}
+                          </p>
+                        </div>
+                      </div>
+                      <Button size="icon" variant="outline" title="حذف کامل یوزر" onClick={() => void removeBuiltService(service)}>
+                        <Trash2 className="size-4 text-destructive" />
+                      </Button>
+                    </article>
+                  ))}
+                  {!builtServices.length && <p className="p-8 text-center text-sm text-muted-foreground">هنوز یوزری توسط این همکار ساخته نشده است.</p>}
+                </div>
+              </section>
             </>
           ) : (
             <div className="grid min-h-96 place-items-center rounded-lg border bg-card text-sm text-muted-foreground">
@@ -383,7 +454,13 @@ export function SellersPage() {
               <Field label="نام نمایشی"><Input required value={sellerForm.display_name} onChange={(event) => setSellerForm({ ...sellerForm, display_name: event.target.value })} /></Field>
               <Field label="نام کاربری"><Input dir="ltr" required value={sellerForm.username} onChange={(event) => setSellerForm({ ...sellerForm, username: event.target.value })} /></Field>
               <Field label="رمز عبور"><Input dir="ltr" type="password" required minLength={8} value={sellerForm.password} onChange={(event) => setSellerForm({ ...sellerForm, password: event.target.value })} /></Field>
-              <Field label="موجودی اولیه (تومان)"><Input dir="ltr" type="number" min={0} value={sellerForm.initial_balance} onChange={(event) => setSellerForm({ ...sellerForm, initial_balance: Number(event.target.value) })} /></Field>
+              <Field label="موجودی اولیه (تومان)"><Input dir="ltr" type="number" min={sellerForm.allow_negative_balance ? undefined : 0} value={sellerForm.initial_balance} onChange={(event) => setSellerForm({ ...sellerForm, initial_balance: Number(event.target.value) })} /></Field>
+              <Field label="اعتبار حساب" wide>
+                <label className="flex items-center gap-2 rounded-md border p-3 text-sm">
+                  <input className="size-4" type="checkbox" checked={sellerForm.allow_negative_balance} onChange={(event) => setSellerForm({ ...sellerForm, allow_negative_balance: event.target.checked })} />
+                  اجازه ساخت با موجودی منفی و ثبت بدهی
+                </label>
+              </Field>
             </div>
             <div className="mt-5 flex justify-end gap-2">
               <Button type="button" variant="ghost" onClick={() => setShowNewSeller(false)}>انصراف</Button>
