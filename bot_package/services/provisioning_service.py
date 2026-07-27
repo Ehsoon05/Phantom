@@ -174,7 +174,7 @@ class ProvisioningService:
             (
                 "alien",
                 "Alien",
-                "marzban",
+                "pasarguard",
                 BotConfig.ALIEN_PANEL_URL or BotConfig.MARZBAN_API_URL,
                 BotConfig.ALIEN_PANEL_USERNAME or BotConfig.MARZBAN_API_USERNAME,
                 BotConfig.ALIEN_PANEL_PASSWORD or BotConfig.MARZBAN_API_PASSWORD,
@@ -365,9 +365,10 @@ class ProvisioningService:
         fields: dict[str, Any] = {}
         if grouped_panel:
             group_ids = [int(item) for item in _json_list(panel.group_ids) if str(item).isdigit()]
-            if not group_ids:
+            if panel.panel_type == "easy" and not group_ids:
                 group_ids = [1]
-            fields["group_ids"] = group_ids
+            if group_ids:
+                fields["group_ids"] = group_ids
             if panel.hwid_limit is not None and int(panel.hwid_limit) > 0:
                 fields["hwid_limit"] = int(panel.hwid_limit)
             if panel.panel_type == "easy":
@@ -410,6 +411,10 @@ class ProvisioningService:
                 ]
                 if tags:
                     inbounds[protocol] = tags
+        elif isinstance(payload, list):
+            tags = [str(item).strip() for item in payload if str(item).strip()]
+            if tags:
+                inbounds["vless"] = tags
         if not inbounds:
             if grouped_panel and allowed_protocols:
                 fields["proxies"] = {protocol: {} for protocol in sorted(allowed_protocols)}
@@ -445,6 +450,10 @@ class ProvisioningService:
                 ]
                 if tags:
                     inbounds[str(protocol)] = tags
+        elif isinstance(payload, list):
+            tags = [str(item).strip() for item in payload if str(item).strip()]
+            if tags:
+                inbounds["vless"] = tags
         return inbounds
 
     @staticmethod
