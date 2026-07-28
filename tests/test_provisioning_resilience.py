@@ -56,21 +56,21 @@ class ProvisioningResilienceTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ProvisioningError, "رمز پنل"):
             await ProvisioningService._token(_StaticClient(response), _panel())
 
-    def test_svn_can_use_separate_management_api_url(self) -> None:
+    def test_svn_public_panel_is_preferred_over_management_fallback(self) -> None:
         previous = BotConfig.SVN_PANEL_API_URL
         try:
             BotConfig.SVN_PANEL_API_URL = "https://direct-api.example/"
-            self.assertEqual(_panel_api_base_url(_panel()), "https://direct-api.example")
+            self.assertEqual(_panel_api_base_url(_panel()), "https://public-panel.example")
         finally:
             BotConfig.SVN_PANEL_API_URL = previous
 
-    def test_svn_direct_panel_is_management_fallback(self) -> None:
+    def test_svn_private_management_url_is_fallback(self) -> None:
         previous = BotConfig.SVN_PANEL_API_URL
         try:
             BotConfig.SVN_PANEL_API_URL = "http://127.0.0.1:18443/"
             self.assertEqual(
                 _panel_api_base_urls(_panel()),
-                ["http://127.0.0.1:18443", "https://public-panel.example"],
+                ["https://public-panel.example", "http://127.0.0.1:18443"],
             )
         finally:
             BotConfig.SVN_PANEL_API_URL = previous

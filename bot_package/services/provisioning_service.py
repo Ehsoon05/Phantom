@@ -133,10 +133,9 @@ def _panel_api_base_url(panel: ProvisionPanel) -> str:
 
 
 def _panel_api_base_urls(panel: ProvisionPanel) -> list[str]:
-    candidates = []
+    candidates = [panel.base_url.rstrip("/")]
     if panel.key == "svn" and BotConfig.SVN_PANEL_API_URL:
         candidates.append(BotConfig.SVN_PANEL_API_URL.rstrip("/"))
-    candidates.append(panel.base_url.rstrip("/"))
     return list(dict.fromkeys(candidate for candidate in candidates if candidate))
 
 
@@ -196,10 +195,18 @@ class ProvisioningService:
         connect_timeout_seconds: float = 15,
     ):
         last_error: ProvisioningError | None = None
-        for base_url in _panel_api_base_urls(panel):
+        for candidate_index, base_url in enumerate(_panel_api_base_urls(panel)):
+            candidate_connect_timeout = connect_timeout_seconds
+            if panel.key == "svn" and candidate_index > 0:
+                # A private management relay is a fallback. Do not let a stale
+                # or stopped relay hold the Telegram flow for a long time.
+                candidate_connect_timeout = min(connect_timeout_seconds, 5)
             client = httpx.AsyncClient(
                 base_url=base_url,
-                timeout=httpx.Timeout(timeout_seconds, connect=connect_timeout_seconds),
+                timeout=httpx.Timeout(
+                    timeout_seconds,
+                    connect=candidate_connect_timeout,
+                ),
                 verify=False,
                 headers=_panel_http_headers(panel),
             )
