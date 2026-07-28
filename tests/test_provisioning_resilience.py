@@ -10,6 +10,8 @@ from bot_package.services.provisioning_service import (
     ProvisioningError,
     ProvisioningService,
     _panel_api_base_url,
+    _panel_api_base_urls,
+    _panel_http_headers,
     _subscription_url,
 )
 
@@ -61,6 +63,22 @@ class ProvisioningResilienceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(_panel_api_base_url(_panel()), "https://direct-api.example")
         finally:
             BotConfig.SVN_PANEL_API_URL = previous
+
+    def test_svn_direct_panel_is_management_fallback(self) -> None:
+        previous = BotConfig.SVN_PANEL_API_URL
+        try:
+            BotConfig.SVN_PANEL_API_URL = "http://127.0.0.1:18443/"
+            self.assertEqual(
+                _panel_api_base_urls(_panel()),
+                ["http://127.0.0.1:18443", "https://public-panel.example"],
+            )
+        finally:
+            BotConfig.SVN_PANEL_API_URL = previous
+
+    def test_svn_direct_requests_use_cloudflare_compatible_user_agent(self) -> None:
+        headers = _panel_http_headers(_panel())
+        self.assertIn("Mozilla/5.0", headers["User-Agent"])
+        self.assertIn("application/json", headers["Accept"])
 
     def test_subscription_url_always_uses_public_panel_base(self) -> None:
         self.assertEqual(

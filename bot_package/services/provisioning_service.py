@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -128,9 +129,27 @@ def _panel_error(response: httpx.Response, action: str) -> ProvisioningError:
 
 
 def _panel_api_base_url(panel: ProvisionPanel) -> str:
+    return _panel_api_base_urls(panel)[0]
+
+
+def _panel_api_base_urls(panel: ProvisionPanel) -> list[str]:
+    candidates = []
     if panel.key == "svn" and BotConfig.SVN_PANEL_API_URL:
-        return BotConfig.SVN_PANEL_API_URL.rstrip("/")
-    return panel.base_url.rstrip("/")
+        candidates.append(BotConfig.SVN_PANEL_API_URL.rstrip("/"))
+    candidates.append(panel.base_url.rstrip("/"))
+    return list(dict.fromkeys(candidate for candidate in candidates if candidate))
+
+
+def _panel_http_headers(panel: ProvisionPanel) -> dict[str, str]:
+    if panel.key != "svn":
+        return {}
+    return {
+        "Accept": "application/json, text/plain, */*",
+        "User-Agent": (
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        ),
+    }
 
 
 def _subscription_url(base_url: str, payload: dict[str, Any]) -> str:
@@ -168,6 +187,35 @@ def username_from_subscription_url(url: str) -> str | None:
 
 
 class ProvisioningService:
+    @staticmethod
+    @asynccontextmanager
+    async def _api_client(
+        panel: ProvisionPanel,
+        *,
+        timeout_seconds: float = 35,
+        connect_timeout_seconds: float = 15,
+    ):
+        last_error: ProvisioningError | None = None
+        for base_url in _panel_api_base_urls(panel):
+            client = httpx.AsyncClient(
+                base_url=base_url,
+                timeout=httpx.Timeout(timeout_seconds, connect=connect_timeout_seconds),
+                verify=False,
+                headers=_panel_http_headers(panel),
+            )
+            try:
+                token = await ProvisioningService._token(client, panel)
+            except ProvisioningError as exc:
+                last_error = exc
+                await client.aclose()
+                continue
+            try:
+                yield client, token
+            finally:
+                await client.aclose()
+            return
+        raise last_error or ProvisioningError("ارتباط با API پنل برقرار نشد.")
+
     @staticmethod
     async def ensure_env_panels(session: AsyncSession) -> None:
         defaults = [
@@ -430,12 +478,7 @@ class ProvisioningService:
     async def fetch_inbounds(panel: ProvisionPanel) -> dict[str, list[str]]:
         if panel.panel_type == "easy":
             return {}
-        async with httpx.AsyncClient(
-            base_url=_panel_api_base_url(panel),
-            timeout=httpx.Timeout(35, connect=15),
-            verify=False,
-        ) as client:
-            token = await ProvisioningService._token(client, panel)
+        async with ProvisioningService._api_client(panel) as (client, token):
             response = await client.get("/api/inbounds", headers={"Authorization": f"Bearer {token}"})
             response.raise_for_status()
             payload = response.json()
@@ -471,12 +514,7 @@ class ProvisioningService:
         username = await ProvisioningService.next_username(session, plan)
         volume_gb = effective_volume_gb(plan)
         data_limit = volume_gb * 1024**3 if volume_gb > 0 else 0
-        async with httpx.AsyncClient(
-            base_url=_panel_api_base_url(panel),
-            timeout=httpx.Timeout(35, connect=15),
-            verify=False,
-        ) as client:
-            token = await ProvisioningService._token(client, panel)
+        async with ProvisioningService._api_client(panel) as (client, token):
             headers = {"Authorization": f"Bearer {token}"}
             access_fields = await ProvisioningService._access_fields(client, panel, headers)
             response = await client.post(
@@ -527,12 +565,7 @@ class ProvisioningService:
                 "expire": int((datetime.now(timezone.utc) + timedelta(hours=duration_hours)).timestamp()),
                 "on_hold_expire_duration": None,
             }
-        async with httpx.AsyncClient(
-            base_url=_panel_api_base_url(panel),
-            timeout=httpx.Timeout(35, connect=15),
-            verify=False,
-        ) as client:
-            token = await ProvisioningService._token(client, panel)
+        async with ProvisioningService._api_client(panel) as (client, token):
             headers = {"Authorization": f"Bearer {token}"}
             access_fields = await ProvisioningService._access_fields(client, panel, headers)
             response = await client.post(
@@ -567,12 +600,7 @@ class ProvisioningService:
             raise ProvisioningError("برای این سرویس اطلاعات پنل یا نام کاربری قابل تشخیص نیست.")
         volume_gb = effective_volume_gb(plan)
         data_limit = volume_gb * 1024**3 if volume_gb > 0 else 0
-        async with httpx.AsyncClient(
-            base_url=_panel_api_base_url(panel),
-            timeout=httpx.Timeout(35, connect=15),
-            verify=False,
-        ) as client:
-            token = await ProvisioningService._token(client, panel)
+        async with ProvisioningService._api_client(panel) as (client, token):
             headers = {"Authorization": f"Bearer {token}"}
             response = await client.put(
                 f"/api/user/{username}",
@@ -602,12 +630,11 @@ class ProvisioningService:
         username = config.panel_username or username_from_subscription_url(config.sub_link)
         if panel is None or not username:
             return None
-        async with httpx.AsyncClient(
-            base_url=_panel_api_base_url(panel),
-            timeout=httpx.Timeout(25, connect=10),
-            verify=False,
-        ) as client:
-            token = await ProvisioningService._token(client, panel)
+        async with ProvisioningService._api_client(
+            panel,
+            timeout_seconds=25,
+            connect_timeout_seconds=10,
+        ) as (client, token):
             response = await client.get(
                 f"/api/user/{username}",
                 headers={"Authorization": f"Bearer {token}"},
@@ -629,12 +656,7 @@ class ProvisioningService:
         if panel is None or not username:
             raise ProvisioningError("برای تغییر وضعیت سرویس، اطلاعات پنل یا نام کاربری قابل تشخیص نیست.")
         new_status = "active" if enabled else "disabled"
-        async with httpx.AsyncClient(
-            base_url=_panel_api_base_url(panel),
-            timeout=httpx.Timeout(35, connect=15),
-            verify=False,
-        ) as client:
-            token = await ProvisioningService._token(client, panel)
+        async with ProvisioningService._api_client(panel) as (client, token):
             response = await client.put(
                 f"/api/user/{username}",
                 headers={"Authorization": f"Bearer {token}"},
@@ -653,12 +675,7 @@ class ProvisioningService:
         username = config.panel_username or username_from_subscription_url(config.sub_link)
         if panel is None or not username:
             raise ProvisioningError("برای حذف سرویس، اطلاعات پنل یا نام کاربری قابل تشخیص نیست.")
-        async with httpx.AsyncClient(
-            base_url=_panel_api_base_url(panel),
-            timeout=httpx.Timeout(35, connect=15),
-            verify=False,
-        ) as client:
-            token = await ProvisioningService._token(client, panel)
+        async with ProvisioningService._api_client(panel) as (client, token):
             response = await client.delete(
                 f"/api/user/{username}",
                 headers={"Authorization": f"Bearer {token}"},
