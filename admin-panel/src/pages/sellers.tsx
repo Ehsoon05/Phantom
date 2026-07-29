@@ -1,5 +1,8 @@
 import {
   CircleDollarSign,
+  Clipboard,
+  Eye,
+  EyeOff,
   PackagePlus,
   Pencil,
   Plus,
@@ -108,6 +111,8 @@ export function SellersPage() {
   const [busy, setBusy] = useState(false);
   const [showNewSeller, setShowNewSeller] = useState(false);
   const [showEditSeller, setShowEditSeller] = useState(false);
+  const [showSellerPassword, setShowSellerPassword] = useState(false);
+  const [showSellerEditPassword, setShowSellerEditPassword] = useState(false);
   const [showOffer, setShowOffer] = useState(false);
   const [editingOfferId, setEditingOfferId] = useState<number | null>(null);
   const [sellerForm, setSellerForm] = useState({
@@ -275,6 +280,7 @@ export function SellersPage() {
       display_name: selected.display_name,
       password: "",
     });
+    setShowSellerEditPassword(false);
     setShowEditSeller(true);
   }
 
@@ -509,11 +515,46 @@ export function SellersPage() {
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-3" onMouseDown={(event) => event.target === event.currentTarget && setShowEditSeller(false)}>
           <form onSubmit={submitSellerEdit} className="w-full max-w-lg rounded-lg border bg-background p-5 shadow-2xl">
             <h2 className="text-lg font-bold">ویرایش دسترسی همکار</h2>
-            <p className="mb-4 mt-1 text-xs text-muted-foreground">برای حفظ رمز فعلی، فیلد رمز جدید را خالی بگذارید.</p>
+            <p className="mb-4 mt-1 text-xs text-muted-foreground">
+              رمز فعلی قابل نمایش نیست؛ برای حفظ آن، فیلد رمز جدید را خالی بگذارید.
+            </p>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="نام نمایشی"><Input required value={sellerEditForm.display_name} onChange={(event) => setSellerEditForm({ ...sellerEditForm, display_name: event.target.value })} /></Field>
               <Field label="نام کاربری ورود"><Input dir="ltr" required minLength={3} value={sellerEditForm.username} onChange={(event) => setSellerEditForm({ ...sellerEditForm, username: event.target.value })} /></Field>
-              <Field label="رمز عبور جدید" wide><Input dir="ltr" type="password" minLength={8} placeholder="بدون تغییر" value={sellerEditForm.password} onChange={(event) => setSellerEditForm({ ...sellerEditForm, password: event.target.value })} /></Field>
+              <Field label="رمز عبور جدید" wide>
+                <div className="flex gap-2">
+                  <Input
+                    dir="ltr"
+                    type={showSellerEditPassword ? "text" : "password"}
+                    minLength={8}
+                    placeholder="بدون تغییر"
+                    value={sellerEditForm.password}
+                    onChange={(event) => setSellerEditForm({ ...sellerEditForm, password: event.target.value })}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    title={showSellerEditPassword ? "مخفی‌کردن رمز" : "نمایش رمز"}
+                    onClick={() => setShowSellerEditPassword((value) => !value)}
+                  >
+                    {showSellerEditPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    title="کپی رمز جدید"
+                    disabled={!sellerEditForm.password}
+                    onClick={() => {
+                      void navigator.clipboard.writeText(sellerEditForm.password);
+                      setNotice("رمز جدید کپی شد.");
+                    }}
+                  >
+                    <Clipboard className="size-4" />
+                  </Button>
+                </div>
+              </Field>
             </div>
             <div className="mt-5 flex justify-end gap-2">
               <Button type="button" variant="ghost" onClick={() => setShowEditSeller(false)}>انصراف</Button>
@@ -530,7 +571,27 @@ export function SellersPage() {
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="نام نمایشی"><Input required value={sellerForm.display_name} onChange={(event) => setSellerForm({ ...sellerForm, display_name: event.target.value })} /></Field>
               <Field label="نام کاربری"><Input dir="ltr" required value={sellerForm.username} onChange={(event) => setSellerForm({ ...sellerForm, username: event.target.value })} /></Field>
-              <Field label="رمز عبور"><Input dir="ltr" type="password" required minLength={8} value={sellerForm.password} onChange={(event) => setSellerForm({ ...sellerForm, password: event.target.value })} /></Field>
+              <Field label="رمز عبور">
+                <div className="flex gap-2">
+                  <Input
+                    dir="ltr"
+                    type={showSellerPassword ? "text" : "password"}
+                    required
+                    minLength={8}
+                    value={sellerForm.password}
+                    onChange={(event) => setSellerForm({ ...sellerForm, password: event.target.value })}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    title={showSellerPassword ? "مخفی‌کردن رمز" : "نمایش رمز"}
+                    onClick={() => setShowSellerPassword((value) => !value)}
+                  >
+                    {showSellerPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </Button>
+                </div>
+              </Field>
               <Field label="موجودی اولیه (تومان)"><Input dir="ltr" type="number" min={sellerForm.allow_negative_balance ? undefined : 0} value={sellerForm.initial_balance} onChange={(event) => setSellerForm({ ...sellerForm, initial_balance: Number(event.target.value) })} /></Field>
               <Field label="اعتبار حساب" wide>
                 <label className="flex items-center gap-2 rounded-md border p-3 text-sm">
