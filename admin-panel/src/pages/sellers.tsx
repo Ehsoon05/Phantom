@@ -42,6 +42,8 @@ const emptyOffer = {
   title: "",
   panel_key: "",
   price_toman: 0,
+  pricing_mode: "fixed" as "fixed" | "per_gb",
+  price_per_gb_toman: 0,
   volume_gb: 20,
   lock_volume: false,
   default_duration_days: 30,
@@ -191,6 +193,8 @@ export function SellersPage() {
       title: offer.title,
       panel_key: offer.panel_key,
       price_toman: offer.price_toman,
+      pricing_mode: offer.pricing_mode,
+      price_per_gb_toman: offer.price_per_gb_toman,
       volume_gb: offer.volume_gb,
       lock_volume: offer.lock_volume,
       default_duration_days: offer.default_duration_days,
@@ -425,6 +429,7 @@ export function SellersPage() {
                         <div className="flex flex-wrap items-center gap-2">
                           <strong>{offer.title}</strong>
                           <span className="rounded bg-muted px-2 py-0.5 text-xs">{offer.panel_key}</span>
+                          {offer.pricing_mode === "per_gb" && <span className="rounded bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-600">قیمت‌گذاری گیگی</span>}
                           {offer.lock_volume && <span className="rounded bg-primary/10 px-2 py-0.5 text-xs text-primary">حجم ثابت</span>}
                           {offer.lock_time_mode && <span className="rounded bg-primary/10 px-2 py-0.5 text-xs text-primary">نوع تاریخ ثابت</span>}
                           {offer.lock_duration && <span className="rounded bg-primary/10 px-2 py-0.5 text-xs text-primary">مدت ثابت</span>}
@@ -435,7 +440,11 @@ export function SellersPage() {
                         </p>
                       </div>
                       <div className="flex items-center justify-between gap-3 md:justify-end">
-                        <strong className="text-primary">{toman(offer.price_toman)}</strong>
+                        <strong className="text-primary">
+                          {offer.pricing_mode === "per_gb"
+                            ? `${toman(offer.price_per_gb_toman)} / گیگ`
+                            : toman(offer.price_toman)}
+                        </strong>
                         <Button size="icon" variant="outline" title="ویرایش" onClick={() => openEditOffer(offer)}><Pencil className="size-4" /></Button>
                         <Button
                           size="icon"
@@ -464,7 +473,7 @@ export function SellersPage() {
                 <div className="border-b p-4">
                   <h2 className="font-bold">یوزرهای ساخته‌شده</h2>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    حذف از این بخش، یوزر را از پنل سازنده و لینک را از پنل ساب پاک می‌کند.
+                    حذف فقط یوزر و لینک ساب را پاک می‌کند؛ هزینه خرید و گردش حساب همکار حفظ می‌شود.
                   </p>
                 </div>
                 <div className="divide-y">
@@ -552,7 +561,15 @@ export function SellersPage() {
                   {panels.map((panel) => <option key={panel.key} value={panel.key}>{panel.title} ({panel.key})</option>)}
                 </select>
               </Field>
-              <Field label="قیمت همکار (تومان)"><Input dir="ltr" type="number" min={0} value={offerForm.price_toman} onChange={(event) => setOfferForm({ ...offerForm, price_toman: Number(event.target.value) })} /></Field>
+              <Field label="مدل قیمت‌گذاری">
+                <select className="h-10 rounded-md border bg-background px-3 text-sm" value={offerForm.pricing_mode} onChange={(event) => setOfferForm({ ...offerForm, pricing_mode: event.target.value as "fixed" | "per_gb" })}>
+                  <option value="fixed">مبلغ ثابت</option>
+                  <option value="per_gb">قیمت به‌ازای هر گیگ</option>
+                </select>
+              </Field>
+              {offerForm.pricing_mode === "fixed"
+                ? <Field label="قیمت ثابت همکار (تومان)"><Input dir="ltr" type="number" min={0} value={offerForm.price_toman} onChange={(event) => setOfferForm({ ...offerForm, price_toman: Number(event.target.value) })} /></Field>
+                : <Field label="قیمت هر گیگ (تومان)"><Input dir="ltr" type="number" min={0} value={offerForm.price_per_gb_toman} onChange={(event) => setOfferForm({ ...offerForm, price_per_gb_toman: Number(event.target.value) })} /></Field>}
               <Field label="حجم ساخت (GB، صفر نامحدود)"><Input dir="ltr" type="number" min={0} value={offerForm.volume_gb} onChange={(event) => setOfferForm({ ...offerForm, volume_gb: Number(event.target.value) })} /></Field>
               <Field label="قفل حجم برای همکار">
                 <label className="flex h-10 items-center gap-2 rounded-md border px-3 text-sm"><input className="size-4" type="checkbox" checked={offerForm.lock_volume} onChange={(event) => setOfferForm({ ...offerForm, lock_volume: event.target.checked })} /> حجم این پلن قابل ویرایش نباشد</label>
