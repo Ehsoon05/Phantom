@@ -36,6 +36,8 @@ class SchemaService:
                         "subscription_device_limit": "INTEGER",
                         "panel_key": "VARCHAR",
                         "panel_username": "VARCHAR",
+                        "usage_offset_bytes": "BIGINT DEFAULT 0 NOT NULL",
+                        "display_total_bytes": "BIGINT",
                         "provision_source": "VARCHAR DEFAULT 'inventory' NOT NULL",
                         "expired_detected_at": "DATETIME",
                         "deletion_due_at": "DATETIME",

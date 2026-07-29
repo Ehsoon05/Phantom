@@ -113,11 +113,11 @@ class SubscriptionLinkService:
         device_limit: int | None = None,
         show_config_preview: bool | None = None,
         telegram_user_id: int | None = None,
-    ) -> None:
+    ) -> bool:
         if not BotConfig.SUBSCRIPTION_PANEL_SYNC_URL or not BotConfig.SUBSCRIPTION_PANEL_SYNC_TOKEN:
-            return
+            return False
         if not config.public_sub_token:
-            return
+            return False
 
         payload = {
             "token": config.public_sub_token,
@@ -127,6 +127,8 @@ class SubscriptionLinkService:
             "is_sold": bool(config.is_sold),
             "service_name": service_name,
             "panel_username": config.panel_username,
+            "usage_offset_bytes": max(0, int(config.usage_offset_bytes or 0)),
+            "display_total_bytes": max(0, int(config.display_total_bytes or 0)),
             "telegram_user_id": int(telegram_user_id or config.sold_to_user_id or 0) or None,
             "device_limit": max(0, int(device_limit)) if device_limit is not None else None,
             "show_config_preview": show_config_preview,
@@ -140,8 +142,10 @@ class SubscriptionLinkService:
                     headers={"Authorization": f"Bearer {BotConfig.SUBSCRIPTION_PANEL_SYNC_TOKEN}"},
                 )
                 response.raise_for_status()
+                return True
         except httpx.HTTPError:
             logger.warning("Failed to sync subscription config %s to panel", config.id, exc_info=True)
+            return False
 
     @staticmethod
     async def sync_panel_settings(

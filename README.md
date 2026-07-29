@@ -62,6 +62,9 @@ SUBSCRIPTION_PANEL_SYNC_TOKEN=یک-توکن-مشترک-قوی
 # Optional: direct, WAF-free management endpoint for the SVN panel.
 # Public subscription links still use SVN_PANEL_URL.
 SVN_PANEL_API_URL=
+MMD_PANEL_URL=https://mmd-panel.example.com
+MMD_PANEL_USERNAME=
+MMD_PANEL_PASSWORD=
 ```
 
 Run both bots:

@@ -40,6 +40,8 @@ class Config(Base):
     subscription_device_limit = Column(Integer, nullable=True)
     panel_key = Column(String, nullable=True)
     panel_username = Column(String, nullable=True)
+    usage_offset_bytes = Column(BigInteger, nullable=False, default=0)
+    display_total_bytes = Column(BigInteger, nullable=True)
     provision_source = Column(String, nullable=False, default="inventory")
     is_sold = Column(Boolean, default=False)
     sold_to_user_id = Column(BigInteger, nullable=True)

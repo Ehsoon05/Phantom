@@ -276,6 +276,16 @@ class ProvisioningService:
                 None,
                 None,
             ),
+            (
+                "mmd",
+                "MMD",
+                "marzban",
+                BotConfig.MMD_PANEL_URL,
+                BotConfig.MMD_PANEL_USERNAME,
+                BotConfig.MMD_PANEL_PASSWORD,
+                None,
+                None,
+            ),
         ]
         for key, title, panel_type, base_url, username, password, group_ids, hwid_limit in defaults:
             if not (base_url and username and password):
@@ -626,6 +636,8 @@ class ProvisioningService:
 
         config.panel_key = panel.key
         config.panel_username = username
+        config.usage_offset_bytes = 0
+        config.display_total_bytes = data_limit if data_limit > 0 else None
         config.expired_detected_at = None
         config.deletion_due_at = None
         config.panel_deleted_at = None
