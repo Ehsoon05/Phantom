@@ -286,6 +286,16 @@ class ProvisioningService:
                 None,
                 None,
             ),
+            (
+                "mmd_germany",
+                "MMD germany",
+                "marzban",
+                BotConfig.MMD_GERMANY_PANEL_URL,
+                BotConfig.MMD_GERMANY_PANEL_USERNAME,
+                BotConfig.MMD_GERMANY_PANEL_PASSWORD,
+                None,
+                None,
+            ),
         ]
         for key, title, panel_type, base_url, username, password, group_ids, hwid_limit in defaults:
             if not (base_url and username and password):

@@ -65,6 +65,9 @@ SVN_PANEL_API_URL=
 MMD_PANEL_URL=https://mmd-panel.example.com
 MMD_PANEL_USERNAME=
 MMD_PANEL_PASSWORD=
+MMD_GERMANY_PANEL_URL=https://germany-panel.example.com
+MMD_GERMANY_PANEL_USERNAME=
+MMD_GERMANY_PANEL_PASSWORD=
 ```
 
 Run both bots:
