@@ -159,21 +159,37 @@ async def run(args: argparse.Namespace) -> int:
                         summary[f"source_{source.get('status') or 'unknown'}"] += 1
                         continue
 
+                    write_payload = dict(payload)
+                    if action == "create" and status == "disabled":
+                        write_payload["status"] = "active"
                     if action == "create":
                         target_response = await target_client.post(
                             "/api/user",
                             headers=target_headers,
-                            json=payload,
+                            json=write_payload,
                         )
                     else:
                         target_response = await target_client.put(
                             f"/api/user/{username}",
                             headers=target_headers,
-                            json={key: value for key, value in payload.items() if key != "username"},
+                            json={
+                                key: value
+                                for key, value in write_payload.items()
+                                if key != "username"
+                            },
                         )
                     if target_response.is_error:
                         summary[f"target_write_{target_response.status_code}"] += 1
                         continue
+                    if action == "create" and status == "disabled":
+                        disable_target = await target_client.put(
+                            f"/api/user/{username}",
+                            headers=target_headers,
+                            json={"status": "disabled"},
+                        )
+                        if disable_target.is_error:
+                            summary[f"target_disable_{disable_target.status_code}"] += 1
+                            continue
                     target_lookup = await target_client.get(
                         f"/api/user/{username}",
                         headers=target_headers,
@@ -234,7 +250,21 @@ async def run(args: argparse.Namespace) -> int:
                         summary["source_disable_failed"] += 1
                     summary[f"migrated_{action}"] += 1
 
-        if args.apply and sum(value for key, value in summary.items() if "failed" in key or "http" in key or key.startswith("missing_")) == 0:
+        failure_prefixes = (
+            "missing_",
+            "source_http_",
+            "target_http_",
+            "target_write_",
+            "target_lookup_",
+            "target_disable_",
+            "subscription_sync_failed",
+            "source_disable_failed",
+        )
+        if args.apply and not any(
+            value
+            for key, value in summary.items()
+            if key.startswith(failure_prefixes)
+        ):
             plans = (
                 await session.execute(
                     select(ShopPlan).where(
