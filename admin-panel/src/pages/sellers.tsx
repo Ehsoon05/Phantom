@@ -173,8 +173,16 @@ export function SellersPage() {
       setSelectedId(value.id);
       setSellerForm({ username: "", display_name: "", password: "", initial_balance: 0, allow_negative_balance: false });
       setShowNewSeller(false);
-      setNotice("حساب همکار ساخته شد.");
       await load();
+      setSelectedId(value.id);
+      setEditingOfferId(null);
+      setOfferForm({
+        ...emptyOffer,
+        panel_key: panels[0]?.key ?? "",
+        allowed_time_modes: ["date"],
+      });
+      setShowOffer(true);
+      setNotice("حساب همکار ساخته شد. حالا سرویس و مدل قیمت‌گذاری او را مشخص کنید.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "ساخت حساب انجام نشد.");
     } finally {
@@ -600,6 +608,9 @@ export function SellersPage() {
                 </label>
               </Field>
             </div>
+            <p className="mt-4 rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs leading-6 text-muted-foreground">
+              پس از ساخت حساب، فرم تعریف سرویس باز می‌شود؛ آنجا می‌توانید قیمت ثابت یا قیمت به‌ازای هر گیگ، حجم و پنل ساخت را تعیین کنید.
+            </p>
             <div className="mt-5 flex justify-end gap-2">
               <Button type="button" variant="ghost" onClick={() => setShowNewSeller(false)}>انصراف</Button>
               <Button type="submit" disabled={busy}><UserPlus className="size-4" /> ساخت حساب</Button>
@@ -622,10 +633,10 @@ export function SellersPage() {
                   {panels.map((panel) => <option key={panel.key} value={panel.key}>{panel.title} ({panel.key})</option>)}
                 </select>
               </Field>
-              <Field label="مدل قیمت‌گذاری">
+              <Field label="نوع سرویس و مدل قیمت‌گذاری">
                 <select className="h-10 rounded-md border bg-background px-3 text-sm" value={offerForm.pricing_mode} onChange={(event) => setOfferForm({ ...offerForm, pricing_mode: event.target.value as "fixed" | "per_gb" })}>
-                  <option value="fixed">مبلغ ثابت</option>
-                  <option value="per_gb">قیمت به‌ازای هر گیگ</option>
+                  <option value="fixed">سرویس با مبلغ ثابت</option>
+                  <option value="per_gb">سرویس حجمی با قیمت هر گیگ</option>
                 </select>
               </Field>
               {offerForm.pricing_mode === "fixed"
