@@ -56,6 +56,8 @@ export interface SellerOffer {
   allowed_time_modes: string[];
   default_time_mode: string;
   lock_time: boolean;
+  lock_time_mode: boolean;
+  lock_duration: boolean;
   name_prefix: string;
   panel_hwid_limit: number | null;
   subscription_device_limit: number;

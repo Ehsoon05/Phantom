@@ -47,7 +47,8 @@ const emptyOffer = {
   default_duration_days: 30,
   allowed_time_modes: ["date"],
   default_time_mode: "date",
-  lock_time: false,
+  lock_time_mode: false,
+  lock_duration: false,
   name_prefix: "PhantomSeller_1",
   panel_hwid_limit: null as number | null,
   subscription_device_limit: 0,
@@ -104,6 +105,7 @@ export function SellersPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [showNewSeller, setShowNewSeller] = useState(false);
+  const [showEditSeller, setShowEditSeller] = useState(false);
   const [showOffer, setShowOffer] = useState(false);
   const [editingOfferId, setEditingOfferId] = useState<number | null>(null);
   const [sellerForm, setSellerForm] = useState({
@@ -112,6 +114,11 @@ export function SellersPage() {
     password: "",
     initial_balance: 0,
     allow_negative_balance: false,
+  });
+  const [sellerEditForm, setSellerEditForm] = useState({
+    username: "",
+    display_name: "",
+    password: "",
   });
   const [offerForm, setOfferForm] = useState<OfferForm>(emptyOffer);
   const selected = useMemo(
@@ -189,7 +196,8 @@ export function SellersPage() {
       default_duration_days: offer.default_duration_days,
       allowed_time_modes: [...offer.allowed_time_modes],
       default_time_mode: offer.default_time_mode,
-      lock_time: offer.lock_time,
+      lock_time_mode: offer.lock_time_mode,
+      lock_duration: offer.lock_duration,
       name_prefix: offer.name_prefix,
       panel_hwid_limit: offer.panel_hwid_limit,
       subscription_device_limit: offer.subscription_device_limit,
@@ -253,6 +261,38 @@ export function SellersPage() {
       setNotice(updated.allow_negative_balance ? "امکان بدهکارشدن همکار فعال شد." : "امکان بدهکارشدن همکار غیرفعال شد.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "تغییر مجوز بدهکاری انجام نشد.");
+    }
+  }
+
+  function openEditSeller() {
+    if (!selected) return;
+    setSellerEditForm({
+      username: selected.username,
+      display_name: selected.display_name,
+      password: "",
+    });
+    setShowEditSeller(true);
+  }
+
+  async function submitSellerEdit(event: FormEvent) {
+    event.preventDefault();
+    if (!selected) return;
+    setBusy(true);
+    setError("");
+    try {
+      const payload: Record<string, unknown> = {
+        username: sellerEditForm.username,
+        display_name: sellerEditForm.display_name,
+      };
+      if (sellerEditForm.password) payload.password = sellerEditForm.password;
+      const updated = await updateSeller(selected.id, payload);
+      setSellers((items) => items.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
+      setShowEditSeller(false);
+      setNotice(sellerEditForm.password ? "نام کاربری و رمز همکار به‌روز شد." : "مشخصات همکار به‌روز شد.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "ویرایش حساب همکار انجام نشد.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -353,6 +393,9 @@ export function SellersPage() {
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" onClick={openEditSeller}>
+                    <Pencil className="size-4" /> ویرایش ورود
+                  </Button>
                   <Button variant="outline" onClick={changeBalance}>
                     <CircleDollarSign className="size-4" /> تغییر موجودی
                   </Button>
@@ -383,7 +426,8 @@ export function SellersPage() {
                           <strong>{offer.title}</strong>
                           <span className="rounded bg-muted px-2 py-0.5 text-xs">{offer.panel_key}</span>
                           {offer.lock_volume && <span className="rounded bg-primary/10 px-2 py-0.5 text-xs text-primary">حجم ثابت</span>}
-                          {offer.lock_time && <span className="rounded bg-primary/10 px-2 py-0.5 text-xs text-primary">زمان ثابت</span>}
+                          {offer.lock_time_mode && <span className="rounded bg-primary/10 px-2 py-0.5 text-xs text-primary">نوع تاریخ ثابت</span>}
+                          {offer.lock_duration && <span className="rounded bg-primary/10 px-2 py-0.5 text-xs text-primary">مدت ثابت</span>}
                           {!offer.is_active && <span className="rounded bg-destructive/10 px-2 py-0.5 text-xs text-destructive">غیرفعال</span>}
                         </div>
                         <p className="mt-1 text-xs text-muted-foreground">
@@ -452,6 +496,24 @@ export function SellersPage() {
         </main>
       </div>
 
+      {showEditSeller && selected && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-3" onMouseDown={(event) => event.target === event.currentTarget && setShowEditSeller(false)}>
+          <form onSubmit={submitSellerEdit} className="w-full max-w-lg rounded-lg border bg-background p-5 shadow-2xl">
+            <h2 className="text-lg font-bold">ویرایش دسترسی همکار</h2>
+            <p className="mb-4 mt-1 text-xs text-muted-foreground">برای حفظ رمز فعلی، فیلد رمز جدید را خالی بگذارید.</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="نام نمایشی"><Input required value={sellerEditForm.display_name} onChange={(event) => setSellerEditForm({ ...sellerEditForm, display_name: event.target.value })} /></Field>
+              <Field label="نام کاربری ورود"><Input dir="ltr" required minLength={3} value={sellerEditForm.username} onChange={(event) => setSellerEditForm({ ...sellerEditForm, username: event.target.value })} /></Field>
+              <Field label="رمز عبور جدید" wide><Input dir="ltr" type="password" minLength={8} placeholder="بدون تغییر" value={sellerEditForm.password} onChange={(event) => setSellerEditForm({ ...sellerEditForm, password: event.target.value })} /></Field>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setShowEditSeller(false)}>انصراف</Button>
+              <Button type="submit" disabled={busy}><Pencil className="size-4" /> ذخیره تغییرات</Button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {showNewSeller && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-3" onMouseDown={(event) => event.target === event.currentTarget && setShowNewSeller(false)}>
           <form onSubmit={submitSeller} className="w-full max-w-lg rounded-lg border bg-background p-5 shadow-2xl">
@@ -513,8 +575,11 @@ export function SellersPage() {
                   {offerForm.allowed_time_modes.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
                 </select>
               </Field>
-              <Field label="قفل زمان برای همکار">
-                <label className="flex h-10 items-center gap-2 rounded-md border px-3 text-sm"><input className="size-4" type="checkbox" checked={offerForm.lock_time} onChange={(event) => setOfferForm({ ...offerForm, lock_time: event.target.checked })} /> نوع و مدت زمان قابل تغییر نباشد</label>
+              <Field label="قفل نوع تاریخ برای همکار">
+                <label className="flex h-10 items-center gap-2 rounded-md border px-3 text-sm"><input className="size-4" type="checkbox" checked={offerForm.lock_time_mode} onChange={(event) => setOfferForm({ ...offerForm, lock_time_mode: event.target.checked })} /> مدل تاریخ قابل تغییر نباشد</label>
+              </Field>
+              <Field label="قفل مدت سرویس برای همکار">
+                <label className="flex h-10 items-center gap-2 rounded-md border px-3 text-sm"><input className="size-4" type="checkbox" checked={offerForm.lock_duration} onChange={(event) => setOfferForm({ ...offerForm, lock_duration: event.target.checked })} /> تعداد روز قابل تغییر نباشد</label>
               </Field>
               <Field label="ویژگی‌های لینک ساب">
                 <div className="grid gap-2 rounded-md border p-3 text-xs">
