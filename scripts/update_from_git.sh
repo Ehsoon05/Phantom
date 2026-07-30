@@ -11,9 +11,53 @@ VENV_DIR="${VENV_DIR:-$APP_DIR/venv}"
 LOCK_FILE="${LOCK_FILE:-/tmp/phantom-auto-update.lock}"
 WEBAPP_DEPLOY_DIR="${WEBAPP_DEPLOY_DIR:-/var/www/phantom-app}"
 ADMIN_DEPLOY_DIR="${ADMIN_DEPLOY_DIR:-/var/www/phantom-admin}"
+SELLER_PANEL_DIR="${SELLER_PANEL_DIR:-/opt/seller-panel}"
+SELLER_PANEL_REMOTE="${SELLER_PANEL_REMOTE:-origin}"
+SELLER_PANEL_BRANCH="${SELLER_PANEL_BRANCH:-main}"
 
 log() {
   printf '[%s] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"
+}
+
+update_seller_panel() {
+  if [ ! -d "$SELLER_PANEL_DIR/.git" ]; then
+    return 0
+  fi
+
+  (
+    cd "$SELLER_PANEL_DIR"
+
+    if [ "$(git rev-parse --abbrev-ref HEAD)" != "$SELLER_PANEL_BRANCH" ]; then
+      log "Seller panel is not on '$SELLER_PANEL_BRANCH'; skipping its update."
+      return 0
+    fi
+    if ! git diff-index --quiet HEAD --; then
+      log "Seller panel has local changes; skipping its update."
+      return 0
+    fi
+
+    log "Fetching seller panel $SELLER_PANEL_REMOTE/$SELLER_PANEL_BRANCH"
+    git fetch "$SELLER_PANEL_REMOTE" "$SELLER_PANEL_BRANCH"
+
+    local seller_local_rev seller_remote_rev seller_merge_base
+    seller_local_rev="$(git rev-parse HEAD)"
+    seller_remote_rev="$(git rev-parse FETCH_HEAD)"
+    if [ "$seller_local_rev" = "$seller_remote_rev" ]; then
+      log "Seller panel is already up to date."
+      return 0
+    fi
+
+    seller_merge_base="$(git merge-base HEAD FETCH_HEAD)"
+    if [ "$seller_merge_base" != "$seller_local_rev" ]; then
+      log "Seller panel update is not a fast-forward; skipping it."
+      return 0
+    fi
+
+    log "Updating seller panel to $seller_remote_rev"
+    git merge --ff-only FETCH_HEAD
+    docker compose up -d --build
+    log "Seller panel update complete."
+  )
 }
 
 cd "$APP_DIR"
@@ -43,6 +87,9 @@ remote_rev="$(git rev-parse FETCH_HEAD)"
 
 if [ "$local_rev" = "$remote_rev" ]; then
   log "Already up to date."
+  if ! update_seller_panel; then
+    log "Seller panel update failed; the Phantom deployment remains active."
+  fi
   exit 0
 fi
 
@@ -107,6 +154,10 @@ if command -v systemctl >/dev/null 2>&1; then
   fi
 else
   log "systemctl not found. Restart changed services manually."
+fi
+
+if ! update_seller_panel; then
+  log "Seller panel update failed; the Phantom deployment remains active."
 fi
 
 log "Update complete."
