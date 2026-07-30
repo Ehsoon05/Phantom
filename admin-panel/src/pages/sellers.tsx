@@ -48,8 +48,10 @@ const emptyOffer = {
   pricing_mode: "fixed" as "fixed" | "per_gb",
   price_per_gb_toman: 0,
   volume_gb: 20,
+  min_volume_gb: 0,
   lock_volume: false,
   default_duration_days: 30,
+  min_duration_days: 1,
   allowed_time_modes: ["date"],
   default_time_mode: "date",
   lock_time_mode: false,
@@ -209,8 +211,10 @@ export function SellersPage() {
       pricing_mode: offer.pricing_mode,
       price_per_gb_toman: offer.price_per_gb_toman,
       volume_gb: offer.volume_gb,
+      min_volume_gb: offer.min_volume_gb,
       lock_volume: offer.lock_volume,
       default_duration_days: offer.default_duration_days,
+      min_duration_days: offer.min_duration_days,
       allowed_time_modes: [...offer.allowed_time_modes],
       default_time_mode: offer.default_time_mode,
       lock_time_mode: offer.lock_time_mode,
@@ -450,7 +454,7 @@ export function SellersPage() {
                           {!offer.is_active && <span className="rounded bg-destructive/10 px-2 py-0.5 text-xs text-destructive">غیرفعال</span>}
                         </div>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          {offer.volume_gb ? `${offer.volume_gb}GB` : "حجم نامحدود"} · {offer.default_duration_days || "نامحدود"} روز · محدودیت ساب {offer.subscription_device_limit || "نامحدود"}
+                          {offer.volume_gb ? `${offer.volume_gb}GB` : "حجم نامحدود"} · حداقل حجم {offer.min_volume_gb || (offer.pricing_mode === "per_gb" ? 1 : 0)}GB · {offer.default_duration_days || "نامحدود"} روز · حداقل مدت {offer.min_duration_days} روز
                         </p>
                       </div>
                       <div className="flex items-center justify-between gap-3 md:justify-end">
@@ -634,7 +638,19 @@ export function SellersPage() {
                 </select>
               </Field>
               <Field label="نوع سرویس و مدل قیمت‌گذاری">
-                <select className="h-10 rounded-md border bg-background px-3 text-sm" value={offerForm.pricing_mode} onChange={(event) => setOfferForm({ ...offerForm, pricing_mode: event.target.value as "fixed" | "per_gb" })}>
+                <select
+                  className="h-10 rounded-md border bg-background px-3 text-sm"
+                  value={offerForm.pricing_mode}
+                  onChange={(event) => {
+                    const pricingMode = event.target.value as "fixed" | "per_gb";
+                    setOfferForm({
+                      ...offerForm,
+                      pricing_mode: pricingMode,
+                      min_volume_gb: pricingMode === "per_gb" ? Math.max(1, offerForm.min_volume_gb) : offerForm.min_volume_gb,
+                      volume_gb: pricingMode === "per_gb" ? Math.max(1, offerForm.volume_gb) : offerForm.volume_gb,
+                    });
+                  }}
+                >
                   <option value="fixed">سرویس با مبلغ ثابت</option>
                   <option value="per_gb">سرویس حجمی با قیمت هر گیگ</option>
                 </select>
@@ -642,11 +658,37 @@ export function SellersPage() {
               {offerForm.pricing_mode === "fixed"
                 ? <Field label="قیمت ثابت همکار (تومان)"><Input dir="ltr" type="number" min={0} value={offerForm.price_toman} onChange={(event) => setOfferForm({ ...offerForm, price_toman: Number(event.target.value) })} /></Field>
                 : <Field label="قیمت هر گیگ (تومان)"><Input dir="ltr" type="number" min={0} value={offerForm.price_per_gb_toman} onChange={(event) => setOfferForm({ ...offerForm, price_per_gb_toman: Number(event.target.value) })} /></Field>}
-              <Field label="حجم ساخت (GB، صفر نامحدود)"><Input dir="ltr" type="number" min={0} value={offerForm.volume_gb} onChange={(event) => setOfferForm({ ...offerForm, volume_gb: Number(event.target.value) })} /></Field>
+              <Field label="حجم پیش‌فرض ساخت (GB)">
+                <Input
+                  dir="ltr"
+                  type="number"
+                  min={Math.max(offerForm.min_volume_gb, offerForm.pricing_mode === "per_gb" ? 1 : 0)}
+                  value={offerForm.volume_gb}
+                  onChange={(event) => setOfferForm({ ...offerForm, volume_gb: Number(event.target.value) })}
+                />
+              </Field>
+              <Field label="حداقل حجم قابل ساخت (GB)">
+                <Input
+                  dir="ltr"
+                  type="number"
+                  min={offerForm.pricing_mode === "per_gb" ? 1 : 0}
+                  value={offerForm.min_volume_gb}
+                  onChange={(event) => setOfferForm({ ...offerForm, min_volume_gb: Number(event.target.value) })}
+                />
+              </Field>
               <Field label="قفل حجم برای همکار">
                 <label className="flex h-10 items-center gap-2 rounded-md border px-3 text-sm"><input className="size-4" type="checkbox" checked={offerForm.lock_volume} onChange={(event) => setOfferForm({ ...offerForm, lock_volume: event.target.checked })} /> حجم این پلن قابل ویرایش نباشد</label>
               </Field>
-              <Field label="مدت پیش‌فرض (روز، صفر نامحدود)"><Input dir="ltr" type="number" min={0} value={offerForm.default_duration_days} onChange={(event) => setOfferForm({ ...offerForm, default_duration_days: Number(event.target.value) })} /></Field>
+              <Field label="مدت پیش‌فرض (روز، صفر نامحدود)">
+                <Input
+                  dir="ltr"
+                  type="number"
+                  min={offerForm.default_time_mode === "unlimited" ? 0 : offerForm.min_duration_days}
+                  value={offerForm.default_duration_days}
+                  onChange={(event) => setOfferForm({ ...offerForm, default_duration_days: Number(event.target.value) })}
+                />
+              </Field>
+              <Field label="حداقل مدت قابل ساخت (روز)"><Input dir="ltr" type="number" min={0} value={offerForm.min_duration_days} onChange={(event) => setOfferForm({ ...offerForm, min_duration_days: Number(event.target.value) })} /></Field>
               <Field label="پیشوند و شمارشگر نام"><Input dir="ltr" value={offerForm.name_prefix} onChange={(event) => setOfferForm({ ...offerForm, name_prefix: event.target.value })} /></Field>
               <Field label="HWID پنل (خالی یعنی پیش‌فرض)"><Input dir="ltr" type="number" min={0} value={offerForm.panel_hwid_limit ?? ""} onChange={(event) => setOfferForm({ ...offerForm, panel_hwid_limit: event.target.value === "" ? null : Number(event.target.value) })} /></Field>
               <Field label="محدودیت دستگاه پنل ساب (صفر نامحدود)"><Input dir="ltr" type="number" min={0} value={offerForm.subscription_device_limit} onChange={(event) => setOfferForm({ ...offerForm, subscription_device_limit: Number(event.target.value) })} /></Field>

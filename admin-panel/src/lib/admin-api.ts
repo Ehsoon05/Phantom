@@ -53,8 +53,10 @@ export interface SellerOffer {
   pricing_mode: "fixed" | "per_gb";
   price_per_gb_toman: number;
   volume_gb: number;
+  min_volume_gb: number;
   lock_volume: boolean;
   default_duration_days: number;
+  min_duration_days: number;
   allowed_time_modes: string[];
   default_time_mode: string;
   lock_time: boolean;
