@@ -159,6 +159,7 @@ class PanelBridgeService:
         inbounds: dict[str, list[str]],
         *,
         may_update: bool,
+        reset_traffic: bool = False,
     ) -> tuple[str, bool]:
         access = {
             "proxies": {protocol: {} for protocol in inbounds},
@@ -189,6 +190,10 @@ class PanelBridgeService:
             if response.is_error:
                 raise _panel_error(response, "ساخت سرویس کمکی در پنل مقصد")
             payload = response.json()
+            if may_update and reset_traffic:
+                reset = await client.post(f"/api/user/{username}/reset", headers=headers)
+                if reset.status_code not in {200, 204, 404, 405}:
+                    raise _panel_error(reset, "ریست حجم سرویس کمکی پس از تمدید")
         return _subscription_url(target.base_url, payload), created
 
     @staticmethod
@@ -230,7 +235,12 @@ class PanelBridgeService:
             raise ProvisioningError("افزودن منبع کمکی به پنل ساب انجام نشد.")
 
     @staticmethod
-    async def reconcile_config(rule_id: int, config_id: int) -> str:
+    async def reconcile_config(
+        rule_id: int,
+        config_id: int,
+        *,
+        reset_target_traffic: bool = False,
+    ) -> str:
         async with async_session() as session:
             rule = await session.get(PanelBridgeRule, rule_id)
             config = await session.get(Config, config_id)
@@ -258,6 +268,7 @@ class PanelBridgeService:
                 source_payload,
                 _json_dict(rule.target_inbounds_json),
                 may_update=assignment is not None,
+                reset_traffic=reset_target_traffic,
             )
             if assignment is None:
                 assignment = PanelBridgeAssignment(
@@ -377,7 +388,11 @@ class PanelBridgeService:
             await session.commit()
 
     @staticmethod
-    async def reconcile_matching_config(config_id: int) -> None:
+    async def reconcile_matching_config(
+        config_id: int,
+        *,
+        reset_target_traffic: bool = False,
+    ) -> None:
         async with async_session() as session:
             config = await session.get(Config, config_id)
             if config is None:
@@ -390,7 +405,11 @@ class PanelBridgeService:
             rule_ids = [rule.id for rule in rules if _rule_matches(rule, config)]
         for rule_id in rule_ids:
             try:
-                await PanelBridgeService.reconcile_config(rule_id, config_id)
+                await PanelBridgeService.reconcile_config(
+                    rule_id,
+                    config_id,
+                    reset_target_traffic=reset_target_traffic,
+                )
             except Exception:
                 continue
 

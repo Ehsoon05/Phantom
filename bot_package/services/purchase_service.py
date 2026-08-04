@@ -279,7 +279,10 @@ async def renew_purchase(
     await session.commit()
     sub_link = await _public_or_raw_link(session, purchase.config, purchase.service_name)
     await session.commit()
-    await PanelBridgeService.reconcile_matching_config(purchase.config.id)
+    await PanelBridgeService.reconcile_matching_config(
+        purchase.config.id,
+        reset_target_traffic=True,
+    )
     return PurchaseResult(
         purchase=purchase,
         config=purchase.config,
