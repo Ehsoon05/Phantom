@@ -176,6 +176,24 @@ class SubscriptionLinkService:
             logger.warning("Failed to sync subscription panel settings", exc_info=True)
 
     @staticmethod
+    async def sync_supplements(token: str, supplements: list[dict]) -> bool:
+        url = SubscriptionLinkService._internal_config_url(token, "supplements")
+        if not url:
+            return False
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                response = await client.put(
+                    url,
+                    json={"supplements": supplements},
+                    headers={"Authorization": f"Bearer {BotConfig.SUBSCRIPTION_PANEL_SYNC_TOKEN}"},
+                )
+                response.raise_for_status()
+                return True
+        except httpx.HTTPError:
+            logger.warning("Failed to sync supplements for %s", token, exc_info=True)
+            return False
+
+    @staticmethod
     def _internal_settings_url() -> str:
         sync_url = BotConfig.SUBSCRIPTION_PANEL_SYNC_URL.rstrip("/")
         if sync_url.endswith("/internal/configs"):

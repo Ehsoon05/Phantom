@@ -14,6 +14,7 @@ const CatalogPage = lazy(() => import("@/pages/catalog").then((module) => ({ def
 const DashboardPage = lazy(() => import("@/pages/dashboard").then((module) => ({ default: module.DashboardPage })));
 const LoginPage = lazy(() => import("@/pages/login").then((module) => ({ default: module.LoginPage })));
 const PaymentsPage = lazy(() => import("@/pages/payments").then((module) => ({ default: module.PaymentsPage })));
+const PanelBridgesPage = lazy(() => import("@/pages/panel-bridges").then((module) => ({ default: module.PanelBridgesPage })));
 const PromotionsPage = lazy(() => import("@/pages/promotions").then((module) => ({ default: module.PromotionsPage })));
 const SettingsPage = lazy(() => import("@/pages/settings").then((module) => ({ default: module.SettingsPage })));
 const ShopPage = lazy(() => import("@/pages/shop").then((module) => ({ default: module.ShopPage })));
@@ -47,6 +48,7 @@ createRoot(document.getElementById("root")!).render(
               <Route index element={<DashboardPage />} />
               <Route path="users" element={<UsersPage />} />
               <Route path="payments" element={<PaymentsPage />} />
+              <Route path="panel-bridges" element={<PanelBridgesPage />} />
               <Route path="catalog" element={<CatalogPage />} />
               <Route path="promotions" element={<PromotionsPage />} />
               <Route path="shop" element={<ShopPage />} />

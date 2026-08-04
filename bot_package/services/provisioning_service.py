@@ -529,6 +529,38 @@ class ProvisioningService:
         return inbounds
 
     @staticmethod
+    async def fetch_inbound_options(panel: ProvisionPanel) -> list[dict[str, Any]]:
+        if panel.panel_type == "easy":
+            return []
+        async with ProvisioningService._api_client(panel) as (client, token):
+            response = await client.get(
+                "/api/inbounds",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if response.is_error:
+                raise _panel_error(response, "دریافت اینباندهای پنل")
+            payload = response.json()
+
+        options: list[dict[str, Any]] = []
+        if isinstance(payload, dict):
+            for protocol, items in payload.items():
+                if not isinstance(items, list):
+                    continue
+                for item in items:
+                    if not isinstance(item, dict) or not item.get("tag"):
+                        continue
+                    options.append(
+                        {
+                            "protocol": str(protocol),
+                            "tag": str(item["tag"]).strip(),
+                            "port": int(item.get("port") or 0),
+                            "network": str(item.get("network") or ""),
+                            "tls": str(item.get("tls") or ""),
+                        }
+                    )
+        return options
+
+    @staticmethod
     async def create_for_plan(
         session: AsyncSession,
         plan: ShopPlan,

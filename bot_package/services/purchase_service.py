@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from ..models import Config, ProvisionPanel, Purchase, ShopPlan, ShopPlanCategory, Transaction, User
 from .coupon_service import CouponService
 from .inventory_service import InventoryService
+from .panel_bridge_service import PanelBridgeService
 from .price_service import PriceService
 from .provisioning_service import ProvisioningError, ProvisioningService
 from .settings_service import SettingsService
@@ -198,6 +199,7 @@ async def purchase_plan(
 
     sub_link = await _public_or_raw_link(session, config, purchase.service_name)
     await session.commit()
+    await PanelBridgeService.reconcile_matching_config(config.id)
     return PurchaseResult(purchase=purchase, config=config, sub_link=sub_link, source=source)
 
 
@@ -277,6 +279,7 @@ async def renew_purchase(
     await session.commit()
     sub_link = await _public_or_raw_link(session, purchase.config, purchase.service_name)
     await session.commit()
+    await PanelBridgeService.reconcile_matching_config(purchase.config.id)
     return PurchaseResult(
         purchase=purchase,
         config=purchase.config,

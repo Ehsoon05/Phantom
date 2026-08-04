@@ -361,6 +361,49 @@ class ProvisionPanel(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class PanelBridgeRule(Base):
+    __tablename__ = "panel_bridge_rules"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    source_panel_keys_json = Column(Text, nullable=False, default="[]")
+    source_category_keys_json = Column(Text, nullable=False, default="[]")
+    source_plan_ids_json = Column(Text, nullable=False, default="[]")
+    target_panel_key = Column(String, nullable=False)
+    target_inbounds_json = Column(Text, nullable=False, default="{}")
+    target_ports_json = Column(Text, nullable=False, default="[]")
+    is_enabled = Column(Boolean, nullable=False, default=True)
+    cleanup_on_delete = Column(Boolean, nullable=False, default=True)
+    sync_status = Column(String, nullable=False, default="idle")
+    total_matches = Column(Integer, nullable=False, default=0)
+    synced_count = Column(Integer, nullable=False, default=0)
+    skipped_count = Column(Integer, nullable=False, default=0)
+    failed_count = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text, nullable=True)
+    last_synced_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class PanelBridgeAssignment(Base):
+    __tablename__ = "panel_bridge_assignments"
+    __table_args__ = (
+        UniqueConstraint("rule_id", "config_id", name="uq_panel_bridge_rule_config"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    rule_id = Column(Integer, ForeignKey("panel_bridge_rules.id"), nullable=False, index=True)
+    config_id = Column(Integer, ForeignKey("configs.id"), nullable=False, index=True)
+    target_panel_key = Column(String, nullable=False)
+    target_username = Column(String, nullable=False)
+    target_sub_link = Column(Text, nullable=False)
+    target_created = Column(Boolean, nullable=False, default=True)
+    status = Column(String, nullable=False, default="active")
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class RialPaymentRequest(Base):
     __tablename__ = "rial_payment_requests"
 

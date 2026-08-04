@@ -135,6 +135,14 @@ class SchemaService:
                         "hwid_limit": "INTEGER",
                     },
                 )
+            if "panel_bridge_assignments" in tables:
+                await SchemaService._add_missing_columns(
+                    conn,
+                    "panel_bridge_assignments",
+                    {
+                        "target_panel_key": "VARCHAR DEFAULT '' NOT NULL",
+                    },
+                )
             if "configs" in tables and "shop_plans" in tables:
                 await conn.execute(text("""
                     UPDATE configs

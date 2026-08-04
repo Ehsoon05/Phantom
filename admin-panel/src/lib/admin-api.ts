@@ -259,6 +259,67 @@ export interface ProvisionPanel {
 
 export const listProvisionPanels = () => api<ProvisionPanel[]>("/admin/provision/panels");
 
+export interface PanelBridgeContext {
+  panels: { key: string; title: string; enabled: boolean }[];
+  categories: { key: string; title: string }[];
+  plans: { id: number; title: string; category_key: string; active: boolean }[];
+}
+
+export interface PanelInboundOption {
+  protocol: string;
+  tag: string;
+  port: number;
+  network: string;
+  tls: string;
+}
+
+export interface PanelBridgeRule {
+  id: number;
+  name: string;
+  source_panel_keys: string[];
+  source_category_keys: string[];
+  source_plan_ids: number[];
+  target_panel_key: string;
+  target_inbounds: Record<string, string[]>;
+  target_ports: number[];
+  cleanup_on_delete: boolean;
+  is_enabled: boolean;
+  sync_status: string;
+  total_matches: number;
+  synced_count: number;
+  skipped_count: number;
+  failed_count: number;
+  assignments: number;
+  last_error: string | null;
+  last_synced_at: string | null;
+}
+
+export type PanelBridgeRuleInput = {
+  name: string;
+  source_panel_keys: string[];
+  source_category_keys: string[];
+  source_plan_ids: number[];
+  target_panel_key: string;
+  target_inbounds: Record<string, string[]>;
+  cleanup_on_delete: boolean;
+  apply_now: boolean;
+};
+
+export const listPanelBridgeRules = () =>
+  api<PanelBridgeRule[]>("/admin/panel-bridges");
+export const getPanelBridgeContext = () =>
+  api<PanelBridgeContext>("/admin/panel-bridges/context");
+export const getPanelLiveInbounds = (panelKey: string) =>
+  api<PanelInboundOption[]>(`/admin/panel-bridges/panels/${encodeURIComponent(panelKey)}/inbounds`);
+export const createPanelBridgeRule = (body: PanelBridgeRuleInput) =>
+  api<PanelBridgeRule>("/admin/panel-bridges", { method: "POST", body: JSON.stringify(body) });
+export const updatePanelBridgeRule = (id: number, body: PanelBridgeRuleInput) =>
+  api<PanelBridgeRule>(`/admin/panel-bridges/${id}`, { method: "PUT", body: JSON.stringify(body) });
+export const syncPanelBridgeRule = (id: number) =>
+  api<{ queued: boolean; detail?: string }>(`/admin/panel-bridges/${id}/sync`, { method: "POST" });
+export const deletePanelBridgeRule = (id: number) =>
+  api<{ cleaning: boolean }>(`/admin/panel-bridges/${id}`, { method: "DELETE" });
+
 // --- Coupons ----------------------------------------------------------------
 
 export interface Coupon {

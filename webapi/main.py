@@ -14,6 +14,7 @@ from bot_package.services.schema_service import SchemaService
 from .config import ApiConfig
 from .routers import (
     admin_auth,
+    admin_bridges,
     admin_catalog,
     admin_ops,
     admin_payments,
@@ -51,6 +52,7 @@ app.include_router(shop.router, prefix=API_PREFIX)
 app.include_router(wallet.router, prefix=API_PREFIX)
 app.include_router(referrals.router, prefix=API_PREFIX)
 app.include_router(admin_auth.router, prefix=API_PREFIX)
+app.include_router(admin_bridges.router, prefix=API_PREFIX)
 app.include_router(admin_stats.router, prefix=API_PREFIX)
 app.include_router(admin_users.router, prefix=API_PREFIX)
 app.include_router(admin_payments.router, prefix=API_PREFIX)

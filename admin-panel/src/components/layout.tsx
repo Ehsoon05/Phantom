@@ -1,5 +1,6 @@
 import {
   CreditCard,
+  Cable,
   Gift,
   LayoutDashboard,
   LogOut,
@@ -25,6 +26,7 @@ export function Layout() {
     { to: "/users", label: "کاربران", icon: Users, end: false, show: hasPermission("users") },
     { to: "/payments", label: "پرداخت‌ها", icon: CreditCard, end: false, show: hasPermission("users") || hasPermission("reports") },
     { to: "/catalog", label: "محصولات", icon: Package, end: false, show: hasPermission("prices") || hasPermission("inventory") },
+    { to: "/panel-bridges", label: "پنل‌ها و سرویس‌ها", icon: Cable, end: false, show: hasPermission("shop") },
     { to: "/promotions", label: "تخفیف و دعوت", icon: Gift, end: false, show: hasPermission("coupons") || hasPermission("users") },
     { to: "/shop", label: "فروشگاه", icon: Store, end: false, show: hasPermission("shop") },
     { to: "/settings", label: "تنظیمات", icon: Settings, end: false, show: hasPermission("shop") },
