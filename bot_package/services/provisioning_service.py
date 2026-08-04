@@ -296,6 +296,16 @@ class ProvisioningService:
                 None,
                 None,
             ),
+            (
+                "phantom_tunnel",
+                "Phantom Tunnel",
+                "marzban",
+                BotConfig.PHANTOM_TUNNEL_PANEL_URL,
+                BotConfig.PHANTOM_TUNNEL_PANEL_USERNAME,
+                BotConfig.PHANTOM_TUNNEL_PANEL_PASSWORD,
+                None,
+                None,
+            ),
         ]
         for key, title, panel_type, base_url, username, password, group_ids, hwid_limit in defaults:
             if not (base_url and username and password):
@@ -304,15 +314,8 @@ class ProvisioningService:
                 await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == key))
             ).scalar_one_or_none()
             if existing:
-                existing.title = title
-                existing.panel_type = panel_type
-                existing.base_url = base_url
-                existing.username = username
-                existing.password = password
-                if not existing.group_ids and group_ids:
-                    existing.group_ids = group_ids
-                if existing.hwid_limit is None and hwid_limit is not None:
-                    existing.hwid_limit = hwid_limit
+                # Environment entries seed missing panels only. Values edited in
+                # the admin panel must remain authoritative after a restart.
                 continue
             session.add(
                 ProvisionPanel(
@@ -728,6 +731,9 @@ class ProvisioningService:
         config.panel_key = panel.key
         config.panel_username = username
         await session.flush()
+        from .panel_bridge_service import PanelBridgeService
+
+        await PanelBridgeService.reconcile_matching_config(config.id)
         return new_status
 
     @staticmethod
@@ -743,6 +749,10 @@ class ProvisioningService:
             )
             if response.status_code not in {200, 204, 404}:
                 raise _panel_error(response, "حذف سرویس از پنل")
+
+        from .panel_bridge_service import PanelBridgeService
+
+        await PanelBridgeService.remove_config_assignments_in_session(session, config)
 
         now = datetime.now(timezone.utc)
         config.panel_key = panel.key

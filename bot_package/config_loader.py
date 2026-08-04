@@ -120,6 +120,9 @@ class BotConfig:
     MMD_GERMANY_PANEL_URL = os.getenv("MMD_GERMANY_PANEL_URL", "").strip().rstrip("/")
     MMD_GERMANY_PANEL_USERNAME = os.getenv("MMD_GERMANY_PANEL_USERNAME", "").strip()
     MMD_GERMANY_PANEL_PASSWORD = os.getenv("MMD_GERMANY_PANEL_PASSWORD", "").strip()
+    PHANTOM_TUNNEL_PANEL_URL = os.getenv("PHANTOM_TUNNEL_PANEL_URL", "").strip().rstrip("/")
+    PHANTOM_TUNNEL_PANEL_USERNAME = os.getenv("PHANTOM_TUNNEL_PANEL_USERNAME", "").strip()
+    PHANTOM_TUNNEL_PANEL_PASSWORD = os.getenv("PHANTOM_TUNNEL_PANEL_PASSWORD", "").strip()
     SESSION_TIMEOUT_MINUTES = _parse_int_env("SESSION_TIMEOUT_MINUTES", 60)
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().upper()
 

@@ -167,6 +167,9 @@ export function PanelBridgesPage() {
       <section className="grid gap-3"><h2 className="font-semibold">قانون‌های فعال</h2>
         {rules.map((rule) => <article key={rule.id} className="grid gap-3 rounded-lg border bg-card p-4">
           <div className="flex flex-wrap items-start justify-between gap-3"><div><strong>{rule.name}</strong><div className="mt-1 flex flex-wrap gap-1"><Badge variant="outline">{statusLabel(rule.sync_status)}</Badge><Badge variant="secondary">{rule.assignments} اتصال فعال</Badge><Badge variant="outline">پورت {rule.target_ports.join(", ")}</Badge></div></div><div className="flex gap-2"><Button size="icon-sm" variant="outline" title="همگام‌سازی" onClick={() => sync.mutate(rule.id)}><RefreshCw /></Button><Button size="sm" variant="outline" onClick={() => editRule(rule)}>ویرایش</Button><Button size="icon-sm" variant="destructive" title="حذف و پاک‌سازی" onClick={() => window.confirm("این قانون و یوزرهای کمکی ساخته‌شده حذف شوند؟") && remove.mutate(rule.id)}><Trash2 /></Button></div></div>
+          <div className="flex flex-wrap gap-1" aria-label="اینباندهای مقصد">
+            {Object.entries(rule.target_inbounds).flatMap(([protocol, tags]) => tags.map((tag) => <Badge key={`${protocol}:${tag}`} variant="outline">{protocol.toUpperCase()} · {tag}</Badge>))}
+          </div>
           <div className="grid grid-cols-2 gap-2 text-center text-sm sm:grid-cols-4"><Stat label="هدف" value={rule.total_matches} /><Stat label="موفق" value={rule.synced_count} /><Stat label="ردشده" value={rule.skipped_count} /><Stat label="خطا" value={rule.failed_count} /></div>
           {rule.last_error && <p className="rounded-md bg-destructive/10 p-2 text-xs text-destructive">{rule.last_error}</p>}
         </article>)}

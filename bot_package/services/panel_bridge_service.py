@@ -74,17 +74,17 @@ def _epoch_seconds(value: Any) -> int:
 
 def _target_timing(source: dict[str, Any]) -> dict[str, Any]:
     status = str(source.get("status") or "").strip().lower()
-    if status not in {"active", "on_hold"}:
+    if status not in {"active", "on_hold", "disabled", "limited", "expired"}:
         raise BridgeSkip(f"وضعیت سرویس مبدا {status or 'نامشخص'} است.")
     expire = _epoch_seconds(source.get("expire"))
-    if status == "active" and expire and expire <= int(datetime.now(timezone.utc).timestamp()):
-        raise BridgeSkip("تاریخ سرویس مبدا تمام شده است.")
     if status == "on_hold":
         duration = int(source.get("on_hold_expire_duration") or 0)
         if duration <= 0:
             raise BridgeSkip("مدت on hold سرویس مبدا معتبر نیست.")
         return {"status": "on_hold", "expire": 0, "on_hold_expire_duration": duration}
-    return {"status": "active", "expire": expire, "on_hold_expire_duration": None}
+    if status != "active" or (expire and expire <= int(datetime.now(timezone.utc).timestamp())):
+        status = "disabled"
+    return {"status": status, "expire": expire, "on_hold_expire_duration": None}
 
 
 def _remaining_data_limit(source: dict[str, Any]) -> int:
@@ -92,9 +92,7 @@ def _remaining_data_limit(source: dict[str, Any]) -> int:
     if total <= 0:
         return 0
     remaining = total - int(source.get("used_traffic") or 0)
-    if remaining <= 0:
-        raise BridgeSkip("حجم سرویس مبدا تمام شده است.")
-    return remaining
+    return max(0, remaining)
 
 
 class PanelBridgeService:
@@ -172,6 +170,8 @@ class PanelBridgeService:
             **_target_timing(source),
             **access,
         }
+        if int(source.get("data_limit") or 0) > 0 and body["data_limit"] <= 0:
+            body["status"] = "disabled"
         async with ProvisioningService._api_client(target) as (client, token):
             headers = {"Authorization": f"Bearer {token}"}
             existing = await client.get(f"/api/user/{username}", headers=headers)
@@ -261,6 +261,16 @@ class PanelBridgeService:
                     )
                 )
             ).scalar_one_or_none()
+            if assignment and assignment.target_username != username:
+                if assignment.target_created:
+                    async with ProvisioningService._api_client(target) as (client, token):
+                        response = await client.delete(
+                            f"/api/user/{assignment.target_username}",
+                            headers={"Authorization": f"Bearer {token}"},
+                        )
+                        if response.status_code not in {200, 204, 404}:
+                            raise _panel_error(response, "حذف یوزرنیم قبلی سرویس کمکی")
+                assignment.target_created = False
             source_payload = await PanelBridgeService._fetch_panel_user(source, username)
             target_sub_link, created = await PanelBridgeService._upsert_target_user(
                 target,
@@ -280,6 +290,8 @@ class PanelBridgeService:
                     target_created=created,
                 )
                 session.add(assignment)
+            else:
+                assignment.target_created = assignment.target_created or created
             assignment.target_sub_link = target_sub_link
             assignment.target_panel_key = target.key
             assignment.status = "active"
@@ -412,6 +424,39 @@ class PanelBridgeService:
                 )
             except Exception:
                 continue
+
+    @staticmethod
+    async def remove_config_assignments(config_id: int) -> None:
+        async with async_session() as session:
+            config = await session.get(Config, config_id)
+            if config is None:
+                return
+            await PanelBridgeService.remove_config_assignments_in_session(session, config)
+            await session.commit()
+
+    @staticmethod
+    async def remove_config_assignments_in_session(session, config: Config) -> None:
+        assignments = (
+            await session.execute(
+                select(PanelBridgeAssignment).where(
+                    PanelBridgeAssignment.config_id == config.id
+                )
+            )
+        ).scalars().all()
+        for assignment in assignments:
+            target = await ProvisioningService.get_panel(session, assignment.target_panel_key)
+            if assignment.target_created and target is not None:
+                async with ProvisioningService._api_client(target) as (client, token):
+                    response = await client.delete(
+                        f"/api/user/{assignment.target_username}",
+                        headers={"Authorization": f"Bearer {token}"},
+                    )
+                    if response.status_code not in {200, 204, 404}:
+                        raise _panel_error(response, "حذف سرویس معادل")
+            await session.delete(assignment)
+        await session.flush()
+        if assignments and config.public_sub_token:
+            await PanelBridgeService._sync_config_links(session, config)
 
     @staticmethod
     async def remove_rule(rule_id: int) -> None:
