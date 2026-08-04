@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
@@ -94,6 +95,12 @@ def _remaining_data_limit(source: dict[str, Any]) -> int:
         return 0
     remaining = total - int(source.get("used_traffic") or 0)
     return max(0, remaining)
+
+
+def _bridge_fallback_username(username: str, rule_id: int, config_id: int) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_]+", "_", username).strip("_") or "user"
+    suffix = f"_b{rule_id}_{config_id}"
+    return f"{cleaned[: max(1, 32 - len(suffix))]}{suffix}"
 
 
 class PanelBridgeService:
@@ -373,7 +380,9 @@ class PanelBridgeService:
                     )
                 )
             ).scalar_one_or_none()
-            if assignment and assignment.target_username != username:
+            fallback_username = _bridge_fallback_username(username, rule.id, config.id)
+            expected_target_names = {username, fallback_username}
+            if assignment and assignment.target_username not in expected_target_names:
                 if assignment.target_created:
                     async with ProvisioningService._api_client(target) as (client, token):
                         response = await client.delete(
@@ -384,26 +393,46 @@ class PanelBridgeService:
                             raise _panel_error(response, "حذف یوزرنیم قبلی سرویس کمکی")
                 assignment.target_created = False
             source_payload = await PanelBridgeService._fetch_panel_user(source, username)
-            target_sub_link, created = await PanelBridgeService._upsert_target_user(
-                target,
-                username,
-                source_payload,
-                _json_dict(rule.target_inbounds_json),
-                may_update=assignment is not None,
-                reset_traffic=reset_target_traffic,
-            )
+            target_username = assignment.target_username if assignment else username
+            used_fallback = target_username == fallback_username
+            try:
+                target_sub_link, created = await PanelBridgeService._upsert_target_user(
+                    target,
+                    target_username,
+                    source_payload,
+                    _json_dict(rule.target_inbounds_json),
+                    may_update=assignment is not None,
+                    reset_traffic=reset_target_traffic,
+                )
+            except ProvisioningError as exc:
+                collision = "HTTP 403" in str(exc) or "متعلق به این قانون نیست" in str(exc)
+                if not collision or target_username == fallback_username:
+                    raise
+                target_username = fallback_username
+                used_fallback = True
+                target_sub_link, created = await PanelBridgeService._upsert_target_user(
+                    target,
+                    target_username,
+                    source_payload,
+                    _json_dict(rule.target_inbounds_json),
+                    may_update=True,
+                    reset_traffic=reset_target_traffic,
+                )
             if assignment is None:
                 assignment = PanelBridgeAssignment(
                     rule_id=rule.id,
                     config_id=config.id,
                     target_panel_key=target.key,
-                    target_username=username,
+                    target_username=target_username,
                     target_sub_link=target_sub_link,
                     target_created=created,
                 )
                 session.add(assignment)
             else:
                 assignment.target_created = assignment.target_created or created
+            if used_fallback:
+                assignment.target_created = True
+            assignment.target_username = target_username
             assignment.target_sub_link = target_sub_link
             assignment.target_panel_key = target.key
             assignment.status = "active"

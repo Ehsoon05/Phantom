@@ -3,10 +3,18 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from bot_package.services.panel_bridge_service import (
+    _bridge_fallback_username,
     _remaining_data_limit,
     _rule_matches,
     _target_timing,
 )
+
+
+def test_bridge_fallback_username_is_stable_and_bounded():
+    value = _bridge_fallback_username("khodam", 1, 796)
+
+    assert value == "khodam_b1_796"
+    assert len(_bridge_fallback_username("x" * 100, 12, 3456)) <= 32
 
 
 def test_rule_matches_panel_category_and_plan_together():
