@@ -4,6 +4,7 @@ import asyncio
 import json
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 from sqlalchemy import delete, select
 
@@ -96,6 +97,116 @@ def _remaining_data_limit(source: dict[str, Any]) -> int:
 
 
 class PanelBridgeService:
+    @staticmethod
+    async def import_external_configs(rule_id: int) -> list[int]:
+        external_rows = await SubscriptionLinkService.list_panel_configs()
+        if not external_rows:
+            return []
+
+        async with async_session() as session:
+            rule = await session.get(PanelBridgeRule, rule_id)
+            if not rule or not rule.is_enabled:
+                return []
+            source_keys = [str(value) for value in _json_list(rule.source_panel_keys_json)]
+            if not source_keys:
+                return []
+            panels = [
+                panel
+                for key in source_keys
+                if (panel := await ProvisioningService.get_panel(session, key)) is not None
+            ]
+            if not panels:
+                return []
+
+            existing_configs = (await session.execute(select(Config))).scalars().all()
+            configs_by_token = {
+                str(config.public_sub_token): config
+                for config in existing_configs
+                if config.public_sub_token
+            }
+            configs_by_link = {
+                str(config.sub_link): config for config in existing_configs if config.sub_link
+            }
+            imported_ids: list[int] = []
+
+            for item in external_rows:
+                token = str(item.get("token") or "").strip()
+                upstream_url = str(item.get("upstream_url") or "").strip()
+                if not token or not upstream_url:
+                    continue
+                existing = configs_by_token.get(token) or configs_by_link.get(upstream_url)
+                if existing is not None and existing.provision_source != "external_subscription":
+                    continue
+
+                requested_key = str(item.get("source_panel_key") or "").strip()
+                upstream_host = (urlparse(upstream_url).hostname or "").lower()
+                candidates = [panel for panel in panels if panel.key == requested_key]
+                if not candidates:
+                    candidates = [
+                        panel
+                        for panel in panels
+                        if (urlparse(panel.base_url).hostname or "").lower() == upstream_host
+                    ]
+                if not candidates:
+                    continue
+
+                username = str(item.get("panel_username") or "").strip()
+                username = username or username_from_subscription_url(upstream_url) or ""
+                if not username:
+                    continue
+
+                resolved_panel = None
+                source_payload: dict[str, Any] | None = None
+                for panel in candidates:
+                    try:
+                        source_payload = await PanelBridgeService._fetch_panel_user(panel, username)
+                        resolved_panel = panel
+                        break
+                    except BridgeSkip:
+                        continue
+                    except Exception:
+                        continue
+                if resolved_panel is None or source_payload is None:
+                    continue
+
+                source_limit = int(source_payload.get("data_limit") or 0)
+                external_volume = int(item.get("volume_gb") or 0)
+                volume_gb = external_volume or (source_limit // (1024**3) if source_limit > 0 else 0)
+                telegram_user_id = int(item.get("telegram_user_id") or 0)
+                previous_identity = (
+                    existing.sub_link,
+                    existing.panel_key,
+                    existing.panel_username,
+                ) if existing is not None else None
+                config = existing or Config(
+                    volume_gb=max(0, volume_gb),
+                    category_key=str(item.get("category_key") or "manual"),
+                    sub_link=upstream_url,
+                    public_sub_token=token,
+                    provision_source="external_subscription",
+                    is_sold=True,
+                    sold_at=datetime.now(timezone.utc),
+                )
+                if existing is None:
+                    session.add(config)
+                config.volume_gb = max(0, volume_gb)
+                config.category_key = str(item.get("category_key") or "manual")
+                config.sub_link = upstream_url
+                config.public_sub_token = token
+                config.panel_key = resolved_panel.key
+                config.panel_username = username
+                config.is_sold = True
+                config.sold_to_user_id = telegram_user_id or config.sold_to_user_id
+                await session.flush()
+                current_identity = (config.sub_link, config.panel_key, config.panel_username)
+                if existing is None or previous_identity != current_identity:
+                    imported_ids.append(config.id)
+                configs_by_token[token] = config
+                configs_by_link[upstream_url] = config
+
+            await session.commit()
+            return imported_ids
+
     @staticmethod
     async def _refresh_target_ports(session, rule: PanelBridgeRule) -> None:
         target = await ProvisioningService.get_panel(session, rule.target_panel_key)
@@ -207,9 +318,10 @@ class PanelBridgeService:
             )
         ).scalars().first()
         await session.flush()
-        primary_ok = await SubscriptionLinkService.sync_to_panel(config, service_name)
-        if not primary_ok:
-            raise ProvisioningError("همگام‌سازی لینک اصلی با پنل ساب انجام نشد.")
+        if config.provision_source != "external_subscription":
+            primary_ok = await SubscriptionLinkService.sync_to_panel(config, service_name)
+            if not primary_ok:
+                raise ProvisioningError("همگام‌سازی لینک اصلی با پنل ساب انجام نشد.")
 
         rows = (
             await session.execute(
@@ -324,6 +436,12 @@ class PanelBridgeService:
                 await session.commit()
                 return
             await session.commit()
+
+        await PanelBridgeService.import_external_configs(rule_id)
+        async with async_session() as session:
+            rule = await session.get(PanelBridgeRule, rule_id)
+            if not rule:
+                return
             config_ids = await PanelBridgeService.matching_config_ids(rule)
             rule.total_matches = len(config_ids)
             await session.commit()
@@ -369,6 +487,55 @@ class PanelBridgeService:
             rule.last_synced_at = datetime.now(timezone.utc)
             rule.updated_at = datetime.now(timezone.utc)
             await session.commit()
+
+    @staticmethod
+    async def discover_external_configs() -> dict[str, int]:
+        async with async_session() as session:
+            rule_ids = list(
+                (
+                    await session.execute(
+                        select(PanelBridgeRule.id).where(PanelBridgeRule.is_enabled.is_(True))
+                    )
+                ).scalars().all()
+            )
+        stats = {"imported": 0, "synced": 0, "failed": 0}
+        for rule_id in rule_ids:
+            imported_ids = await PanelBridgeService.import_external_configs(rule_id)
+            stats["imported"] += len(imported_ids)
+            async with async_session() as session:
+                rule = await session.get(PanelBridgeRule, rule_id)
+                if not rule:
+                    continue
+                external_configs = (
+                    await session.execute(
+                        select(Config).where(
+                            Config.provision_source == "external_subscription",
+                            Config.panel_deleted_at.is_(None),
+                        )
+                    )
+                ).scalars().all()
+                assigned_ids = set(
+                    (
+                        await session.execute(
+                            select(PanelBridgeAssignment.config_id).where(
+                                PanelBridgeAssignment.rule_id == rule_id
+                            )
+                        )
+                    ).scalars().all()
+                )
+                pending_ids = [
+                    config.id
+                    for config in external_configs
+                    if config.id not in assigned_ids and _rule_matches(rule, config)
+                ]
+            reconcile_ids = sorted(set(imported_ids + pending_ids))
+            for config_id in reconcile_ids:
+                try:
+                    await PanelBridgeService.reconcile_config(rule_id, config_id)
+                    stats["synced"] += 1
+                except Exception:
+                    stats["failed"] += 1
+        return stats
 
     @staticmethod
     async def remove_assignment(rule_id: int, config_id: int) -> None:

@@ -127,6 +127,7 @@ class SubscriptionLinkService:
             "is_sold": bool(config.is_sold),
             "service_name": service_name,
             "panel_username": config.panel_username,
+            "source_panel_key": config.panel_key,
             "usage_offset_bytes": max(0, int(config.usage_offset_bytes or 0)),
             "display_total_bytes": max(0, int(config.display_total_bytes or 0)),
             "telegram_user_id": int(telegram_user_id or config.sold_to_user_id or 0) or None,
@@ -192,6 +193,29 @@ class SubscriptionLinkService:
         except httpx.HTTPError:
             logger.warning("Failed to sync supplements for %s", token, exc_info=True)
             return False
+
+    @staticmethod
+    async def list_panel_configs() -> list[dict]:
+        if not BotConfig.SUBSCRIPTION_PANEL_SYNC_URL or not BotConfig.SUBSCRIPTION_PANEL_SYNC_TOKEN:
+            return []
+        url = BotConfig.SUBSCRIPTION_PANEL_SYNC_URL.rstrip("/")
+        if not url.endswith("/internal/configs"):
+            url = f"{url}/internal/configs"
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    url,
+                    headers={"Authorization": f"Bearer {BotConfig.SUBSCRIPTION_PANEL_SYNC_TOKEN}"},
+                )
+                response.raise_for_status()
+                payload = response.json()
+        except (httpx.HTTPError, ValueError):
+            logger.warning("Failed to list subscription panel configs", exc_info=True)
+            return []
+        configs = payload.get("configs") if isinstance(payload, dict) else None
+        if not isinstance(configs, list):
+            return []
+        return [item for item in configs if isinstance(item, dict)]
 
     @staticmethod
     def _internal_settings_url() -> str:
