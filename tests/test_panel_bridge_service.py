@@ -38,3 +38,9 @@ def test_target_expiry_is_exactly_the_source_expiry():
     timing = _target_timing({"status": "active", "expire": expire})
 
     assert timing == {"status": "active", "expire": expire, "on_hold_expire_duration": None}
+
+
+def test_target_expiry_accepts_pasarguard_iso_dates():
+    timing = _target_timing({"status": "active", "expire": "2030-08-30T14:51:25Z"})
+
+    assert timing["expire"] == 1914331885

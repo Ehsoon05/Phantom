@@ -56,11 +56,27 @@ def _rule_matches(rule: PanelBridgeRule, config: Config) -> bool:
     )
 
 
+def _epoch_seconds(value: Any) -> int:
+    if value in {None, "", 0, "0"}:
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        pass
+    try:
+        parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise BridgeSkip("تاریخ سرویس مبدا قابل تشخیص نیست.") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.timestamp())
+
+
 def _target_timing(source: dict[str, Any]) -> dict[str, Any]:
     status = str(source.get("status") or "").strip().lower()
     if status not in {"active", "on_hold"}:
         raise BridgeSkip(f"وضعیت سرویس مبدا {status or 'نامشخص'} است.")
-    expire = int(source.get("expire") or 0)
+    expire = _epoch_seconds(source.get("expire"))
     if status == "active" and expire and expire <= int(datetime.now(timezone.utc).timestamp()):
         raise BridgeSkip("تاریخ سرویس مبدا تمام شده است.")
     if status == "on_hold":
