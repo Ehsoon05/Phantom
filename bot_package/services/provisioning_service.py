@@ -733,7 +733,7 @@ class ProvisioningService:
         await session.flush()
         from .panel_bridge_service import PanelBridgeService
 
-        await PanelBridgeService.reconcile_matching_config(config.id)
+        await PanelBridgeService.set_config_assignments_enabled(config.id, enabled)
         return new_status
 
     @staticmethod

@@ -426,6 +426,37 @@ class PanelBridgeService:
                 continue
 
     @staticmethod
+    async def set_config_assignments_enabled(config_id: int, enabled: bool) -> None:
+        async with async_session() as session:
+            assignments = (
+                await session.execute(
+                    select(PanelBridgeAssignment).where(
+                        PanelBridgeAssignment.config_id == config_id,
+                        PanelBridgeAssignment.status == "active",
+                    )
+                )
+            ).scalars().all()
+            errors: list[str] = []
+            for assignment in assignments:
+                target = await ProvisioningService.get_panel(session, assignment.target_panel_key)
+                if target is None:
+                    errors.append(f"پنل مقصد {assignment.target_panel_key} در دسترس نیست.")
+                    continue
+                try:
+                    async with ProvisioningService._api_client(target) as (client, token):
+                        response = await client.put(
+                            f"/api/user/{assignment.target_username}",
+                            headers={"Authorization": f"Bearer {token}"},
+                            json={"status": "active" if enabled else "disabled"},
+                        )
+                        if response.is_error:
+                            raise _panel_error(response, "تغییر وضعیت سرویس معادل")
+                except Exception as exc:
+                    errors.append(str(exc))
+            if errors:
+                raise ProvisioningError(errors[-1])
+
+    @staticmethod
     async def remove_config_assignments(config_id: int) -> None:
         async with async_session() as session:
             config = await session.get(Config, config_id)
