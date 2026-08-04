@@ -294,7 +294,14 @@ class PanelBridgeService:
             headers = {"Authorization": f"Bearer {token}"}
             existing = await client.get(f"/api/user/{username}", headers=headers)
             if existing.status_code == 404:
-                response = await client.post("/api/user", headers=headers, json=body)
+                create_body = dict(body)
+                needs_post_create_disable = body["status"] not in {"active", "on_hold"}
+                if needs_post_create_disable:
+                    create_body["status"] = "active"
+                    create_body["expire"] = 0
+                    if int(source.get("data_limit") or 0) > 0 and body["data_limit"] <= 0:
+                        create_body["data_limit"] = 1
+                response = await client.post("/api/user", headers=headers, json=create_body)
                 created = True
             elif existing.is_error:
                 raise _panel_error(existing, "بررسی یوزر پنل مقصد")
@@ -308,6 +315,11 @@ class PanelBridgeService:
             if response.is_error:
                 raise _panel_error(response, "ساخت سرویس کمکی در پنل مقصد")
             payload = response.json()
+            if existing.status_code == 404 and needs_post_create_disable:
+                response = await client.put(f"/api/user/{username}", headers=headers, json=body)
+                if response.is_error:
+                    raise _panel_error(response, "غیرفعال‌سازی سرویس کمکی پایان‌یافته")
+                payload = response.json()
             if may_update and reset_traffic:
                 reset = await client.post(f"/api/user/{username}/reset", headers=headers)
                 if reset.status_code not in {200, 204, 404, 405}:
