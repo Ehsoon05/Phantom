@@ -128,6 +128,10 @@ def _metadata_source_payload(metadata: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _external_panel_fragment(source_payload: dict[str, Any]) -> str:
+    return "namahdod" if int(source_payload.get("data_limit") or 0) <= 0 else "hajmi"
+
+
 class PanelBridgeService:
     @staticmethod
     async def import_external_configs(rule_id: int) -> list[int]:
@@ -197,13 +201,16 @@ class PanelBridgeService:
                 if source_payload is not None:
                     if source_payload["status"] not in {"active", "on_hold"} and existing is None:
                         continue
-                    preferred_fragment = (
-                        "namahdod" if int(source_payload.get("data_limit") or 0) <= 0 else "hajmi"
-                    )
-                    resolved_panel = next(
-                        (panel for panel in candidates if preferred_fragment in panel.key),
-                        candidates[0],
-                    )
+                    if requested_key:
+                        resolved_panel = candidates[0]
+                    else:
+                        preferred_fragment = _external_panel_fragment(source_payload)
+                        resolved_panel = next(
+                            (panel for panel in candidates if preferred_fragment in panel.key),
+                            None,
+                        )
+                        if resolved_panel is None:
+                            continue
                 else:
                     for panel in candidates:
                         try:
