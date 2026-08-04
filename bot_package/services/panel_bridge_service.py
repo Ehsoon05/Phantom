@@ -103,6 +103,31 @@ def _bridge_fallback_username(username: str, rule_id: int, config_id: int) -> st
     return f"{cleaned[: max(1, 32 - len(suffix))]}{suffix}"
 
 
+def _external_source_payload(item: dict[str, Any]) -> dict[str, Any] | None:
+    if not item.get("cache_available"):
+        return None
+    status = str(item.get("upstream_status") or "active").strip().lower()
+    if status not in {"active", "on_hold", "expired", "disabled", "limited"}:
+        status = "active"
+    return {
+        "status": status,
+        "data_limit": max(0, int(item.get("upstream_total_bytes") or 0)),
+        "used_traffic": max(0, int(item.get("upstream_used_bytes") or 0)),
+        "expire": max(0, int(item.get("upstream_expire") or 0)),
+        "on_hold_expire_duration": None,
+    }
+
+
+def _metadata_source_payload(metadata: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": str(metadata.get("status") or "active").strip().lower(),
+        "data_limit": max(0, int(metadata.get("total") or 0)),
+        "used_traffic": max(0, int(metadata.get("used") or 0)),
+        "expire": max(0, int(metadata.get("expire") or 0)),
+        "on_hold_expire_duration": None,
+    }
+
+
 class PanelBridgeService:
     @staticmethod
     async def import_external_configs(rule_id: int) -> list[int]:
@@ -157,22 +182,38 @@ class PanelBridgeService:
                 if not candidates:
                     continue
 
-                username = str(item.get("panel_username") or "").strip()
-                username = username or username_from_subscription_url(upstream_url) or ""
+                username = str(
+                    item.get("panel_username")
+                    or item.get("service_name")
+                    or str(item.get("upstream_title") or "").lstrip("@")
+                    or username_from_subscription_url(upstream_url)
+                    or ""
+                ).strip()
                 if not username:
                     continue
 
                 resolved_panel = None
-                source_payload: dict[str, Any] | None = None
-                for panel in candidates:
-                    try:
-                        source_payload = await PanelBridgeService._fetch_panel_user(panel, username)
-                        resolved_panel = panel
-                        break
-                    except BridgeSkip:
+                source_payload = _external_source_payload(item)
+                if source_payload is not None:
+                    if source_payload["status"] not in {"active", "on_hold"} and existing is None:
                         continue
-                    except Exception:
-                        continue
+                    preferred_fragment = (
+                        "namahdod" if int(source_payload.get("data_limit") or 0) <= 0 else "hajmi"
+                    )
+                    resolved_panel = next(
+                        (panel for panel in candidates if preferred_fragment in panel.key),
+                        candidates[0],
+                    )
+                else:
+                    for panel in candidates:
+                        try:
+                            source_payload = await PanelBridgeService._fetch_panel_user(panel, username)
+                            resolved_panel = panel
+                            break
+                        except BridgeSkip:
+                            continue
+                        except Exception:
+                            continue
                 if resolved_panel is None or source_payload is None:
                     continue
 
@@ -404,7 +445,23 @@ class PanelBridgeService:
                         if response.status_code not in {200, 204, 404}:
                             raise _panel_error(response, "حذف یوزرنیم قبلی سرویس کمکی")
                 assignment.target_created = False
-            source_payload = await PanelBridgeService._fetch_panel_user(source, username)
+            source_payload = None
+            if config.provision_source == "external_subscription" and config.public_sub_token:
+                metadata = await SubscriptionLinkService.fetch_metadata(config.public_sub_token)
+                if metadata:
+                    source_payload = _metadata_source_payload(metadata)
+            if source_payload is None:
+                try:
+                    source_payload = await PanelBridgeService._fetch_panel_user(source, username)
+                except Exception:
+                    if not config.public_sub_token:
+                        raise
+                    metadata = await SubscriptionLinkService.fetch_metadata(
+                        config.public_sub_token
+                    )
+                    if not metadata:
+                        raise
+                    source_payload = _metadata_source_payload(metadata)
             target_username = assignment.target_username if assignment else username
             used_fallback = target_username == fallback_username
             try:
@@ -417,7 +474,11 @@ class PanelBridgeService:
                     reset_traffic=reset_target_traffic,
                 )
             except ProvisioningError as exc:
-                collision = "HTTP 403" in str(exc) or "متعلق به این قانون نیست" in str(exc)
+                collision = (
+                    "HTTP 403" in str(exc)
+                    or "HTTP 422" in str(exc)
+                    or "متعلق به این قانون نیست" in str(exc)
+                )
                 if not collision or target_username == fallback_username:
                     raise
                 target_username = fallback_username

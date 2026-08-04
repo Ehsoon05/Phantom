@@ -4,6 +4,8 @@ from types import SimpleNamespace
 
 from bot_package.services.panel_bridge_service import (
     _bridge_fallback_username,
+    _external_source_payload,
+    _metadata_source_payload,
     _remaining_data_limit,
     _rule_matches,
     _target_timing,
@@ -15,6 +17,36 @@ def test_bridge_fallback_username_is_stable_and_bounded():
 
     assert value == "khodam_b1_796"
     assert len(_bridge_fallback_username("x" * 100, 12, 3456)) <= 32
+
+
+def test_external_cached_metadata_builds_unlimited_source_payload():
+    payload = _external_source_payload(
+        {
+            "cache_available": True,
+            "upstream_status": "active",
+            "upstream_total_bytes": 0,
+            "upstream_used_bytes": 123,
+            "upstream_expire": 1_900_000_000,
+        }
+    )
+
+    assert payload == {
+        "status": "active",
+        "data_limit": 0,
+        "used_traffic": 123,
+        "expire": 1_900_000_000,
+        "on_hold_expire_duration": None,
+    }
+
+
+def test_metadata_payload_preserves_usage_and_expiry():
+    payload = _metadata_source_payload(
+        {"status": "active", "total": 1000, "used": 400, "expire": 1_900_000_000}
+    )
+
+    assert payload["data_limit"] == 1000
+    assert payload["used_traffic"] == 400
+    assert payload["expire"] == 1_900_000_000
 
 
 def test_rule_matches_panel_category_and_plan_together():
