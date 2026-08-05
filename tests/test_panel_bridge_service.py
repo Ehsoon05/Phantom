@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from bot_package.services.panel_bridge_service import (
+    _automatic_reconcile_candidate,
     _bridge_fallback_username,
     _external_source_payload,
     _external_panel_fragment,
@@ -66,6 +67,28 @@ def test_rule_matches_panel_category_and_plan_together():
 
     assert _rule_matches(rule, matching) is True
     assert _rule_matches(rule, other_plan) is False
+
+
+def test_automatic_reconcile_retries_all_sold_config_sources():
+    inventory = SimpleNamespace(is_sold=True, panel_deleted_at=None, provision_source="inventory")
+    panel = SimpleNamespace(is_sold=True, panel_deleted_at=None, provision_source="panel")
+    external = SimpleNamespace(
+        is_sold=True,
+        panel_deleted_at=None,
+        provision_source="external_subscription",
+    )
+    unsold = SimpleNamespace(is_sold=False, panel_deleted_at=None, provision_source="inventory")
+    deleted = SimpleNamespace(
+        is_sold=True,
+        panel_deleted_at=datetime.now(timezone.utc),
+        provision_source="panel",
+    )
+
+    assert _automatic_reconcile_candidate(inventory) is True
+    assert _automatic_reconcile_candidate(panel) is True
+    assert _automatic_reconcile_candidate(external) is True
+    assert _automatic_reconcile_candidate(unsold) is False
+    assert _automatic_reconcile_candidate(deleted) is False
 
 
 def test_remaining_limit_carries_only_unused_source_volume():

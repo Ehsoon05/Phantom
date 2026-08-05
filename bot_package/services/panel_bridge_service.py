@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -25,6 +26,9 @@ from .provisioning_service import (
     username_from_subscription_url,
 )
 from .subscription_link_service import SubscriptionLinkService
+
+
+logger = logging.getLogger(__name__)
 
 
 class BridgeSkip(RuntimeError):
@@ -130,6 +134,10 @@ def _metadata_source_payload(metadata: dict[str, Any]) -> dict[str, Any]:
 
 def _external_panel_fragment(source_payload: dict[str, Any]) -> str:
     return "namahdod" if int(source_payload.get("data_limit") or 0) <= 0 else "hajmi"
+
+
+def _automatic_reconcile_candidate(config: Config) -> bool:
+    return bool(config.is_sold and config.panel_deleted_at is None)
 
 
 class PanelBridgeService:
@@ -615,10 +623,13 @@ class PanelBridgeService:
                 rule = await session.get(PanelBridgeRule, rule_id)
                 if not rule:
                     continue
-                external_configs = (
+                # Immediate reconciliation can fail transiently after a purchase
+                # or an inventory assignment. Retry every unassigned sold config,
+                # regardless of how it entered the system.
+                candidate_configs = (
                     await session.execute(
                         select(Config).where(
-                            Config.provision_source == "external_subscription",
+                            Config.is_sold.is_(True),
                             Config.panel_deleted_at.is_(None),
                         )
                     )
@@ -634,16 +645,43 @@ class PanelBridgeService:
                 )
                 pending_ids = [
                     config.id
-                    for config in external_configs
-                    if config.id not in assigned_ids and _rule_matches(rule, config)
+                    for config in candidate_configs
+                    if (
+                        _automatic_reconcile_candidate(config)
+                        and config.id not in assigned_ids
+                        and _rule_matches(rule, config)
+                    )
                 ]
             reconcile_ids = sorted(set(imported_ids + pending_ids))
+            failures: list[str] = []
             for config_id in reconcile_ids:
                 try:
                     await PanelBridgeService.reconcile_config(rule_id, config_id)
                     stats["synced"] += 1
-                except Exception:
+                except Exception as exc:
                     stats["failed"] += 1
+                    failures.append(f"config={config_id}: {str(exc)[:900]}")
+                    logger.warning(
+                        "Automatic panel bridge reconciliation failed for rule=%s config=%s: %s",
+                        rule_id,
+                        config_id,
+                        exc,
+                    )
+            if reconcile_ids:
+                async with async_session() as session:
+                    rule = await session.get(PanelBridgeRule, rule_id)
+                    if rule:
+                        rule.last_synced_at = datetime.now(timezone.utc)
+                        rule.updated_at = datetime.now(timezone.utc)
+                        if failures:
+                            rule.sync_status = "completed_with_errors"
+                            rule.failed_count = len(failures)
+                            rule.last_error = failures[-1]
+                        elif rule.sync_status != "running":
+                            rule.sync_status = "completed"
+                            rule.failed_count = 0
+                            rule.last_error = None
+                        await session.commit()
         return stats
 
     @staticmethod
@@ -698,8 +736,13 @@ class PanelBridgeService:
                     config_id,
                     reset_target_traffic=reset_target_traffic,
                 )
-            except Exception:
-                continue
+            except Exception as exc:
+                logger.warning(
+                    "Immediate panel bridge reconciliation failed for rule=%s config=%s: %s",
+                    rule_id,
+                    config_id,
+                    exc,
+                )
 
     @staticmethod
     async def set_config_assignments_enabled(config_id: int, enabled: bool) -> None:
