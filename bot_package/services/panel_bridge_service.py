@@ -153,7 +153,7 @@ class PanelBridgeService:
         if requested_key:
             return candidates[0], cached_payload
 
-        api_unavailable = False
+        unavailable_panels: list[ProvisionPanel] = []
         for panel in candidates:
             try:
                 live_payload = await PanelBridgeService._fetch_panel_user(panel, username)
@@ -162,23 +162,28 @@ class PanelBridgeService:
                 # A 404 is authoritative: this account does not own the user.
                 continue
             except Exception:
-                api_unavailable = True
+                unavailable_panels.append(panel)
 
-        if cached_payload is None or not api_unavailable:
+        if cached_payload is None or not unavailable_panels:
             return None, None
+
+        if len(unavailable_panels) == 1:
+            # If every sibling account explicitly returned 404, the sole
+            # temporarily unavailable account is the only possible owner.
+            return unavailable_panels[0], cached_payload
 
         # Same-host provider accounts cannot be distinguished from a cached
         # subscription URL alone. Preserve an earlier live classification when
         # possible; only then use the volume-based legacy fallback.
         existing = next(
-            (panel for panel in candidates if panel.key == existing_panel_key),
+            (panel for panel in unavailable_panels if panel.key == existing_panel_key),
             None,
         )
         if existing is not None:
             return existing, cached_payload
         preferred_fragment = _external_panel_fragment(cached_payload)
         fallback = next(
-            (panel for panel in candidates if preferred_fragment in panel.key),
+            (panel for panel in unavailable_panels if preferred_fragment in panel.key),
             None,
         )
         return fallback, cached_payload if fallback is not None else None

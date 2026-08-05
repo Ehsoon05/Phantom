@@ -110,6 +110,31 @@ def test_external_panel_resolution_keeps_live_classification_during_api_outage()
     assert payload is cached
 
 
+def test_external_panel_resolution_selects_only_non_404_account():
+    hajmi = SimpleNamespace(key="mexico_hajmi")
+    namahdod = SimpleNamespace(key="mexico_namahdod")
+    cached = {"status": "active", "data_limit": 0, "used_traffic": 10}
+
+    async def fetch(panel, _username):
+        if panel.key == "mexico_namahdod":
+            raise BridgeSkip("not found")
+        raise RuntimeError("hajmi account temporarily unavailable")
+
+    with patch.object(PanelBridgeService, "_fetch_panel_user", side_effect=fetch):
+        panel, payload = asyncio.run(
+            PanelBridgeService._resolve_external_panel(
+                [namahdod, hajmi],
+                requested_key="",
+                username="TestKodam",
+                cached_payload=cached,
+                existing_panel_key="mexico_namahdod",
+            )
+        )
+
+    assert panel.key == "mexico_hajmi"
+    assert payload is cached
+
+
 def test_rule_matches_panel_category_and_plan_together():
     rule = SimpleNamespace(
         source_panel_keys_json=json.dumps(["mexico_hajmi", "mexico_namahdod"]),
