@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -42,6 +44,7 @@ TRIAL_VOLUME_MB = "trial_volume_mb"
 TRIAL_DURATION_HOURS = "trial_duration_hours"
 TRIAL_PANEL_KEY = "trial_panel_key"
 TRIAL_TIME_MODE = "trial_time_mode"
+TRIAL_PANEL_PHANTOM_TUNNEL_MIGRATION = "_migration_trial_panel_phantom_tunnel_v1"
 SERVICE_REMINDERS_ENABLED = "service_reminders_enabled"
 SERVICE_REMINDER_VOLUME_PERCENTS = "service_reminder_volume_percents"
 SERVICE_REMINDER_TIME_DAYS = "service_reminder_time_days"
@@ -84,7 +87,7 @@ DEFAULTS = {
     TRIAL_ENABLED: "true",
     TRIAL_VOLUME_MB: "500",
     TRIAL_DURATION_HOURS: "24",
-    TRIAL_PANEL_KEY: "easy",
+    TRIAL_PANEL_KEY: "phantom_tunnel",
     TRIAL_TIME_MODE: "date",
     SERVICE_REMINDERS_ENABLED: "true",
     SERVICE_REMINDER_VOLUME_PERCENTS: "20,10",
@@ -104,6 +107,22 @@ class SettingsService:
             existing = (await session.execute(stmt)).scalar_one_or_none()
             if existing is None:
                 session.add(BotSetting(key=key, value=value))
+        await session.flush()
+
+        # Move the existing installation to Phantom Tunnel once. The marker
+        # makes later admin changes authoritative across future restarts.
+        migration = (
+            await session.execute(
+                select(BotSetting).where(BotSetting.key == TRIAL_PANEL_PHANTOM_TUNNEL_MIGRATION)
+            )
+        ).scalar_one_or_none()
+        if migration is None:
+            trial_panel = (
+                await session.execute(select(BotSetting).where(BotSetting.key == TRIAL_PANEL_KEY))
+            ).scalar_one()
+            trial_panel.value = "phantom_tunnel"
+            trial_panel.updated_at = datetime.now(timezone.utc)
+            session.add(BotSetting(key=TRIAL_PANEL_PHANTOM_TUNNEL_MIGRATION, value="done"))
         await session.commit()
 
     @staticmethod
@@ -489,7 +508,9 @@ class SettingsService:
 
     @staticmethod
     async def get_trial_panel_key(session: AsyncSession) -> str:
-        panel_key = str(await SettingsService.get(session, TRIAL_PANEL_KEY, "easy") or "easy").strip()
+        panel_key = str(
+            await SettingsService.get(session, TRIAL_PANEL_KEY, "phantom_tunnel") or "phantom_tunnel"
+        ).strip()
         return "easy" if panel_key == "asan" else panel_key
 
     @staticmethod

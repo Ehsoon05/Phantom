@@ -17,6 +17,9 @@ from bot_package.services.panel_bridge_service import (
     _rule_matches,
     _target_timing,
 )
+from bot_package.models import Base, BotSetting, PanelBridgeRule
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 def test_bridge_fallback_username_is_stable_and_bounded():
@@ -135,6 +138,50 @@ def test_rule_matches_panel_category_and_plan_together():
 
     assert _rule_matches(rule, matching) is True
     assert _rule_matches(rule, other_plan) is False
+
+
+def test_phantom_tunnel_scope_migration_is_hajmi_only_and_one_time():
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        try:
+            async with sessions() as session:
+                rule = PanelBridgeRule(
+                    name="Phantom Tunnel",
+                    source_panel_keys_json=json.dumps(["mexico_hajmi", "mexico_namahdod"]),
+                    source_category_keys_json=json.dumps(["express"]),
+                    source_plan_ids_json=json.dumps([12]),
+                    target_panel_key="phantom_tunnel",
+                    target_inbounds_json="{}",
+                    target_ports_json="[]",
+                )
+                session.add(rule)
+                await session.commit()
+
+                await PanelBridgeService.migrate_phantom_tunnel_hajmi_scope(session)
+                assert json.loads(rule.source_panel_keys_json) == ["mexico_hajmi"]
+                assert json.loads(rule.source_category_keys_json) == ["express"]
+                assert json.loads(rule.source_plan_ids_json) == [12]
+
+                rule.source_panel_keys_json = json.dumps(["mexico_namahdod"])
+                await session.commit()
+                await PanelBridgeService.migrate_phantom_tunnel_hajmi_scope(session)
+                await session.refresh(rule)
+                assert json.loads(rule.source_panel_keys_json) == ["mexico_namahdod"]
+                marker = (
+                    await session.execute(
+                        select(BotSetting).where(
+                            BotSetting.key == "_migration_phantom_tunnel_hajmi_scope_v1"
+                        )
+                    )
+                ).scalar_one()
+                assert marker.value == "done"
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
 
 
 def test_automatic_reconcile_retries_all_sold_config_sources():

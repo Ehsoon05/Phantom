@@ -12,6 +12,7 @@ from sqlalchemy import delete, select
 
 from ..database import async_session
 from ..models import (
+    BotSetting,
     Config,
     PanelBridgeAssignment,
     PanelBridgeRule,
@@ -29,6 +30,9 @@ from .subscription_link_service import SubscriptionLinkService
 
 
 logger = logging.getLogger(__name__)
+
+
+PHANTOM_TUNNEL_HAJMI_SCOPE_MIGRATION = "_migration_phantom_tunnel_hajmi_scope_v1"
 
 
 class BridgeSkip(RuntimeError):
@@ -152,6 +156,28 @@ def _automatic_reconcile_candidate(config: Config) -> bool:
 
 
 class PanelBridgeService:
+    @staticmethod
+    async def migrate_phantom_tunnel_hajmi_scope(session) -> None:
+        migration = (
+            await session.execute(
+                select(BotSetting).where(BotSetting.key == PHANTOM_TUNNEL_HAJMI_SCOPE_MIGRATION)
+            )
+        ).scalar_one_or_none()
+        if migration is not None:
+            return
+
+        rules = (
+            await session.execute(
+                select(PanelBridgeRule).where(PanelBridgeRule.target_panel_key == "phantom_tunnel")
+            )
+        ).scalars().all()
+        now = datetime.now(timezone.utc)
+        for rule in rules:
+            rule.source_panel_keys_json = json.dumps(["mexico_hajmi"])
+            rule.updated_at = now
+        session.add(BotSetting(key=PHANTOM_TUNNEL_HAJMI_SCOPE_MIGRATION, value="done"))
+        await session.commit()
+
     @staticmethod
     async def _resolve_external_panel(
         candidates: list[ProvisionPanel],

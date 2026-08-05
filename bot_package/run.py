@@ -17,6 +17,7 @@ from bot_package.services.settings_service import SettingsService
 from bot_package.services.shop_customization_service import ShopCustomizationService
 from bot_package.services.service_reminder_service import register_service_reminder_jobs
 from bot_package.services.panel_bridge_jobs import register_panel_bridge_jobs
+from bot_package.services.panel_bridge_service import PanelBridgeService
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,7 @@ async def main():
         await ShopCustomizationService.init_defaults(session)
         await RequiredChannelService.init_defaults(session)
         await SettingsService.init_defaults(session)
+        await PanelBridgeService.migrate_phantom_tunnel_hajmi_scope(session)
         await AdminService.sync_configured_admins(session)
 
     main_app = await setup_main_bot()
