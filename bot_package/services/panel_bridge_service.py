@@ -142,6 +142,48 @@ def _automatic_reconcile_candidate(config: Config) -> bool:
 
 class PanelBridgeService:
     @staticmethod
+    async def _resolve_external_panel(
+        candidates: list[ProvisionPanel],
+        *,
+        requested_key: str,
+        username: str,
+        cached_payload: dict[str, Any] | None,
+        existing_panel_key: str,
+    ) -> tuple[ProvisionPanel | None, dict[str, Any] | None]:
+        if requested_key:
+            return candidates[0], cached_payload
+
+        api_unavailable = False
+        for panel in candidates:
+            try:
+                live_payload = await PanelBridgeService._fetch_panel_user(panel, username)
+                return panel, live_payload
+            except BridgeSkip:
+                # A 404 is authoritative: this account does not own the user.
+                continue
+            except Exception:
+                api_unavailable = True
+
+        if cached_payload is None or not api_unavailable:
+            return None, None
+
+        # Same-host provider accounts cannot be distinguished from a cached
+        # subscription URL alone. Preserve an earlier live classification when
+        # possible; only then use the volume-based legacy fallback.
+        existing = next(
+            (panel for panel in candidates if panel.key == existing_panel_key),
+            None,
+        )
+        if existing is not None:
+            return existing, cached_payload
+        preferred_fragment = _external_panel_fragment(cached_payload)
+        fallback = next(
+            (panel for panel in candidates if preferred_fragment in panel.key),
+            None,
+        )
+        return fallback, cached_payload if fallback is not None else None
+
+    @staticmethod
     async def import_external_configs(rule_id: int) -> list[int]:
         external_rows = await SubscriptionLinkService.list_panel_configs()
         if not external_rows:
@@ -204,31 +246,17 @@ class PanelBridgeService:
                 if not username:
                     continue
 
-                resolved_panel = None
                 source_payload = _external_source_payload(item)
                 if source_payload is not None:
                     if source_payload["status"] not in {"active", "on_hold"} and existing is None:
                         continue
-                    if requested_key:
-                        resolved_panel = candidates[0]
-                    else:
-                        preferred_fragment = _external_panel_fragment(source_payload)
-                        resolved_panel = next(
-                            (panel for panel in candidates if preferred_fragment in panel.key),
-                            None,
-                        )
-                        if resolved_panel is None:
-                            continue
-                else:
-                    for panel in candidates:
-                        try:
-                            source_payload = await PanelBridgeService._fetch_panel_user(panel, username)
-                            resolved_panel = panel
-                            break
-                        except BridgeSkip:
-                            continue
-                        except Exception:
-                            continue
+                resolved_panel, source_payload = await PanelBridgeService._resolve_external_panel(
+                    candidates,
+                    requested_key=requested_key,
+                    username=username,
+                    cached_payload=source_payload,
+                    existing_panel_key=str(existing.panel_key or "") if existing else "",
+                )
                 if resolved_panel is None or source_payload is None:
                     continue
 

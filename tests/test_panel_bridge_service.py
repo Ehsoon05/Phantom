@@ -1,8 +1,12 @@
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from bot_package.services.panel_bridge_service import (
+    BridgeSkip,
+    PanelBridgeService,
     _automatic_reconcile_candidate,
     _bridge_fallback_username,
     _external_source_payload,
@@ -54,6 +58,56 @@ def test_metadata_payload_preserves_usage_and_expiry():
 def test_external_panel_fragment_separates_unlimited_and_volume_accounts():
     assert _external_panel_fragment({"data_limit": 0}) == "namahdod"
     assert _external_panel_fragment({"data_limit": 10 * 1024**3}) == "hajmi"
+
+
+def test_external_panel_resolution_prefers_the_account_that_owns_the_user():
+    hajmi = SimpleNamespace(key="mexico_hajmi")
+    namahdod = SimpleNamespace(key="mexico_namahdod")
+    cached = {"status": "active", "data_limit": 0, "used_traffic": 10}
+
+    async def fetch(panel, username):
+        assert username == "TestKodam"
+        if panel.key == "mexico_hajmi":
+            return {"status": "active", "data_limit": 50 * 1024**3, "used_traffic": 10}
+        raise BridgeSkip("not found")
+
+    with patch.object(PanelBridgeService, "_fetch_panel_user", side_effect=fetch):
+        panel, payload = asyncio.run(
+            PanelBridgeService._resolve_external_panel(
+                [namahdod, hajmi],
+                requested_key="",
+                username="TestKodam",
+                cached_payload=cached,
+                existing_panel_key="mexico_namahdod",
+            )
+        )
+
+    assert panel.key == "mexico_hajmi"
+    assert payload["data_limit"] == 50 * 1024**3
+
+
+def test_external_panel_resolution_keeps_live_classification_during_api_outage():
+    hajmi = SimpleNamespace(key="mexico_hajmi")
+    namahdod = SimpleNamespace(key="mexico_namahdod")
+    cached = {"status": "active", "data_limit": 0, "used_traffic": 10}
+
+    with patch.object(
+        PanelBridgeService,
+        "_fetch_panel_user",
+        new=AsyncMock(side_effect=RuntimeError("panel unavailable")),
+    ):
+        panel, payload = asyncio.run(
+            PanelBridgeService._resolve_external_panel(
+                [namahdod, hajmi],
+                requested_key="",
+                username="TestKodam",
+                cached_payload=cached,
+                existing_panel_key="mexico_hajmi",
+            )
+        )
+
+    assert panel.key == "mexico_hajmi"
+    assert payload is cached
 
 
 def test_rule_matches_panel_category_and_plan_together():
