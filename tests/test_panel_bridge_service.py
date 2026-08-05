@@ -13,6 +13,7 @@ from bot_package.services.panel_bridge_service import (
     _external_username,
     _external_panel_fragment,
     _metadata_source_payload,
+    _prune_inbound_selection,
     _remaining_data_limit,
     _rule_matches,
     _target_timing,
@@ -182,6 +183,16 @@ def test_phantom_tunnel_scope_migration_is_hajmi_only_and_one_time():
             await engine.dispose()
 
     asyncio.run(run())
+
+
+def test_removed_target_inbounds_are_pruned_without_losing_live_choices():
+    cleaned, removed = _prune_inbound_selection(
+        {"vless": ["live", "deleted"], "trojan": ["also-deleted"]},
+        [{"protocol": "vless", "tag": "live", "port": 443}],
+    )
+
+    assert cleaned == {"vless": ["live"]}
+    assert removed == ["vless / deleted", "trojan / also-deleted"]
 
 
 def test_automatic_reconcile_retries_all_sold_config_sources():

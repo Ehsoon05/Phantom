@@ -155,6 +155,26 @@ def _automatic_reconcile_candidate(config: Config) -> bool:
     return bool(config.is_sold and config.panel_deleted_at is None)
 
 
+def _prune_inbound_selection(selected: dict, options: list[dict]) -> tuple[dict[str, list[str]], list[str]]:
+    available = {
+        (str(item.get("protocol") or ""), str(item.get("tag") or ""))
+        for item in options
+    }
+    cleaned: dict[str, list[str]] = {}
+    removed: list[str] = []
+    for protocol, tags in selected.items():
+        kept = []
+        for tag in tags if isinstance(tags, list) else []:
+            key = (str(protocol), str(tag))
+            if key in available:
+                kept.append(str(tag))
+            else:
+                removed.append(f"{protocol} / {tag}")
+        if kept:
+            cleaned[str(protocol)] = kept
+    return cleaned, removed
+
+
 class PanelBridgeService:
     @staticmethod
     async def migrate_phantom_tunnel_hajmi_scope(session) -> None:
@@ -336,6 +356,14 @@ class PanelBridgeService:
             raise ProvisioningError("پنل مقصد فعال و معتبر نیست.")
         selected = _json_dict(rule.target_inbounds_json)
         options = await ProvisioningService.fetch_inbound_options(target)
+        selected, removed = _prune_inbound_selection(selected, options)
+        if removed:
+            logger.warning(
+                "Removed unavailable target inbounds from bridge rule=%s: %s",
+                rule.id,
+                ", ".join(removed),
+            )
+            rule.target_inbounds_json = json.dumps(selected, ensure_ascii=False)
         available = {
             (str(item.get("protocol") or ""), str(item.get("tag") or "")): int(item.get("port") or 0)
             for item in options
@@ -344,10 +372,6 @@ class PanelBridgeService:
         for protocol, tags in selected.items():
             for tag in tags:
                 key = (str(protocol), str(tag))
-                if key not in available:
-                    raise ProvisioningError(
-                        f"اینباند انتخاب‌شده {protocol} / {tag} دیگر در پنل مقصد وجود ندارد."
-                    )
                 if available[key] > 0:
                     ports.add(available[key])
         if not ports:
