@@ -136,6 +136,17 @@ def _external_panel_fragment(source_payload: dict[str, Any]) -> str:
     return "namahdod" if int(source_payload.get("data_limit") or 0) <= 0 else "hajmi"
 
 
+def _external_username(item: dict[str, Any], upstream_url: str) -> str:
+    return str(
+        item.get("upstream_panel_username")
+        or item.get("panel_username")
+        or item.get("service_name")
+        or str(item.get("upstream_title") or "").lstrip("@")
+        or username_from_subscription_url(upstream_url)
+        or ""
+    ).strip()
+
+
 def _automatic_reconcile_candidate(config: Config) -> bool:
     return bool(config.is_sold and config.panel_deleted_at is None)
 
@@ -167,23 +178,18 @@ class PanelBridgeService:
         if cached_payload is None or not unavailable_panels:
             return None, None
 
-        if len(unavailable_panels) == 1:
-            # If every sibling account explicitly returned 404, the sole
-            # temporarily unavailable account is the only possible owner.
-            return unavailable_panels[0], cached_payload
-
         # Same-host provider accounts cannot be distinguished from a cached
         # subscription URL alone. Preserve an earlier live classification when
         # possible; only then use the volume-based legacy fallback.
         existing = next(
-            (panel for panel in unavailable_panels if panel.key == existing_panel_key),
+            (panel for panel in candidates if panel.key == existing_panel_key),
             None,
         )
         if existing is not None:
             return existing, cached_payload
         preferred_fragment = _external_panel_fragment(cached_payload)
         fallback = next(
-            (panel for panel in unavailable_panels if preferred_fragment in panel.key),
+            (panel for panel in candidates if preferred_fragment in panel.key),
             None,
         )
         return fallback, cached_payload if fallback is not None else None
@@ -241,13 +247,7 @@ class PanelBridgeService:
                 if not candidates:
                     continue
 
-                username = str(
-                    item.get("panel_username")
-                    or item.get("service_name")
-                    or str(item.get("upstream_title") or "").lstrip("@")
-                    or username_from_subscription_url(upstream_url)
-                    or ""
-                ).strip()
+                username = _external_username(item, upstream_url)
                 if not username:
                     continue
 

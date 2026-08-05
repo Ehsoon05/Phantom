@@ -10,6 +10,7 @@ from bot_package.services.panel_bridge_service import (
     _automatic_reconcile_candidate,
     _bridge_fallback_username,
     _external_source_payload,
+    _external_username,
     _external_panel_fragment,
     _metadata_source_payload,
     _remaining_data_limit,
@@ -60,6 +61,19 @@ def test_external_panel_fragment_separates_unlimited_and_volume_accounts():
     assert _external_panel_fragment({"data_limit": 10 * 1024**3}) == "hajmi"
 
 
+def test_external_username_prefers_the_identity_read_from_subscription_content():
+    username = _external_username(
+        {
+            "upstream_panel_username": "PhantomHubs-Unlimited@ameireza",
+            "panel_username": "TestKodam",
+            "service_name": "Amirreza",
+        },
+        "https://provider.example/sub/opaque-token",
+    )
+
+    assert username == "PhantomHubs-Unlimited@ameireza"
+
+
 def test_external_panel_resolution_prefers_the_account_that_owns_the_user():
     hajmi = SimpleNamespace(key="mexico_hajmi")
     namahdod = SimpleNamespace(key="mexico_namahdod")
@@ -103,31 +117,6 @@ def test_external_panel_resolution_keeps_live_classification_during_api_outage()
                 username="TestKodam",
                 cached_payload=cached,
                 existing_panel_key="mexico_hajmi",
-            )
-        )
-
-    assert panel.key == "mexico_hajmi"
-    assert payload is cached
-
-
-def test_external_panel_resolution_selects_only_non_404_account():
-    hajmi = SimpleNamespace(key="mexico_hajmi")
-    namahdod = SimpleNamespace(key="mexico_namahdod")
-    cached = {"status": "active", "data_limit": 0, "used_traffic": 10}
-
-    async def fetch(panel, _username):
-        if panel.key == "mexico_namahdod":
-            raise BridgeSkip("not found")
-        raise RuntimeError("hajmi account temporarily unavailable")
-
-    with patch.object(PanelBridgeService, "_fetch_panel_user", side_effect=fetch):
-        panel, payload = asyncio.run(
-            PanelBridgeService._resolve_external_panel(
-                [namahdod, hajmi],
-                requested_key="",
-                username="TestKodam",
-                cached_payload=cached,
-                existing_panel_key="mexico_namahdod",
             )
         )
 
