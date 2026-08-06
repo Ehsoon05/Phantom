@@ -1,16 +1,22 @@
+import asyncio
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from bot_package.services.mexico_panel_maintenance_service import (
     _cached_metadata,
     _dominant_group_ids,
     _desired_device_limit,
+    _is_synced_namahdod_item,
     _remaining_hajmi_bytes,
     _recovery_username,
     _restored_expire,
     _stored_recovery_metadata,
     _subscription_needs_sync,
+    _should_reset_unlimited,
+    _synced_device_limit,
     _user_rows,
 )
+from bot_package.services.subscription_link_service import SubscriptionLinkService
 
 
 def test_device_limit_prefers_config_then_synced_panel_then_plan():
@@ -112,6 +118,73 @@ def test_subscription_sync_runs_only_for_changed_or_stale_panel_identity():
         )
         is True
     )
+
+
+def test_manual_subscription_is_detected_from_source_or_live_panel_owner():
+    assert _is_synced_namahdod_item(
+        {"source_panel_key": "mexico_namahdod"},
+        {},
+    ) is True
+    assert _is_synced_namahdod_item(
+        {"upstream_panel_username": "manual-user"},
+        {"manual-user": {}},
+    ) is True
+    assert _is_synced_namahdod_item(
+        {
+            "upstream_status": "active",
+            "upstream_total_bytes": 300 * 1024**3,
+            "service_name": "VIP Unlimited",
+        },
+        {},
+    ) is True
+    assert _is_synced_namahdod_item(
+        {"source_panel_key": "mexico_hajmi", "service_name": "Unlimited"},
+        {},
+    ) is False
+
+
+def test_manual_device_limit_defaults_to_one_and_keeps_explicit_limit():
+    assert _synced_device_limit({"device_limit": None}) == 1
+    assert _synced_device_limit({"device_limit": 2}) == 2
+
+
+def test_unlimited_reset_is_not_limited_to_bot_purchases():
+    assert _should_reset_unlimited({"used_traffic": 300 * 1024**3, "status": "limited"}) is True
+    assert _should_reset_unlimited({"used_traffic": 299 * 1024**3, "status": "active"}) is False
+    assert _should_reset_unlimited({"used_traffic": 300 * 1024**3, "status": "expired"}) is False
+
+
+def test_manual_subscription_sync_preserves_token_and_sets_unlimited_metadata():
+    captured = {}
+
+    async def fake_sync(payload, identity):
+        captured.update(payload)
+        return True
+
+    with patch.object(SubscriptionLinkService, "_sync_payload", side_effect=fake_sync):
+        result = asyncio.run(
+            SubscriptionLinkService.sync_external_to_panel(
+                {
+                    "token": "public-token",
+                    "upstream_url": "https://old.example/sub/token",
+                    "category_key": "manual",
+                    "service_name": "Manual VIP",
+                    "device_limit": 2,
+                },
+                upstream_url="https://provider.example/sub/new-token",
+                panel_username="ManualVIP",
+                panel_key="mexico_namahdod",
+                device_limit=2,
+                display_total_bytes=0,
+            )
+        )
+
+    assert result is True
+    assert captured["token"] == "public-token"
+    assert captured["upstream_url"] == "https://provider.example/sub/new-token"
+    assert captured["source_panel_key"] == "mexico_namahdod"
+    assert captured["display_total_bytes"] == 0
+    assert captured["device_limit"] == 2
 
 
 def test_missing_expiry_is_bounded_to_pasarguard_maximum():

@@ -17,6 +17,23 @@ logger = logging.getLogger(__name__)
 
 class SubscriptionLinkService:
     @staticmethod
+    async def _sync_payload(payload: dict, identity: str) -> bool:
+        if not BotConfig.SUBSCRIPTION_PANEL_SYNC_URL or not BotConfig.SUBSCRIPTION_PANEL_SYNC_TOKEN:
+            return False
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    BotConfig.SUBSCRIPTION_PANEL_SYNC_URL,
+                    json=payload,
+                    headers={"Authorization": f"Bearer {BotConfig.SUBSCRIPTION_PANEL_SYNC_TOKEN}"},
+                )
+                response.raise_for_status()
+                return True
+        except httpx.HTTPError:
+            logger.warning("Failed to sync subscription %s to panel", identity, exc_info=True)
+            return False
+
+    @staticmethod
     def public_link(token: str) -> str:
         return f"{BotConfig.SUBSCRIPTION_PUBLIC_BASE_URL}/token/{quote(token, safe='')}"
 
@@ -139,18 +156,36 @@ class SubscriptionLinkService:
             "show_config_preview": show_config_preview,
             "info_proxies_enabled": (config.panel_key == "svn"),
         }
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.post(
-                    BotConfig.SUBSCRIPTION_PANEL_SYNC_URL,
-                    json=payload,
-                    headers={"Authorization": f"Bearer {BotConfig.SUBSCRIPTION_PANEL_SYNC_TOKEN}"},
-                )
-                response.raise_for_status()
-                return True
-        except httpx.HTTPError:
-            logger.warning("Failed to sync subscription config %s to panel", config.id, exc_info=True)
+        return await SubscriptionLinkService._sync_payload(payload, f"config {config.id}")
+
+    @staticmethod
+    async def sync_external_to_panel(
+        item: dict,
+        *,
+        upstream_url: str,
+        panel_username: str,
+        panel_key: str,
+        device_limit: int,
+        display_total_bytes: int,
+    ) -> bool:
+        token = str(item.get("token") or "").strip()
+        if not token or not upstream_url:
             return False
+        payload = {
+            "token": token,
+            "upstream_url": upstream_url,
+            "volume_gb": max(0, int(item.get("volume_gb") or 0)),
+            "category_key": str(item.get("category_key") or "manual"),
+            "is_sold": bool(item.get("is_sold")),
+            "service_name": item.get("service_name"),
+            "panel_username": panel_username,
+            "source_panel_key": panel_key,
+            "usage_offset_bytes": 0,
+            "display_total_bytes": max(0, int(display_total_bytes)),
+            "telegram_user_id": int(item.get("telegram_user_id") or 0) or None,
+            "device_limit": max(1, int(device_limit)),
+        }
+        return await SubscriptionLinkService._sync_payload(payload, f"token {token}")
 
     @staticmethod
     async def sync_panel_settings(

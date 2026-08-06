@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -8,7 +9,7 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from telegram.error import TelegramError
 from telegram.ext import Application, ContextTypes
 
@@ -26,6 +27,7 @@ from .subscription_link_service import SubscriptionLinkService
 
 logger = logging.getLogger(__name__)
 MAINTENANCE_INTERVAL_SECONDS = 1800
+ACTIVE_SYNC_STATES = {"active", "limited", "on_hold"}
 
 
 def _positive_int(value: Any) -> int:
@@ -96,6 +98,41 @@ def _subscription_needs_sync(panel_key: str, synced: dict | None, changed: bool)
     if changed or not synced:
         return True
     return str(synced.get("source_panel_key") or "") != panel_key
+
+
+def _synced_username(item: dict) -> str:
+    return str(item.get("upstream_panel_username") or item.get("panel_username") or "").strip()
+
+
+def _synced_device_limit(item: dict) -> int:
+    return max(1, _positive_int(item.get("device_limit")))
+
+
+def _is_synced_namahdod_item(item: dict, namahdod_users: dict[str, dict]) -> bool:
+    source_key = str(item.get("source_panel_key") or "").strip()
+    if source_key:
+        return source_key == "mexico_namahdod"
+    username = _synced_username(item)
+    if username and username in namahdod_users:
+        return True
+    status = str(item.get("upstream_status") or "").strip().lower()
+    if status not in ACTIVE_SYNC_STATES:
+        return False
+    identity = " ".join(
+        str(item.get(key) or "")
+        for key in ("service_name", "panel_username", "upstream_panel_username", "upstream_title")
+    ).lower()
+    unlimited_marker = any(marker in identity for marker in ("unlimited", "namah", "نامحدود"))
+    total = _positive_int(item.get("upstream_total_bytes"))
+    return unlimited_marker and total in {0, MEXICO_UNLIMITED_DATA_LIMIT_BYTES}
+
+
+def _should_reset_unlimited(user_payload: dict) -> bool:
+    status = str(user_payload.get("status") or "").strip().lower()
+    return (
+        _positive_int(user_payload.get("used_traffic")) >= MEXICO_UNLIMITED_DATA_LIMIT_BYTES
+        and status not in {"expired", "disabled"}
+    )
 
 
 def _restored_expire(metadata: dict, plan: ShopPlan | None) -> int:
@@ -263,6 +300,110 @@ class MexicoPanelMaintenanceService:
         return payload if isinstance(payload, dict) else {}, "restored"
 
     @staticmethod
+    async def _restore_external_missing(
+        panel: ProvisionPanel,
+        item: dict,
+        device_limit: int,
+    ) -> tuple[dict | None, str]:
+        username = _synced_username(item)
+        token = str(item.get("token") or "").strip()
+        if not username or not token:
+            return None, "missing_identity"
+        status = str(item.get("upstream_status") or "").strip().lower()
+        if status not in ACTIVE_SYNC_STATES:
+            return None, "inactive"
+        expire = _positive_int(item.get("upstream_expire"))
+        now = int(datetime.now(timezone.utc).timestamp())
+        if expire and expire <= now:
+            return None, "expired"
+
+        stable_id = int(hashlib.sha256(token.encode()).hexdigest()[:8], 16)
+        target_username = _recovery_username(username, stable_id)
+        async with ProvisioningService._api_client(panel) as (client, api_token):
+            headers = {"Authorization": f"Bearer {api_token}"}
+            access_fields = await ProvisioningService._access_fields(client, panel, headers)
+            access_fields["hwid_limit"] = device_limit
+            create_payload = {
+                "username": target_username,
+                "status": "active",
+                "expire": _restored_expire({"expire": expire}, None),
+                "on_hold_expire_duration": None,
+                "data_limit": MEXICO_UNLIMITED_DATA_LIMIT_BYTES,
+                "data_limit_reset_strategy": "no_reset",
+                **access_fields,
+            }
+            response = await client.post("/api/user", headers=headers, json=create_payload)
+            if response.status_code == 409:
+                response = await client.get(f"/api/user/{target_username}", headers=headers)
+                if response.status_code == 404:
+                    target_username = _recovery_username(username, stable_id, force_suffix=True)
+                    create_payload["username"] = target_username
+                    response = await client.post("/api/user", headers=headers, json=create_payload)
+                    if response.status_code == 409:
+                        response = await client.get(f"/api/user/{target_username}", headers=headers)
+            if response.is_error:
+                raise _panel_error(response, f"بازیابی لینک دستی {username}")
+            payload = response.json()
+
+        panel_username = str(payload.get("username") or target_username)
+        upstream_url = _subscription_url(panel.base_url, payload)
+        await SubscriptionLinkService.sync_external_to_panel(
+            item,
+            upstream_url=upstream_url,
+            panel_username=panel_username,
+            panel_key=panel.key,
+            device_limit=device_limit,
+            display_total_bytes=0,
+        )
+        return payload if isinstance(payload, dict) else {}, "restored"
+
+    @staticmethod
+    async def _update_external_existing(
+        panel: ProvisionPanel,
+        item: dict,
+        user_payload: dict,
+        device_limit: int,
+    ) -> tuple[bool, bool]:
+        username = str(user_payload.get("username") or _synced_username(item)).strip()
+        update: dict[str, Any] = {}
+        if _positive_int(user_payload.get("hwid_limit")) != device_limit:
+            update["hwid_limit"] = device_limit
+        if _positive_int(user_payload.get("data_limit")) != MEXICO_UNLIMITED_DATA_LIMIT_BYTES:
+            update["data_limit"] = MEXICO_UNLIMITED_DATA_LIMIT_BYTES
+            update["data_limit_reset_strategy"] = "no_reset"
+        reset = _should_reset_unlimited(user_payload)
+
+        if update or reset:
+            async with ProvisioningService._api_client(panel) as (client, api_token):
+                headers = {"Authorization": f"Bearer {api_token}"}
+                if update:
+                    response = await client.put(f"/api/user/{username}", headers=headers, json=update)
+                    if response.is_error:
+                        raise _panel_error(response, f"به‌روزرسانی لینک دستی {username}")
+                if reset:
+                    response = await client.post(f"/api/user/{username}/reset", headers=headers)
+                    if response.status_code not in {200, 204}:
+                        raise _panel_error(response, f"ریست لینک دستی {username}")
+
+        needs_sync = (
+            str(item.get("source_panel_key") or "") != panel.key
+            or item.get("display_total_bytes") != 0
+            or str(item.get("panel_username") or "").strip() != username
+            or _positive_int(item.get("device_limit")) != device_limit
+        )
+        synced = False
+        if needs_sync:
+            synced = await SubscriptionLinkService.sync_external_to_panel(
+                item,
+                upstream_url=str(item.get("upstream_url") or "").strip(),
+                panel_username=username,
+                panel_key=panel.key,
+                device_limit=device_limit,
+                display_total_bytes=0,
+            )
+        return bool(update) or synced, reset
+
+    @staticmethod
     async def _update_existing(
         session,
         panel: ProvisionPanel,
@@ -284,8 +425,7 @@ class MexicoPanelMaintenanceService:
             if current_limit != MEXICO_UNLIMITED_DATA_LIMIT_BYTES:
                 update["data_limit"] = MEXICO_UNLIMITED_DATA_LIMIT_BYTES
                 update["data_limit_reset_strategy"] = "no_reset"
-            used = _positive_int(user_payload.get("used_traffic"))
-            reset = purchase is not None and used >= MEXICO_UNLIMITED_DATA_LIMIT_BYTES
+            reset = _should_reset_unlimited(user_payload)
 
         changed = bool(update)
         if update or reset:
@@ -324,7 +464,13 @@ class MexicoPanelMaintenanceService:
         return changed, reset
 
     @staticmethod
-    async def _notify_reset(admin_bot, config: Config) -> None:
+    async def _notify_reset(
+        admin_bot,
+        *,
+        panel_username: str,
+        telegram_user_id: int | None = None,
+        source: str = "ربات/پنل ساب",
+    ) -> None:
         async with async_session() as session:
             admin_ids = list(
                 (
@@ -335,8 +481,9 @@ class MexicoPanelMaintenanceService:
             )
         text = (
             "ریست خودکار حجم سرویس نامحدود انجام شد.\n\n"
-            f"Username پنل: {config.panel_username or '-'}\n"
-            f"آیدی عددی کاربر: {config.sold_to_user_id or '-'}\n"
+            f"Username پنل: {panel_username or '-'}\n"
+            f"آیدی عددی کاربر: {telegram_user_id or '-'}\n"
+            f"منبع ثبت: {source}\n"
             "سقف واقعی پنل: 300GB\n"
             "نمایش کاربر: نامحدود"
         )
@@ -355,6 +502,9 @@ class MexicoPanelMaintenanceService:
             "reset": 0,
             "skipped": 0,
             "failed": 0,
+            "external_checked": 0,
+            "external_restored": 0,
+            "external_updated": 0,
         }
         synced_configs = await SubscriptionLinkService.list_panel_configs()
         synced_by_token = {
@@ -379,7 +529,10 @@ class MexicoPanelMaintenanceService:
                 (
                     await session.execute(
                         select(Config).where(
-                            Config.is_sold.is_(True),
+                            or_(
+                                Config.is_sold.is_(True),
+                                Config.provision_source == "external_subscription",
+                            ),
                             Config.panel_key.in_(MEXICO_PANEL_KEYS),
                             Config.panel_deleted_at.is_(None),
                         )
@@ -457,12 +610,70 @@ class MexicoPanelMaintenanceService:
                             stats["updated"] += 1
                         if reset:
                             stats["reset"] += 1
-                            await MexicoPanelMaintenanceService._notify_reset(admin_bot, current)
+                            await MexicoPanelMaintenanceService._notify_reset(
+                                admin_bot,
+                                panel_username=current.panel_username or "",
+                                telegram_user_id=current.sold_to_user_id,
+                            )
                     await session.commit()
             except Exception as exc:  # noqa: BLE001
                 stats["failed"] += 1
                 logger.warning("Mexico maintenance failed for config=%s: %s", config.id, exc, exc_info=True)
             await asyncio.sleep(0.05)
+
+        known_tokens = {str(config.public_sub_token or "") for config in configs}
+        namahdod_panel = panels.get("mexico_namahdod")
+        namahdod_users = panel_users.get("mexico_namahdod")
+        if namahdod_panel is not None and namahdod_users is not None:
+            for item in synced_configs:
+                token = str(item.get("token") or "").strip()
+                if not token or token in known_tokens:
+                    continue
+                if not _is_synced_namahdod_item(item, namahdod_users):
+                    continue
+                stats["external_checked"] += 1
+                username = _synced_username(item)
+                device_limit = _synced_device_limit(item)
+                try:
+                    user_payload = namahdod_users.get(username)
+                    if user_payload is None:
+                        user_payload, outcome = await MexicoPanelMaintenanceService._restore_external_missing(
+                            namahdod_panel,
+                            item,
+                            device_limit,
+                        )
+                        if outcome != "restored":
+                            stats["skipped"] += 1
+                            continue
+                        username = str(user_payload.get("username") or username)
+                        namahdod_users[username] = user_payload or {}
+                        stats["external_restored"] += 1
+                    else:
+                        changed, reset = await MexicoPanelMaintenanceService._update_external_existing(
+                            namahdod_panel,
+                            item,
+                            user_payload,
+                            device_limit,
+                        )
+                        if changed:
+                            stats["external_updated"] += 1
+                        if reset:
+                            stats["reset"] += 1
+                            await MexicoPanelMaintenanceService._notify_reset(
+                                admin_bot,
+                                panel_username=username,
+                                telegram_user_id=_positive_int(item.get("telegram_user_id")) or None,
+                                source="تبدیل دستی پنل ساب",
+                            )
+                except Exception as exc:  # noqa: BLE001
+                    stats["failed"] += 1
+                    logger.warning(
+                        "Mexico maintenance failed for external token=%s: %s",
+                        token,
+                        exc,
+                        exc_info=True,
+                    )
+                await asyncio.sleep(0.05)
         return stats
 
 
