@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -89,6 +90,14 @@ def _restored_expire(metadata: dict, plan: ShopPlan | None) -> int:
     return int((now + timedelta(days=duration_days) - timedelta(minutes=1)).timestamp())
 
 
+def _recovery_username(value: str, config_id: int, *, force_suffix: bool = False) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_@.-]+", "_", str(value or "").strip())
+    cleaned = re.sub(r"_+", "_", cleaned).strip("_.-") or "PhantomHubs"
+    suffix = f"_r{config_id}" if force_suffix else ""
+    maximum_base = max(3, 32 - len(suffix))
+    return f"{cleaned[:maximum_base]}{suffix}"
+
+
 def _dominant_group_ids(users: dict[str, dict]) -> list[int]:
     groups = [
         tuple(_positive_int(value) for value in item.get("group_ids") or [] if _positive_int(value) > 0)
@@ -173,33 +182,50 @@ class MexicoPanelMaintenanceService:
             config.usage_offset_bytes = 0
             config.display_total_bytes = 0
 
+        original_username = config.panel_username
+        target_username = _recovery_username(original_username, config.id)
         async with ProvisioningService._api_client(panel) as (client, token):
             headers = {"Authorization": f"Bearer {token}"}
             access_fields = await ProvisioningService._access_fields(client, panel, headers)
             if device_limit > 0:
                 access_fields["hwid_limit"] = device_limit
-            response = await client.post(
-                "/api/user",
-                headers=headers,
-                json={
-                    "username": config.panel_username,
+            create_payload = {
+                    "username": target_username,
                     "status": "active",
                     "expire": expire,
                     "on_hold_expire_duration": None,
                     "data_limit": data_limit,
                     "data_limit_reset_strategy": "no_reset",
                     **access_fields,
-                },
+                }
+            response = await client.post(
+                "/api/user",
+                headers=headers,
+                json=create_payload,
             )
             if response.status_code == 409:
                 response = await client.get(
-                    f"/api/user/{config.panel_username}",
+                    f"/api/user/{target_username}",
                     headers=headers,
                 )
+                if response.status_code == 404:
+                    target_username = _recovery_username(original_username, config.id, force_suffix=True)
+                    create_payload["username"] = target_username
+                    response = await client.post(
+                        "/api/user",
+                        headers=headers,
+                        json=create_payload,
+                    )
+                    if response.status_code == 409:
+                        response = await client.get(
+                            f"/api/user/{target_username}",
+                            headers=headers,
+                        )
             if response.is_error:
-                raise _panel_error(response, f"بازیابی {config.panel_username}")
+                raise _panel_error(response, f"بازیابی {original_username}")
             payload = response.json()
 
+        config.panel_username = str(payload.get("username") or target_username)
         config.sub_link = _subscription_url(panel.base_url, payload)
         config.subscription_device_limit = device_limit
         config.panel_deleted_at = None

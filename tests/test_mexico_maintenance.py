@@ -5,6 +5,7 @@ from bot_package.services.mexico_panel_maintenance_service import (
     _dominant_group_ids,
     _desired_device_limit,
     _remaining_hajmi_bytes,
+    _recovery_username,
     _restored_expire,
     _user_rows,
 )
@@ -77,3 +78,9 @@ def test_missing_expiry_is_bounded_to_pasarguard_maximum():
 
     seconds = remaining - int(datetime.now(timezone.utc).timestamp())
     assert 29 * 86400 < seconds < 30 * 86400
+
+
+def test_recovery_username_cleans_legacy_names_and_adds_stable_collision_suffix():
+    assert _recovery_username("SinaJay namhadood", 847) == "SinaJay_namahdood"
+    assert _recovery_username("Khodam", 820, force_suffix=True) == "Khodam_r820"
+    assert _recovery_username("نام قدیمی", 850, force_suffix=True) == "PhantomHubs_r850"
