@@ -21,6 +21,10 @@ class ProvisioningError(RuntimeError):
     pass
 
 
+MEXICO_PANEL_KEYS = {"mexico_hajmi", "mexico_namahdod"}
+MEXICO_UNLIMITED_DATA_LIMIT_BYTES = 300 * 1024**3
+
+
 @dataclass(frozen=True)
 class ProvisionedSubscription:
     panel_key: str
@@ -576,9 +580,15 @@ class ProvisioningService:
         username = await ProvisioningService.next_username(session, plan)
         volume_gb = effective_volume_gb(plan)
         data_limit = volume_gb * 1024**3 if volume_gb > 0 else 0
+        if panel.key == "mexico_namahdod":
+            data_limit = MEXICO_UNLIMITED_DATA_LIMIT_BYTES
         async with ProvisioningService._api_client(panel) as (client, token):
             headers = {"Authorization": f"Bearer {token}"}
             access_fields = await ProvisioningService._access_fields(client, panel, headers)
+            device_limit = max(0, int(plan.subscription_device_limit or 0))
+            if panel.key in MEXICO_PANEL_KEYS:
+                device_limit = device_limit or 1
+                access_fields["hwid_limit"] = device_limit
             response = await client.post(
                 "/api/user",
                 headers=headers,
@@ -662,8 +672,15 @@ class ProvisioningService:
             raise ProvisioningError("برای این سرویس اطلاعات پنل یا نام کاربری قابل تشخیص نیست.")
         volume_gb = effective_volume_gb(plan)
         data_limit = volume_gb * 1024**3 if volume_gb > 0 else 0
+        if panel.key == "mexico_namahdod":
+            data_limit = MEXICO_UNLIMITED_DATA_LIMIT_BYTES
         async with ProvisioningService._api_client(panel) as (client, token):
             headers = {"Authorization": f"Bearer {token}"}
+            access_fields = await ProvisioningService._access_fields(client, panel, headers)
+            device_limit = max(0, int(config.subscription_device_limit or plan.subscription_device_limit or 0))
+            if panel.key in MEXICO_PANEL_KEYS:
+                device_limit = device_limit or 1
+                access_fields["hwid_limit"] = device_limit
             response = await client.put(
                 f"/api/user/{username}",
                 headers=headers,
@@ -671,6 +688,7 @@ class ProvisioningService:
                     "data_limit": data_limit,
                     "data_limit_reset_strategy": "no_reset",
                     **_renew_timing_payload(plan),
+                    **access_fields,
                 },
             )
             if response.is_error:
@@ -682,7 +700,7 @@ class ProvisioningService:
         config.panel_key = panel.key
         config.panel_username = username
         config.usage_offset_bytes = 0
-        config.display_total_bytes = data_limit if data_limit > 0 else None
+        config.display_total_bytes = 0 if panel.key == "mexico_namahdod" else (data_limit if data_limit > 0 else None)
         config.expired_detected_at = None
         config.deletion_due_at = None
         config.panel_deleted_at = None

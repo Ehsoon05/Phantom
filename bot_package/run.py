@@ -18,6 +18,7 @@ from bot_package.services.shop_customization_service import ShopCustomizationSer
 from bot_package.services.service_reminder_service import register_service_reminder_jobs
 from bot_package.services.panel_bridge_jobs import register_panel_bridge_jobs
 from bot_package.services.panel_bridge_service import PanelBridgeService
+from bot_package.services.mexico_panel_maintenance_service import register_mexico_panel_maintenance_job
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ async def main():
     register_crypto_jobs(main_app)
     await register_service_reminder_jobs(main_app)
     register_panel_bridge_jobs(main_app)
+    register_mexico_panel_maintenance_job(admin_app)
 
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()

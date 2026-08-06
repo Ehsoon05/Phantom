@@ -129,7 +129,11 @@ class SubscriptionLinkService:
             "panel_username": config.panel_username,
             "source_panel_key": config.panel_key,
             "usage_offset_bytes": max(0, int(config.usage_offset_bytes or 0)),
-            "display_total_bytes": max(0, int(config.display_total_bytes or 0)),
+            "display_total_bytes": (
+                max(0, int(config.display_total_bytes))
+                if config.display_total_bytes is not None
+                else None
+            ),
             "telegram_user_id": int(telegram_user_id or config.sold_to_user_id or 0) or None,
             "device_limit": max(0, int(device_limit)) if device_limit is not None else None,
             "show_config_preview": show_config_preview,

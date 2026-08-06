@@ -95,6 +95,12 @@ async def _create_panel_config(
         panel_key=provisioned.panel_key,
         panel_username=provisioned.username,
         provision_source="panel",
+        subscription_device_limit=(
+            max(0, int(plan.subscription_device_limit or 0)) or 1
+            if provisioned.panel_key in {"mexico_hajmi", "mexico_namahdod"}
+            else max(0, int(plan.subscription_device_limit or 0))
+        ),
+        display_total_bytes=0 if provisioned.panel_key == "mexico_namahdod" else None,
         is_sold=True,
         sold_to_user_id=user_id,
         sold_at=datetime.now(timezone.utc),
