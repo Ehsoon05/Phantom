@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -68,6 +68,27 @@ def _remaining_hajmi_bytes(config: Config, metadata: dict) -> tuple[int, int, in
     return total, used, max(total - used, 0)
 
 
+def _cached_metadata(item: dict | None) -> dict | None:
+    if not item or not item.get("cache_available"):
+        return None
+    return {
+        "status": str(item.get("upstream_status") or "active"),
+        "total": _positive_int(item.get("upstream_total_bytes")),
+        "used": _positive_int(item.get("upstream_used_bytes")),
+        "expire": _positive_int(item.get("upstream_expire")),
+    }
+
+
+def _restored_expire(metadata: dict, plan: ShopPlan | None) -> int:
+    now = datetime.now(timezone.utc)
+    maximum = now + timedelta(days=30) - timedelta(minutes=1)
+    expire = _positive_int(metadata.get("expire"))
+    if expire > 0:
+        return min(expire, int(maximum.timestamp()))
+    duration_days = max(1, min(30, int(plan.provision_duration_days or plan.duration_days or 30))) if plan else 30
+    return int((now + timedelta(days=duration_days) - timedelta(minutes=1)).timestamp())
+
+
 def _dominant_group_ids(users: dict[str, dict]) -> list[int]:
     groups = [
         tuple(_positive_int(value) for value in item.get("group_ids") or [] if _positive_int(value) > 0)
@@ -125,17 +146,21 @@ class MexicoPanelMaintenanceService:
         config: Config,
         plan: ShopPlan | None,
         device_limit: int,
+        synced: dict | None,
     ) -> tuple[dict | None, str]:
         if not config.public_sub_token or not config.panel_username:
             return None, "missing_identity"
         metadata = await SubscriptionLinkService.fetch_metadata(config.public_sub_token)
         if not metadata:
+            metadata = _cached_metadata(synced)
+        if not metadata:
             return None, "missing_metadata"
 
-        expire = _positive_int(metadata.get("expire"))
+        original_expire = _positive_int(metadata.get("expire"))
         now = int(datetime.now(timezone.utc).timestamp())
-        if expire and expire <= now:
+        if original_expire and original_expire <= now:
             return None, "expired"
+        expire = _restored_expire(metadata, plan)
 
         if panel.key == "mexico_hajmi":
             total, used, data_limit = _remaining_hajmi_bytes(config, metadata)
@@ -364,6 +389,7 @@ class MexicoPanelMaintenanceService:
                             current,
                             plan,
                             device_limit,
+                            synced,
                         )
                         if outcome != "restored":
                             stats["skipped"] += 1

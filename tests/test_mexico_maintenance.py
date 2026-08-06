@@ -1,9 +1,11 @@
 from types import SimpleNamespace
 
 from bot_package.services.mexico_panel_maintenance_service import (
+    _cached_metadata,
     _dominant_group_ids,
     _desired_device_limit,
     _remaining_hajmi_bytes,
+    _restored_expire,
     _user_rows,
 )
 
@@ -48,3 +50,30 @@ def test_dominant_group_ids_follow_the_live_panel_users():
     }
 
     assert _dominant_group_ids(users) == [7]
+
+
+def test_cached_subscription_metadata_is_used_when_live_upstream_is_gone():
+    assert _cached_metadata(
+        {
+            "cache_available": True,
+            "upstream_status": "active",
+            "upstream_total_bytes": 20 * 1024**3,
+            "upstream_used_bytes": 7 * 1024**3,
+            "upstream_expire": 1_900_000_000,
+        }
+    ) == {
+        "status": "active",
+        "total": 20 * 1024**3,
+        "used": 7 * 1024**3,
+        "expire": 1_900_000_000,
+    }
+
+
+def test_missing_expiry_is_bounded_to_pasarguard_maximum():
+    plan = SimpleNamespace(provision_duration_days=0, duration_days=90)
+    remaining = _restored_expire({"expire": 0}, plan)
+
+    from datetime import datetime, timezone
+
+    seconds = remaining - int(datetime.now(timezone.utc).timestamp())
+    assert 29 * 86400 < seconds < 30 * 86400
