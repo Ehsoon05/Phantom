@@ -8,6 +8,7 @@ from bot_package.services.mexico_panel_maintenance_service import (
     _desired_device_limit,
     _is_synced_namahdod_item,
     _remaining_hajmi_bytes,
+    _recovery_base_username,
     _recovery_username,
     _restored_expire,
     _stored_recovery_metadata,
@@ -201,3 +202,9 @@ def test_recovery_username_cleans_legacy_names_and_adds_stable_collision_suffix(
     assert _recovery_username("SinaJay namhadood", 847) == "SinaJay_namhadood"
     assert _recovery_username("Khodam", 820, force_suffix=True) == "Khodam_r820"
     assert _recovery_username("نام قدیمی", 850, force_suffix=True) == "PhantomHubs_r850"
+
+
+def test_recovery_base_username_only_removes_generated_suffix():
+    assert _recovery_base_username("LidsoVIP_Unlimited_114_r795") == "LidsoVIP_Unlimited_114"
+    assert _recovery_base_username("customer_r2_old") == "customer_r2_old"
+    assert _recovery_base_username("regular-user") == "regular-user"

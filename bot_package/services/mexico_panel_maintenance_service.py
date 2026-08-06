@@ -153,6 +153,12 @@ def _recovery_username(value: str, config_id: int, *, force_suffix: bool = False
     return f"{cleaned[:maximum_base]}{suffix}"
 
 
+def _recovery_base_username(value: str) -> str:
+    username = str(value or "").strip()
+    match = re.match(r"^(?P<base>.+)_r[0-9]+$", username)
+    return match.group("base") if match else username
+
+
 def _dominant_group_ids(users: dict[str, dict]) -> list[int]:
     groups = [
         tuple(_positive_int(value) for value in item.get("group_ids") or [] if _positive_int(value) > 0)
@@ -202,6 +208,34 @@ class MexicoPanelMaintenanceService:
                 .order_by(Purchase.purchased_at.desc())
             )
         ).scalars().first()
+
+    @staticmethod
+    async def _bind_config_to_existing(
+        session,
+        panel: ProvisionPanel,
+        config: Config,
+        plan: ShopPlan | None,
+        user_payload: dict,
+        device_limit: int,
+    ) -> None:
+        username = str(user_payload.get("username") or "").strip()
+        if not username:
+            raise ValueError("Existing provider user has no username")
+        config.panel_username = username
+        config.sub_link = _subscription_url(panel.base_url, user_payload)
+        config.subscription_device_limit = device_limit
+        config.panel_deleted_at = None
+        config.expired_detected_at = None
+        config.deletion_due_at = None
+        await session.flush()
+        purchase = await MexicoPanelMaintenanceService._latest_purchase(session, config.id)
+        await SubscriptionLinkService.sync_to_panel(
+            config,
+            purchase.service_name if purchase else None,
+            device_limit=device_limit,
+            show_config_preview=plan.show_subscription_configs if plan else None,
+            telegram_user_id=config.sold_to_user_id,
+        )
 
     @staticmethod
     async def _restore_missing(
@@ -505,6 +539,7 @@ class MexicoPanelMaintenanceService:
             "external_checked": 0,
             "external_restored": 0,
             "external_updated": 0,
+            "rebound": 0,
         }
         synced_configs = await SubscriptionLinkService.list_panel_configs()
         synced_by_token = {
@@ -582,6 +617,20 @@ class MexicoPanelMaintenanceService:
                     synced = synced_by_token.get(current.public_sub_token or "")
                     device_limit = _desired_device_limit(current, plan, synced)
                     user_payload = panel_users.get(panel.key, {}).get(current.panel_username or "")
+                    if user_payload is None:
+                        base_username = _recovery_base_username(current.panel_username or "")
+                        base_payload = panel_users.get(panel.key, {}).get(base_username)
+                        if base_payload is not None and base_username != current.panel_username:
+                            await MexicoPanelMaintenanceService._bind_config_to_existing(
+                                session,
+                                panel,
+                                current,
+                                plan,
+                                base_payload,
+                                device_limit,
+                            )
+                            user_payload = base_payload
+                            stats["rebound"] += 1
                     if user_payload is None:
                         user_payload, outcome = await MexicoPanelMaintenanceService._restore_missing(
                             session,
