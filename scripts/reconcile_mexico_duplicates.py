@@ -82,6 +82,10 @@ async def reconcile(*, apply: bool) -> dict[str, int]:
         if not apply:
             continue
         try:
+            canonical = await MexicoPanelMaintenanceService._get_user(
+                panels[config.panel_key],
+                base,
+            )
             async with async_session() as session:
                 current = await session.get(Config, config.id)
                 if current is None:

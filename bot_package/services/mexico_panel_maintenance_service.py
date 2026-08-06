@@ -200,6 +200,20 @@ class MexicoPanelMaintenanceService:
         return users
 
     @staticmethod
+    async def _get_user(panel: ProvisionPanel, username: str) -> dict:
+        async with ProvisioningService._api_client(panel) as (client, token):
+            response = await client.get(
+                f"/api/user/{username}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if response.is_error:
+                raise _panel_error(response, f"دریافت کاربر {username}")
+            payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError(f"Provider returned an invalid user payload for {username}")
+        return payload
+
+    @staticmethod
     async def _latest_purchase(session, config_id: int) -> Purchase | None:
         return (
             await session.execute(
@@ -621,6 +635,10 @@ class MexicoPanelMaintenanceService:
                         base_username = _recovery_base_username(current.panel_username or "")
                         base_payload = panel_users.get(panel.key, {}).get(base_username)
                         if base_payload is not None and base_username != current.panel_username:
+                            base_payload = await MexicoPanelMaintenanceService._get_user(
+                                panel,
+                                base_username,
+                            )
                             await MexicoPanelMaintenanceService._bind_config_to_existing(
                                 session,
                                 panel,
