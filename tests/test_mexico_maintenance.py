@@ -81,6 +81,6 @@ def test_missing_expiry_is_bounded_to_pasarguard_maximum():
 
 
 def test_recovery_username_cleans_legacy_names_and_adds_stable_collision_suffix():
-    assert _recovery_username("SinaJay namhadood", 847) == "SinaJay_namahdood"
+    assert _recovery_username("SinaJay namhadood", 847) == "SinaJay_namhadood"
     assert _recovery_username("Khodam", 820, force_suffix=True) == "Khodam_r820"
     assert _recovery_username("نام قدیمی", 850, force_suffix=True) == "PhantomHubs_r850"
