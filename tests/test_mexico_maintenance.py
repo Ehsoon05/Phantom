@@ -8,6 +8,7 @@ from bot_package.services.mexico_panel_maintenance_service import (
     _recovery_username,
     _restored_expire,
     _stored_recovery_metadata,
+    _subscription_needs_sync,
     _user_rows,
 )
 
@@ -95,6 +96,22 @@ def test_namahdod_can_be_recovered_without_old_upstream_metadata():
         "used": 0,
         "expire": 0,
     }
+
+
+def test_subscription_sync_runs_only_for_changed_or_stale_panel_identity():
+    current = {"source_panel_key": "mexico_namahdod"}
+
+    assert _subscription_needs_sync("mexico_namahdod", current, False) is False
+    assert _subscription_needs_sync("mexico_namahdod", current, True) is True
+    assert _subscription_needs_sync("mexico_namahdod", None, False) is True
+    assert (
+        _subscription_needs_sync(
+            "mexico_namahdod",
+            {"source_panel_key": "mexico_hajmi"},
+            False,
+        )
+        is True
+    )
 
 
 def test_missing_expiry_is_bounded_to_pasarguard_maximum():

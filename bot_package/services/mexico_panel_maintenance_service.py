@@ -92,6 +92,12 @@ def _stored_recovery_metadata(config: Config, panel_key: str) -> dict | None:
     return {"status": "active", "total": total, "used": used, "expire": 0}
 
 
+def _subscription_needs_sync(panel_key: str, synced: dict | None, changed: bool) -> bool:
+    if changed or not synced:
+        return True
+    return str(synced.get("source_panel_key") or "") != panel_key
+
+
 def _restored_expire(metadata: dict, plan: ShopPlan | None) -> int:
     now = datetime.now(timezone.utc)
     maximum = now + timedelta(days=30) - timedelta(minutes=1)
@@ -264,6 +270,7 @@ class MexicoPanelMaintenanceService:
         plan: ShopPlan | None,
         user_payload: dict,
         device_limit: int,
+        synced: dict | None,
     ) -> tuple[bool, bool]:
         purchase = await MexicoPanelMaintenanceService._latest_purchase(session, config.id)
         update: dict[str, Any] = {}
@@ -306,7 +313,7 @@ class MexicoPanelMaintenanceService:
         if panel.key == "mexico_namahdod" and config.display_total_bytes != 0:
             config.display_total_bytes = 0
             changed = True
-        if changed:
+        if _subscription_needs_sync(panel.key, synced, changed):
             await SubscriptionLinkService.sync_to_panel(
                 config,
                 purchase.service_name if purchase else None,
@@ -444,6 +451,7 @@ class MexicoPanelMaintenanceService:
                             plan,
                             user_payload,
                             device_limit,
+                            synced,
                         )
                         if changed:
                             stats["updated"] += 1
