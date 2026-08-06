@@ -150,9 +150,9 @@ class MexicoPanelMaintenanceService:
     ) -> tuple[dict | None, str]:
         if not config.public_sub_token or not config.panel_username:
             return None, "missing_identity"
-        metadata = await SubscriptionLinkService.fetch_metadata(config.public_sub_token)
+        metadata = _cached_metadata(synced)
         if not metadata:
-            metadata = _cached_metadata(synced)
+            metadata = await SubscriptionLinkService.fetch_metadata(config.public_sub_token)
         if not metadata:
             return None, "missing_metadata"
 
