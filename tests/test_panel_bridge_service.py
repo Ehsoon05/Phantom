@@ -16,7 +16,7 @@ from bot_package.services.panel_bridge_service import (
     _prune_inbound_selection,
     _remaining_data_limit,
     _rule_matches,
-    _stable_external_panel_key,
+    _external_panel_key_for_rule,
     _target_timing,
 )
 from bot_package.models import Base, BotSetting, PanelBridgeRule
@@ -70,10 +70,29 @@ def test_existing_external_panel_classification_wins_over_stale_sync_payload():
     source_keys = ["mexico_hajmi", "mexico_namahdod"]
 
     assert (
-        _stable_external_panel_key("mexico_hajmi", "mexico_namahdod", source_keys)
+        _external_panel_key_for_rule("mexico_hajmi", "mexico_namahdod", source_keys)
         == "mexico_namahdod"
     )
-    assert _stable_external_panel_key("mexico_hajmi", "", source_keys) == "mexico_hajmi"
+    assert _external_panel_key_for_rule("mexico_hajmi", "", source_keys) == "mexico_hajmi"
+
+
+def test_external_import_skips_accounts_outside_the_bridge_rule_scope():
+    assert (
+        _external_panel_key_for_rule(
+            "mexico_hajmi",
+            "mexico_namahdod",
+            ["mexico_hajmi"],
+        )
+        is None
+    )
+    assert (
+        _external_panel_key_for_rule(
+            "mexico_namahdod",
+            "",
+            ["mexico_hajmi"],
+        )
+        is None
+    )
 
 
 def test_external_username_prefers_the_identity_read_from_subscription_content():

@@ -126,18 +126,22 @@ def _external_source_payload(item: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _stable_external_panel_key(
+def _external_panel_key_for_rule(
     requested_key: str,
     existing_panel_key: str,
     source_keys: list[str],
-) -> str:
+) -> str | None:
     """Keep an imported subscription on its established account.
 
     Some providers expose multiple accounts on the same hostname. A stale sync
     payload must not silently move an existing config between those accounts.
     """
-    if existing_panel_key and existing_panel_key in source_keys:
+    if existing_panel_key:
+        if existing_panel_key not in source_keys:
+            return None
         return existing_panel_key
+    if requested_key and requested_key not in source_keys:
+        return None
     return requested_key
 
 
@@ -296,11 +300,13 @@ class PanelBridgeService:
                 if existing is not None and existing.provision_source != "external_subscription":
                     continue
 
-                requested_key = _stable_external_panel_key(
+                requested_key = _external_panel_key_for_rule(
                     str(item.get("source_panel_key") or "").strip(),
                     str(existing.panel_key or "") if existing else "",
                     source_keys,
                 )
+                if requested_key is None:
+                    continue
                 upstream_host = (urlparse(upstream_url).hostname or "").lower()
                 candidates = [panel for panel in panels if panel.key == requested_key]
                 if not candidates:
