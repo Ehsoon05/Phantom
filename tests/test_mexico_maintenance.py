@@ -1,8 +1,9 @@
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from bot_package.services.mexico_panel_maintenance_service import (
+    MexicoPanelMaintenanceService,
     _cached_metadata,
     _dominant_group_ids,
     _desired_device_limit,
@@ -208,3 +209,55 @@ def test_recovery_base_username_only_removes_generated_suffix():
     assert _recovery_base_username("LidsoVIP_Unlimited_114_r795") == "LidsoVIP_Unlimited_114"
     assert _recovery_base_username("customer_r2_old") == "customer_r2_old"
     assert _recovery_base_username("regular-user") == "regular-user"
+
+
+def test_rebinding_shared_upstream_uses_a_fragment_alias():
+    session = SimpleNamespace(
+        execute=AsyncMock(
+            return_value=SimpleNamespace(scalar_one_or_none=lambda: 902)
+        ),
+        flush=AsyncMock(),
+    )
+    panel = SimpleNamespace(
+        key="mexico_namahdod",
+        base_url="https://provider.example",
+    )
+    config = SimpleNamespace(
+        id=804,
+        panel_username="Nadia_r804",
+        sub_link="https://old.example/sub/nadia",
+        subscription_device_limit=2,
+        panel_deleted_at=None,
+        expired_detected_at=None,
+        deletion_due_at=None,
+        sold_to_user_id=None,
+    )
+
+    with (
+        patch.object(
+            MexicoPanelMaintenanceService,
+            "_latest_purchase",
+            new=AsyncMock(return_value=None),
+        ),
+        patch.object(
+            SubscriptionLinkService,
+            "sync_to_panel",
+            new=AsyncMock(return_value=True),
+        ),
+    ):
+        asyncio.run(
+            MexicoPanelMaintenanceService._bind_config_to_existing(
+                session,
+                panel,
+                config,
+                None,
+                {
+                    "username": "Nadia",
+                    "subscription_url": "/sub/nadia-token",
+                },
+                2,
+            )
+        )
+
+    assert config.panel_username == "Nadia"
+    assert config.sub_link == "https://provider.example/sub/nadia-token#phantom-alias-804"

@@ -235,8 +235,21 @@ class MexicoPanelMaintenanceService:
         username = str(user_payload.get("username") or "").strip()
         if not username:
             raise ValueError("Existing provider user has no username")
+        sub_link = _subscription_url(panel.base_url, user_payload)
+        duplicate_config_id = (
+            await session.execute(
+                select(Config.id)
+                .where(Config.sub_link == sub_link, Config.id != config.id)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if duplicate_config_id is not None:
+            # URL fragments are not sent to the provider. They let multiple
+            # public tokens safely reference the same upstream subscription
+            # while preserving Config.sub_link's uniqueness constraint.
+            sub_link = f"{sub_link.split('#', 1)[0]}#phantom-alias-{config.id}"
         config.panel_username = username
-        config.sub_link = _subscription_url(panel.base_url, user_payload)
+        config.sub_link = sub_link
         config.subscription_device_limit = device_limit
         config.panel_deleted_at = None
         config.expired_detected_at = None
