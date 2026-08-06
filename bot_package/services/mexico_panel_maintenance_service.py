@@ -80,6 +80,18 @@ def _cached_metadata(item: dict | None) -> dict | None:
     }
 
 
+def _stored_recovery_metadata(config: Config, panel_key: str) -> dict | None:
+    if panel_key == "mexico_namahdod":
+        return {"status": "active", "total": 0, "used": 0, "expire": 0}
+    total = _positive_int(config.display_total_bytes)
+    if total <= 0:
+        total = max(0, int(config.volume_gb or 0)) * 1024**3
+    if total <= 0:
+        return None
+    used = min(_positive_int(config.usage_offset_bytes), total)
+    return {"status": "active", "total": total, "used": used, "expire": 0}
+
+
 def _restored_expire(metadata: dict, plan: ShopPlan | None) -> int:
     now = datetime.now(timezone.utc)
     maximum = now + timedelta(days=30) - timedelta(minutes=1)
@@ -162,6 +174,8 @@ class MexicoPanelMaintenanceService:
         metadata = _cached_metadata(synced)
         if not metadata:
             metadata = await SubscriptionLinkService.fetch_metadata(config.public_sub_token)
+        if not metadata:
+            metadata = _stored_recovery_metadata(config, panel.key)
         if not metadata:
             return None, "missing_metadata"
 

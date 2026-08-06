@@ -16,6 +16,7 @@ from bot_package.services.panel_bridge_service import (
     _prune_inbound_selection,
     _remaining_data_limit,
     _rule_matches,
+    _stable_external_panel_key,
     _target_timing,
 )
 from bot_package.models import Base, BotSetting, PanelBridgeRule
@@ -63,6 +64,16 @@ def test_metadata_payload_preserves_usage_and_expiry():
 def test_external_panel_fragment_separates_unlimited_and_volume_accounts():
     assert _external_panel_fragment({"data_limit": 0}) == "namahdod"
     assert _external_panel_fragment({"data_limit": 10 * 1024**3}) == "hajmi"
+
+
+def test_existing_external_panel_classification_wins_over_stale_sync_payload():
+    source_keys = ["mexico_hajmi", "mexico_namahdod"]
+
+    assert (
+        _stable_external_panel_key("mexico_hajmi", "mexico_namahdod", source_keys)
+        == "mexico_namahdod"
+    )
+    assert _stable_external_panel_key("mexico_hajmi", "", source_keys) == "mexico_hajmi"
 
 
 def test_external_username_prefers_the_identity_read_from_subscription_content():

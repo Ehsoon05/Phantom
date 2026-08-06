@@ -7,6 +7,7 @@ from bot_package.services.mexico_panel_maintenance_service import (
     _remaining_hajmi_bytes,
     _recovery_username,
     _restored_expire,
+    _stored_recovery_metadata,
     _user_rows,
 )
 
@@ -67,6 +68,32 @@ def test_cached_subscription_metadata_is_used_when_live_upstream_is_gone():
         "total": 20 * 1024**3,
         "used": 7 * 1024**3,
         "expire": 1_900_000_000,
+    }
+
+
+def test_stored_hajmi_state_recovers_remaining_volume_without_upstream_cache():
+    config = SimpleNamespace(
+        display_total_bytes=20 * 1024**3,
+        usage_offset_bytes=7 * 1024**3,
+        volume_gb=20,
+    )
+
+    assert _stored_recovery_metadata(config, "mexico_hajmi") == {
+        "status": "active",
+        "total": 20 * 1024**3,
+        "used": 7 * 1024**3,
+        "expire": 0,
+    }
+
+
+def test_namahdod_can_be_recovered_without_old_upstream_metadata():
+    config = SimpleNamespace(display_total_bytes=0, usage_offset_bytes=0, volume_gb=0)
+
+    assert _stored_recovery_metadata(config, "mexico_namahdod") == {
+        "status": "active",
+        "total": 0,
+        "used": 0,
+        "expire": 0,
     }
 
 
