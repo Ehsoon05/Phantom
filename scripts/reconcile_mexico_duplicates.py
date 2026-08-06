@@ -359,6 +359,99 @@ async def reconcile_cross_panel_unlimited(*, apply: bool) -> dict[str, int]:
         except Exception as exc:  # noqa: BLE001
             stats["failed"] += 1
             print(f"FAILED {source_username}: {exc}")
+
+    # Finish interrupted moves where the database already points at the
+    # unlimited account but the generated source user is still orphaned in
+    # the volumetric account.
+    referenced_hajmi = {
+        str(row.panel_username or "")
+        for row in configs
+        if row.panel_key == "mexico_hajmi"
+    }
+    for source_username, source_payload in hajmi_users.items():
+        if source_username in referenced_hajmi:
+            continue
+        if not re.search(r"_r[0-9]+$", source_username):
+            continue
+        root = _recovery_base_username(source_username).casefold()
+        target_username = namahdod_by_root.get(root)
+        target_summary = namahdod_users.get(target_username or "")
+        if target_summary is None or not target_username:
+            continue
+        source_expire = str(source_payload.get("expire") or "")
+        target_expire = str(target_summary.get("expire") or "")
+        if source_expire and target_expire and source_expire != target_expire:
+            continue
+        related = [
+            row
+            for row in configs
+            if row.panel_key == "mexico_namahdod"
+            and _recovery_base_username(row.panel_username or "").casefold() == root
+        ]
+        if not related:
+            continue
+        desired_limit = max(
+            _desired_device_limit(
+                row,
+                plans.get(row.shop_plan_id),
+                synced.get(row.public_sub_token or ""),
+            )
+            for row in related
+        )
+        stats["groups"] += 1
+        print(
+            f"finish orphan {source_username} -> {target_username}, "
+            f"configs={len(related)}, hwid={desired_limit}"
+        )
+        if not apply:
+            continue
+        try:
+            target_payload = await MexicoPanelMaintenanceService._get_user(
+                namahdod_panel,
+                target_username,
+            )
+            update = {}
+            if int(target_payload.get("hwid_limit") or 0) != desired_limit:
+                update["hwid_limit"] = desired_limit
+            if int(target_payload.get("data_limit") or 0) != MEXICO_UNLIMITED_DATA_LIMIT_BYTES:
+                update["data_limit"] = MEXICO_UNLIMITED_DATA_LIMIT_BYTES
+                update["data_limit_reset_strategy"] = "no_reset"
+            if update:
+                async with ProvisioningService._api_client(namahdod_panel) as (client, token):
+                    response = await client.put(
+                        f"/api/user/{target_username}",
+                        headers={"Authorization": f"Bearer {token}"},
+                        json=update,
+                    )
+                    if response.is_error:
+                        raise _panel_error(response, f"به‌روزرسانی {target_username}")
+                target_payload = await MexicoPanelMaintenanceService._get_user(
+                    namahdod_panel,
+                    target_username,
+                )
+            for row in related:
+                async with async_session() as session:
+                    current = await session.get(Config, row.id)
+                    if current is None:
+                        continue
+                    current.display_total_bytes = 0
+                    current.usage_offset_bytes = 0
+                    current.subscription_device_limit = desired_limit
+                    await MexicoPanelMaintenanceService._bind_config_to_existing(
+                        session,
+                        namahdod_panel,
+                        current,
+                        plans.get(current.shop_plan_id),
+                        target_payload,
+                        desired_limit,
+                    )
+                    await session.commit()
+                stats["configs_rebound"] += 1
+            await _delete_user(hajmi_panel, source_username)
+            stats["source_deleted"] += 1
+        except Exception as exc:  # noqa: BLE001
+            stats["failed"] += 1
+            print(f"FAILED orphan {source_username}: {exc}")
     return stats
 
 
