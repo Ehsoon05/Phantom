@@ -40,6 +40,12 @@ import {
 } from "@/lib/admin-api";
 
 const toman = (value: number) => `${new Intl.NumberFormat("fa-IR").format(value)} تومان`;
+const volumeLabel = (value: number | null | undefined) => {
+  const volume = Math.max(0, Number(value || 0));
+  if (!volume) return "نامحدود";
+  if (volume < 1) return `${new Intl.NumberFormat("fa-IR", { maximumFractionDigits: 2 }).format(volume * 1024)} MB`;
+  return `${new Intl.NumberFormat("fa-IR", { maximumFractionDigits: 3 }).format(volume)} GB`;
+};
 
 const emptyOffer = {
   title: "",
@@ -454,7 +460,7 @@ export function SellersPage() {
                           {!offer.is_active && <span className="rounded bg-destructive/10 px-2 py-0.5 text-xs text-destructive">غیرفعال</span>}
                         </div>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          {offer.volume_gb ? `${offer.volume_gb}GB` : "حجم نامحدود"} · حداقل حجم {offer.min_volume_gb || (offer.pricing_mode === "per_gb" ? 1 : 0)}GB · {offer.default_duration_days || "نامحدود"} روز · حداقل مدت {offer.min_duration_days} روز
+                          {volumeLabel(offer.volume_gb)} · حداقل حجم {volumeLabel(offer.min_volume_gb || (offer.pricing_mode === "per_gb" ? 0.001 : 0))} · {offer.default_duration_days || "نامحدود"} روز · حداقل مدت {offer.min_duration_days} روز
                         </p>
                       </div>
                       <div className="flex items-center justify-between gap-3 md:justify-end">
@@ -502,7 +508,7 @@ export function SellersPage() {
                         <div className="min-w-0">
                           <strong className="block truncate font-mono text-sm" dir="ltr">{service.panel_username}</strong>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            {service.panel_key} · {service.volume_gb ? `${service.volume_gb}GB` : "حجم نامحدود"} · {service.duration_days ? `${service.duration_days} روز` : "زمان نامحدود"} · {service.status}
+                            {service.panel_key} · {volumeLabel(service.volume_gb)} · {service.duration_days ? `${service.duration_days} روز` : "زمان نامحدود"} · {service.status}
                           </p>
                         </div>
                       </div>
@@ -641,15 +647,15 @@ export function SellersPage() {
                 <select
                   className="h-10 rounded-md border bg-background px-3 text-sm"
                   value={offerForm.pricing_mode}
-                  onChange={(event) => {
-                    const pricingMode = event.target.value as "fixed" | "per_gb";
-                    setOfferForm({
-                      ...offerForm,
-                      pricing_mode: pricingMode,
-                      min_volume_gb: pricingMode === "per_gb" ? Math.max(1, offerForm.min_volume_gb) : offerForm.min_volume_gb,
-                      volume_gb: pricingMode === "per_gb" ? Math.max(1, offerForm.volume_gb) : offerForm.volume_gb,
-                    });
-                  }}
+                      onChange={(event) => {
+                        const pricingMode = event.target.value as "fixed" | "per_gb";
+                        setOfferForm({
+                          ...offerForm,
+                          pricing_mode: pricingMode,
+                          min_volume_gb: pricingMode === "per_gb" ? Math.max(0.001, offerForm.min_volume_gb) : offerForm.min_volume_gb,
+                          volume_gb: pricingMode === "per_gb" ? Math.max(0.001, offerForm.volume_gb) : offerForm.volume_gb,
+                        });
+                      }}
                 >
                   <option value="fixed">سرویس با مبلغ ثابت</option>
                   <option value="per_gb">سرویس حجمی با قیمت هر گیگ</option>
@@ -662,16 +668,18 @@ export function SellersPage() {
                 <Input
                   dir="ltr"
                   type="number"
-                  min={Math.max(offerForm.min_volume_gb, offerForm.pricing_mode === "per_gb" ? 1 : 0)}
+                  step="0.001"
+                  min={Math.max(offerForm.min_volume_gb, offerForm.pricing_mode === "per_gb" ? 0.001 : 0)}
                   value={offerForm.volume_gb}
                   onChange={(event) => setOfferForm({ ...offerForm, volume_gb: Number(event.target.value) })}
                 />
               </Field>
-              <Field label="حداقل حجم قابل ساخت (GB)">
+              <Field label={`حداقل حجم قابل ساخت (${volumeLabel(offerForm.min_volume_gb)})`}>
                 <Input
                   dir="ltr"
                   type="number"
-                  min={offerForm.pricing_mode === "per_gb" ? 1 : 0}
+                  step="0.001"
+                  min={offerForm.pricing_mode === "per_gb" ? 0.001 : 0}
                   value={offerForm.min_volume_gb}
                   onChange={(event) => setOfferForm({ ...offerForm, min_volume_gb: Number(event.target.value) })}
                 />
