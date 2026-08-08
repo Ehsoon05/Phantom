@@ -159,6 +159,15 @@ def _external_panel_fragment(source_payload: dict[str, Any]) -> str:
     return "namahdod" if int(source_payload.get("data_limit") or 0) <= 0 else "hajmi"
 
 
+def _external_item_looks_unlimited(item: dict[str, Any], username: str = "") -> bool:
+    identity = " ".join(
+        str(item.get(key) or "")
+        for key in ("service_name", "panel_username", "upstream_panel_username", "upstream_title")
+    )
+    identity = f"{identity} {username}".casefold()
+    return any(marker in identity for marker in ("unlimited", "namah", "نامحدود", "nolimit", "no limit"))
+
+
 def _external_username(item: dict[str, Any], upstream_url: str) -> str:
     return str(
         item.get("upstream_panel_username")
@@ -322,6 +331,14 @@ class PanelBridgeService:
                 if not username:
                     continue
 
+                if (
+                    requested_key == "mexico_hajmi"
+                    and "mexico_namahdod" in source_keys
+                    and _external_item_looks_unlimited(item, username)
+                ):
+                    requested_key = "mexico_namahdod"
+                    candidates = [panel for panel in panels if panel.key == requested_key]
+
                 source_payload = _external_source_payload(item)
                 if source_payload is not None:
                     if source_payload["status"] not in {"active", "on_hold"} and existing is None:
@@ -338,7 +355,11 @@ class PanelBridgeService:
 
                 source_limit = int(source_payload.get("data_limit") or 0)
                 external_volume = int(item.get("volume_gb") or 0)
-                volume_gb = external_volume or (source_limit // (1024**3) if source_limit > 0 else 0)
+                volume_gb = (
+                    0
+                    if resolved_panel.key == "mexico_namahdod"
+                    else external_volume or (source_limit // (1024**3) if source_limit > 0 else 0)
+                )
                 telegram_user_id = int(item.get("telegram_user_id") or 0)
                 previous_identity = (
                     existing.sub_link,
@@ -362,6 +383,8 @@ class PanelBridgeService:
                 config.public_sub_token = token
                 config.panel_key = resolved_panel.key
                 config.panel_username = username
+                if resolved_panel.key == "mexico_namahdod":
+                    config.display_total_bytes = 0
                 config.is_sold = True
                 config.sold_to_user_id = telegram_user_id or config.sold_to_user_id
                 await session.flush()

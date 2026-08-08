@@ -11,6 +11,7 @@ from bot_package.services.panel_bridge_service import (
     _bridge_fallback_username,
     _external_source_payload,
     _external_username,
+    _external_item_looks_unlimited,
     _external_panel_fragment,
     _metadata_source_payload,
     _prune_inbound_selection,
@@ -64,6 +65,13 @@ def test_metadata_payload_preserves_usage_and_expiry():
 def test_external_panel_fragment_separates_unlimited_and_volume_accounts():
     assert _external_panel_fragment({"data_limit": 0}) == "namahdod"
     assert _external_panel_fragment({"data_limit": 10 * 1024**3}) == "hajmi"
+
+
+def test_external_item_looks_unlimited_from_identity_fields():
+    assert _external_item_looks_unlimited({"panel_username": "SinaJay_namhadood"})
+    assert _external_item_looks_unlimited({"service_name": "VIP Unlimited"})
+    assert _external_item_looks_unlimited({"upstream_title": "اشتراک نامحدود"})
+    assert not _external_item_looks_unlimited({"panel_username": "PhantomExpress25GB"})
 
 
 def test_existing_external_panel_classification_wins_over_stale_sync_payload():

@@ -174,7 +174,7 @@ class SubscriptionLinkService:
         payload = {
             "token": token,
             "upstream_url": upstream_url,
-            "volume_gb": max(0, int(item.get("volume_gb") or 0)),
+            "volume_gb": 0 if panel_key == "mexico_namahdod" else max(0, int(item.get("volume_gb") or 0)),
             "category_key": str(item.get("category_key") or "manual"),
             "is_sold": bool(item.get("is_sold")),
             "service_name": item.get("service_name"),
