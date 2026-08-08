@@ -586,8 +586,7 @@ class ProvisioningService:
             headers = {"Authorization": f"Bearer {token}"}
             access_fields = await ProvisioningService._access_fields(client, panel, headers)
             device_limit = max(0, int(plan.subscription_device_limit or 0))
-            if panel.key in MEXICO_PANEL_KEYS:
-                device_limit = device_limit or 1
+            if panel.key in MEXICO_PANEL_KEYS and device_limit > 0:
                 access_fields["hwid_limit"] = device_limit
             response = await client.post(
                 "/api/user",
@@ -678,8 +677,7 @@ class ProvisioningService:
             headers = {"Authorization": f"Bearer {token}"}
             access_fields = await ProvisioningService._access_fields(client, panel, headers)
             device_limit = max(0, int(config.subscription_device_limit or plan.subscription_device_limit or 0))
-            if panel.key in MEXICO_PANEL_KEYS:
-                device_limit = device_limit or 1
+            if panel.key in MEXICO_PANEL_KEYS and device_limit > 0:
                 access_fields["hwid_limit"] = device_limit
             response = await client.put(
                 f"/api/user/{username}",

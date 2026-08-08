@@ -12,7 +12,7 @@ from .coupon_service import CouponService
 from .inventory_service import InventoryService
 from .panel_bridge_service import PanelBridgeService
 from .price_service import PriceService
-from .provisioning_service import ProvisioningError, ProvisioningService
+from .provisioning_service import ProvisioningError, ProvisioningService, effective_volume_gb
 from .settings_service import SettingsService
 from .shop_customization_service import ShopCustomizationService
 from .subscription_link_service import SubscriptionLinkService
@@ -57,6 +57,8 @@ async def _public_or_raw_link(session: AsyncSession, config: Config, service_nam
             plan = await session.get(ShopPlan, config.shop_plan_id)
             if plan is not None:
                 device_limit = max(0, int(plan.subscription_device_limit or 0))
+        if device_limit is None and config.panel_key == "mexico_hajmi":
+            device_limit = 0
         if device_limit is None and config.panel_key:
             panel = (
                 await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == config.panel_key))
@@ -95,12 +97,16 @@ async def _create_panel_config(
         panel_key=provisioned.panel_key,
         panel_username=provisioned.username,
         provision_source="panel",
-        subscription_device_limit=(
-            max(0, int(plan.subscription_device_limit or 0)) or 1
-            if provisioned.panel_key in {"mexico_hajmi", "mexico_namahdod"}
-            else max(0, int(plan.subscription_device_limit or 0))
+        subscription_device_limit=max(0, int(plan.subscription_device_limit or 0)),
+        display_total_bytes=(
+            0
+            if provisioned.panel_key == "mexico_namahdod"
+            else (
+                effective_volume_gb(plan) * 1024**3
+                if provisioned.panel_key == "mexico_hajmi"
+                else None
+            )
         ),
-        display_total_bytes=0 if provisioned.panel_key == "mexico_namahdod" else None,
         is_sold=True,
         sold_to_user_id=user_id,
         sold_at=datetime.now(timezone.utc),

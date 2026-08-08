@@ -14,7 +14,7 @@ from telegram.error import TelegramError
 from telegram.ext import Application, ContextTypes
 
 from ..database import async_session
-from ..models import Admin, Config, ProvisionPanel, Purchase, ShopPlan
+from ..models import Admin, BotSetting, Config, ProvisionPanel, Purchase, ShopPlan
 from .provisioning_service import (
     MEXICO_PANEL_KEYS,
     MEXICO_UNLIMITED_DATA_LIMIT_BYTES,
@@ -28,6 +28,7 @@ from .subscription_link_service import SubscriptionLinkService
 logger = logging.getLogger(__name__)
 MAINTENANCE_INTERVAL_SECONDS = 1800
 ACTIVE_SYNC_STATES = {"active", "limited", "on_hold"}
+AUTO_RESTORE_SETTING_KEY = "mexico_auto_restore_missing"
 
 
 def _positive_int(value: Any) -> int:
@@ -37,7 +38,15 @@ def _positive_int(value: Any) -> int:
         return 0
 
 
+def _is_enabled_setting(value: str | None) -> bool:
+    return str(value or "").strip().casefold() in {"1", "true", "yes", "on", "enabled"}
+
+
 def _desired_device_limit(config: Config, plan: ShopPlan | None, synced: dict | None = None) -> int:
+    panel_key = str(getattr(config, "panel_key", "") or "")
+    if panel_key == "mexico_hajmi":
+        plan_limit = _positive_int(getattr(plan, "subscription_device_limit", 0)) if plan is not None else 0
+        return plan_limit
     configured = _positive_int(config.subscription_device_limit)
     if configured > 0:
         return configured
@@ -48,7 +57,19 @@ def _desired_device_limit(config: Config, plan: ShopPlan | None, synced: dict | 
         plan_limit = _positive_int(plan.subscription_device_limit)
         if plan_limit > 0:
             return plan_limit
-    return 1
+    return 0
+
+
+def _desired_hajmi_display_total(config: Config, plan: ShopPlan | None) -> int:
+    configured = _positive_int(config.display_total_bytes)
+    if configured > 0:
+        return configured
+    provision_volume = getattr(plan, "provision_volume_gb", None) if plan is not None else None
+    plan_volume = getattr(plan, "volume_gb", None) if plan is not None else None
+    volume_gb = provision_volume if provision_volume is not None else plan_volume
+    if volume_gb is None:
+        volume_gb = getattr(config, "volume_gb", 0)
+    return max(0, int(volume_gb or 0)) * 1024**3
 
 
 def _user_rows(payload: Any) -> list[dict]:
@@ -105,7 +126,7 @@ def _synced_username(item: dict) -> str:
 
 
 def _synced_device_limit(item: dict) -> int:
-    return max(1, _positive_int(item.get("device_limit")))
+    return _positive_int(item.get("device_limit"))
 
 
 def _is_synced_namahdod_item(item: dict, namahdod_users: dict[str, dict]) -> bool:
@@ -383,7 +404,8 @@ class MexicoPanelMaintenanceService:
         async with ProvisioningService._api_client(panel) as (client, api_token):
             headers = {"Authorization": f"Bearer {api_token}"}
             access_fields = await ProvisioningService._access_fields(client, panel, headers)
-            access_fields["hwid_limit"] = device_limit
+            if device_limit > 0:
+                access_fields["hwid_limit"] = device_limit
             create_payload = {
                 "username": target_username,
                 "status": "active",
@@ -477,7 +499,7 @@ class MexicoPanelMaintenanceService:
         purchase = await MexicoPanelMaintenanceService._latest_purchase(session, config.id)
         update: dict[str, Any] = {}
         current_hwid = _positive_int(user_payload.get("hwid_limit"))
-        if device_limit > 0 and current_hwid != device_limit:
+        if current_hwid != device_limit:
             update["hwid_limit"] = device_limit
 
         reset = False
@@ -511,6 +533,11 @@ class MexicoPanelMaintenanceService:
         if config.subscription_device_limit != device_limit:
             config.subscription_device_limit = device_limit
             changed = True
+        if panel.key == "mexico_hajmi":
+            desired_total = _desired_hajmi_display_total(config, plan)
+            if desired_total > 0 and config.display_total_bytes != desired_total:
+                config.display_total_bytes = desired_total
+                changed = True
         if panel.key == "mexico_namahdod" and config.display_total_bytes != 0:
             config.display_total_bytes = 0
             changed = True
@@ -601,6 +628,13 @@ class MexicoPanelMaintenanceService:
                     )
                 ).scalars().all()
             )
+            auto_restore_enabled = _is_enabled_setting(
+                (
+                    await session.execute(
+                        select(BotSetting.value).where(BotSetting.key == AUTO_RESTORE_SETTING_KEY)
+                    )
+                ).scalar_one_or_none()
+            )
             plans = {
                 plan.id: plan
                 for plan in (
@@ -662,7 +696,7 @@ class MexicoPanelMaintenanceService:
                             )
                             user_payload = base_payload
                             stats["rebound"] += 1
-                    if user_payload is None:
+                    if user_payload is None and auto_restore_enabled:
                         user_payload, outcome = await MexicoPanelMaintenanceService._restore_missing(
                             session,
                             panel,
@@ -676,6 +710,9 @@ class MexicoPanelMaintenanceService:
                             continue
                         stats["restored"] += 1
                         panel_users.setdefault(panel.key, {})[current.panel_username or ""] = user_payload or {}
+                    elif user_payload is None:
+                        stats["skipped"] += 1
+                        continue
                     else:
                         changed, reset = await MexicoPanelMaintenanceService._update_existing(
                             session,
@@ -716,7 +753,7 @@ class MexicoPanelMaintenanceService:
                 device_limit = _synced_device_limit(item)
                 try:
                     user_payload = namahdod_users.get(username)
-                    if user_payload is None:
+                    if user_payload is None and auto_restore_enabled:
                         user_payload, outcome = await MexicoPanelMaintenanceService._restore_external_missing(
                             namahdod_panel,
                             item,
@@ -728,6 +765,9 @@ class MexicoPanelMaintenanceService:
                         username = str(user_payload.get("username") or username)
                         namahdod_users[username] = user_payload or {}
                         stats["external_restored"] += 1
+                    elif user_payload is None:
+                        stats["skipped"] += 1
+                        continue
                     else:
                         changed, reset = await MexicoPanelMaintenanceService._update_external_existing(
                             namahdod_panel,

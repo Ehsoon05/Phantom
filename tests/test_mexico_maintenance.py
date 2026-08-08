@@ -7,6 +7,7 @@ from bot_package.services.mexico_panel_maintenance_service import (
     _cached_metadata,
     _dominant_group_ids,
     _desired_device_limit,
+    _desired_hajmi_display_total,
     _is_synced_namahdod_item,
     _remaining_hajmi_bytes,
     _recovery_base_username,
@@ -33,7 +34,17 @@ def test_device_limit_prefers_config_then_synced_panel_then_plan():
     config.subscription_device_limit = 0
     plan.subscription_device_limit = 0
     assert _desired_device_limit(config, plan, {"device_limit": 2}) == 2
-    assert _desired_device_limit(config, plan, None) == 1
+    assert _desired_device_limit(config, plan, None) == 0
+
+
+def test_hajmi_device_limit_ignores_legacy_one_when_plan_is_unlimited():
+    plan = SimpleNamespace(subscription_device_limit=0)
+    config = SimpleNamespace(panel_key="mexico_hajmi", subscription_device_limit=1)
+
+    assert _desired_device_limit(config, plan, {"device_limit": 1}) == 0
+
+    plan.subscription_device_limit = 2
+    assert _desired_device_limit(config, plan, {"device_limit": 1}) == 2
 
 
 def test_hajmi_restore_uses_only_remaining_volume():
@@ -46,6 +57,16 @@ def test_hajmi_restore_uses_only_remaining_volume():
     assert total == 20 * 1024**3
     assert used == 7 * 1024**3
     assert remaining == 13 * 1024**3
+
+
+def test_hajmi_display_total_uses_plan_or_config_volume_not_remaining():
+    config = SimpleNamespace(display_total_bytes=None, volume_gb=15)
+    plan = SimpleNamespace(provision_volume_gb=20, volume_gb=15)
+
+    assert _desired_hajmi_display_total(config, plan) == 20 * 1024**3
+
+    config.display_total_bytes = 30 * 1024**3
+    assert _desired_hajmi_display_total(config, plan) == 30 * 1024**3
 
 
 def test_panel_user_listing_accepts_pasarguard_shape():
@@ -145,8 +166,8 @@ def test_manual_subscription_is_detected_from_source_or_live_panel_owner():
     ) is False
 
 
-def test_manual_device_limit_defaults_to_one_and_keeps_explicit_limit():
-    assert _synced_device_limit({"device_limit": None}) == 1
+def test_manual_device_limit_defaults_to_unlimited_and_keeps_explicit_limit():
+    assert _synced_device_limit({"device_limit": None}) == 0
     assert _synced_device_limit({"device_limit": 2}) == 2
 
 

@@ -183,7 +183,7 @@ class SubscriptionLinkService:
             "usage_offset_bytes": 0,
             "display_total_bytes": max(0, int(display_total_bytes)),
             "telegram_user_id": int(item.get("telegram_user_id") or 0) or None,
-            "device_limit": max(1, int(device_limit)),
+            "device_limit": max(0, int(device_limit)),
         }
         return await SubscriptionLinkService._sync_payload(payload, f"token {token}")
 
