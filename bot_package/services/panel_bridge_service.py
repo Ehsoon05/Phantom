@@ -165,7 +165,10 @@ def _external_item_looks_unlimited(item: dict[str, Any], username: str = "") -> 
         for key in ("service_name", "panel_username", "upstream_panel_username", "upstream_title")
     )
     identity = f"{identity} {username}".casefold()
-    return any(marker in identity for marker in ("unlimited", "namah", "نامحدود", "nolimit", "no limit"))
+    return any(
+        marker in identity
+        for marker in ("unlimited", "namah", "namh", "نامحدود", "nolimit", "no limit")
+    )
 
 
 def _external_username(item: dict[str, Any], upstream_url: str) -> str:
