@@ -161,6 +161,9 @@ def _subscription_url(base_url: str, payload: dict[str, Any]) -> str:
         raise ProvisioningError("پنل لینک اشتراک برنگرداند.")
     parsed = urlparse(subscription_url)
     if parsed.scheme and parsed.netloc:
+        hostname = (parsed.hostname or "").lower()
+        if hostname not in {"localhost", "127.0.0.1", "0.0.0.0"}:
+            return subscription_url
         subscription_url = urlunparse(
             ("", "", parsed.path, parsed.params, parsed.query, parsed.fragment)
         )
