@@ -1,11 +1,13 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 from ..models import User, Transaction, Purchase
 from typing import Optional
 
 class UserService:
     @staticmethod
     async def search_user(session: AsyncSession, query: str) -> Optional[User]:
+        query = (query or "").strip()
         if query.isdigit():
             stmt = select(User).where(User.telegram_id == int(query))
             result = await session.execute(stmt)
@@ -13,14 +15,16 @@ class UserService:
             if user:
                 return user
         
-        username = query.lstrip('@')
-        stmt = select(User).where(User.username == username)
+        username = query.lstrip('@').strip()
+        if not username:
+            return None
+        stmt = select(User).where(func.lower(User.username) == username.lower())
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
     
     @staticmethod
     async def charge_wallet(session: AsyncSession, telegram_id: int, amount: int, admin_id: int) -> bool:
-        if amount <= 0:
+        if amount == 0:
             return False
 
         stmt = select(User).where(User.telegram_id == telegram_id)
@@ -28,16 +32,35 @@ class UserService:
         user = result.scalar_one_or_none()
         if not user:
             return False
-        
-        user.wallet_balance += amount
+
+        old_balance = user.wallet_balance or 0
+        new_balance = old_balance + amount
+        if new_balance < 0:
+            return False
+
+        user.wallet_balance = new_balance
+        action_label = "شارژ" if amount > 0 else "کسر موجودی"
         transaction = Transaction(
             user_id=telegram_id,
             amount=amount,
             type="charge",
-            description=f"شارژ توسط ادمین {admin_id}"
+            description=f"{action_label} توسط ادمین {admin_id}: {old_balance} -> {new_balance}",
         )
         session.add(transaction)
+        await session.flush()
+        from .referral_service import ReferralService
+        from .subscription_link_service import SubscriptionLinkService
+
+        rewards = []
+        commission = None
+        if amount > 0:
+            rewards = await ReferralService.evaluate_referred_user(session, telegram_id)
+            commission = await ReferralService.grant_topup_commission(session, transaction)
         await session.commit()
+        for reward in rewards:
+            if reward["config"] is not None:
+                await SubscriptionLinkService.sync_to_panel(reward["config"], reward["service_name"])
+        await ReferralService.notify_commission(commission)
         return True
 
     @staticmethod
@@ -113,6 +136,7 @@ class UserService:
 
         result = await session.execute(
             select(Purchase)
+            .options(selectinload(Purchase.config))
             .where(Purchase.user_id == telegram_id)
             .order_by(Purchase.purchased_at.desc())
             .limit(limit)

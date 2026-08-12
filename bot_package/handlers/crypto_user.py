@@ -35,6 +35,10 @@ RECOMMENDED_TAG = "⭐ پیشنهادی"
 CANCEL_PENDING_LABEL = "🗑 لغو پرداخت قبلی و شروع مجدد"
 
 
+def _asset_label(value: str | None) -> str:
+    return "گرام(تون)" if (value or "").upper() == "TON" else (value or "")
+
+
 def _display_label(key: str) -> str:
     """Coin button label, with a recommended marker on the preferred coin."""
     label = SUPPORTED_COINS[key]["label"]
@@ -43,24 +47,41 @@ def _display_label(key: str) -> str:
     return label
 
 
-def _coin_keyboard() -> ReplyKeyboardMarkup:
+def _keyboard_rows(markup: ReplyKeyboardMarkup) -> list[list[KeyboardButton]]:
+    rows = getattr(markup, "keyboard", None) or []
+    return [list(row) for row in rows]
+
+
+async def _back_rows(session) -> list[list[KeyboardButton]]:
+    rows = _keyboard_rows(await ShopCustomizationService.back_keyboard(session))
+    return rows or [[KeyboardButton(BACK_TO_MAIN)]]
+
+
+async def _coin_keyboard(session) -> ReplyKeyboardMarkup:
     # List the recommended coin first so it's the most prominent option.
     keys = sorted(available_coins(), key=lambda k: 0 if k == RECOMMENDED_COIN_KEY else 1)
     rows = [[KeyboardButton(_display_label(key))] for key in keys]
-    rows.append([KeyboardButton(BACK_TO_MAIN)])
+    rows.extend(await _back_rows(session))
     return ReplyKeyboardMarkup(rows, resize_keyboard=True, one_time_keyboard=True)
 
 
-def _back_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup([[KeyboardButton(BACK_TO_MAIN)]], resize_keyboard=True)
+async def _back_keyboard(session) -> ReplyKeyboardMarkup:
+    return await ShopCustomizationService.back_keyboard(session)
 
 
-def _pending_keyboard() -> ReplyKeyboardMarkup:
+async def _pending_keyboard(session) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        [[KeyboardButton(CANCEL_PENDING_LABEL)], [KeyboardButton(BACK_TO_MAIN)]],
+        [[KeyboardButton(CANCEL_PENDING_LABEL)], *await _back_rows(session)],
         resize_keyboard=True,
         one_time_keyboard=True,
     )
+
+
+async def _is_back_to_main_text(text: str) -> bool:
+    if text == BACK_TO_MAIN:
+        return True
+    async with async_session() as session:
+        return await ShopCustomizationService.action_for_text(session, text) == "back_to_main"
 
 
 def _coin_key_for_label(label: str) -> str | None:
@@ -100,12 +121,14 @@ async def charge_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def _prompt_pending_decision(update: Update, context: ContextTypes.DEFAULT_TYPE, invoice) -> None:
     context.user_data[STEP_KEY] = "pending_decision"
     context.user_data.pop(COIN_KEY, None)
+    async with async_session() as session:
+        keyboard = await _pending_keyboard(session)
     await update.message.reply_text(
         "⚠️ *شما یک پرداخت در انتظار دارید*\n\n"
-        f"مبلغ: *{invoice.quoted_toman:,} تومان* | ارز: *{invoice.coin}*\n\n"
+        f"مبلغ: *{invoice.quoted_toman:,} تومان* | ارز: *{_asset_label(invoice.coin)}*\n\n"
         "اگر هنوز واریز نکرده‌اید، می‌توانید این پرداخت را لغو کنید و از نو شروع کنید. "
         "اگر واریز کرده‌اید، چند لحظه صبر کنید تا به‌صورت خودکار تایید شود.",
-        reply_markup=_pending_keyboard(),
+        reply_markup=keyboard,
         parse_mode=constants.ParseMode.MARKDOWN,
     )
 
@@ -115,10 +138,12 @@ async def _prompt_coin_selection(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data.pop(COIN_KEY, None)
     note = ""
     if RECOMMENDED_COIN_KEY in available_coins():
-        note = "\n\n🌟 *پیشنهاد ما: TON* — سریع‌تر، کم‌هزینه‌تر و مطمئن‌تر."
+        note = "\n\n🌟 *پیشنهاد ما: گرام(تون)* — سریع‌تر، کم‌هزینه‌تر و مطمئن‌تر."
+    async with async_session() as session:
+        keyboard = await _coin_keyboard(session)
     await update.message.reply_text(
         "💎 *شارژ کیف پول با ارز دیجیتال*\n\nارز مورد نظر خود را انتخاب کنید:" + note,
-        reply_markup=_coin_keyboard(),
+        reply_markup=keyboard,
         parse_mode=constants.ParseMode.MARKDOWN,
     )
 
@@ -135,7 +160,7 @@ async def _cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def handle_step(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Process the next message while a crypto charge is in progress."""
     text = (update.message.text or "").strip()
-    if text == BACK_TO_MAIN:
+    if await _is_back_to_main_text(text):
         await _cancel(update, context)
         return
 
@@ -152,9 +177,11 @@ async def handle_step(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def _handle_pending_decision(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
     if text != CANCEL_PENDING_LABEL:
+        async with async_session() as session:
+            keyboard = await _pending_keyboard(session)
         await update.message.reply_text(
             "لطفا یکی از گزینه‌های زیر را انتخاب کنید.",
-            reply_markup=_pending_keyboard(),
+            reply_markup=keyboard,
         )
         return
     async with async_session() as session:
@@ -168,18 +195,22 @@ async def _handle_pending_decision(update: Update, context: ContextTypes.DEFAULT
 async def _handle_choose_coin(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
     coin_key = _coin_key_for_label(text)
     if not coin_key:
+        async with async_session() as session:
+            keyboard = await _coin_keyboard(session)
         await update.message.reply_text(
             "لطفا یکی از ارزهای موجود را از دکمه‌های زیر انتخاب کنید.",
-            reply_markup=_coin_keyboard(),
+            reply_markup=keyboard,
         )
         return
     context.user_data[COIN_KEY] = coin_key
     context.user_data[STEP_KEY] = "enter_amount"
+    async with async_session() as session:
+        keyboard = await _back_keyboard(session)
     await update.message.reply_text(
         f"ارز انتخاب‌شده: *{SUPPORTED_COINS[coin_key]['label']}*\n\n"
         "مبلغی که می‌خواهید کیف پول شما شارژ شود را به *تومان* وارد کنید:\n"
         f"(حداقل {_MIN_TOMAN:,} تومان)",
-        reply_markup=_back_keyboard(),
+        reply_markup=keyboard,
         parse_mode=constants.ParseMode.MARKDOWN,
     )
 
@@ -187,9 +218,11 @@ async def _handle_choose_coin(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def _handle_enter_amount(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
     toman = _parse_toman(text)
     if toman is None or toman < _MIN_TOMAN:
+        async with async_session() as session:
+            keyboard = await _back_keyboard(session)
         await update.message.reply_text(
             f"مبلغ نامعتبر است. یک عدد بزرگ‌تر از {_MIN_TOMAN:,} تومان وارد کنید.",
-            reply_markup=_back_keyboard(),
+            reply_markup=keyboard,
         )
         return
 
@@ -232,6 +265,7 @@ async def _send_invoice(update: Update, invoice) -> None:
     from decimal import Decimal
 
     coin = invoice.coin
+    coin_label = _asset_label(coin)
     try:
         unit_rate = int(Decimal(invoice.locked_rate))
     except Exception:  # noqa: BLE001
@@ -244,15 +278,15 @@ async def _send_invoice(update: Update, invoice) -> None:
     )
 
     lines = [
-        f"💎 پرداخت {coin}",
+        f"💎 پرداخت {coin_label}",
         "",
-        f"📊 مبلغ شبکه: {invoice.expected_crypto} {coin}",
+        f"📊 مبلغ شبکه: {invoice.expected_crypto} {coin_label}",
         f"👛 معادل تومانی: {invoice.quoted_toman:,} تومان ({source_label})",
     ]
     if unit_rate:
-        lines.append(f"🔎 تقریباً ۱ {coin} ≈ {unit_rate:,} تومان")
+        lines.append(f"🔎 تقریباً ۱ {coin_label} ≈ {unit_rate:,} تومان")
     if ttl_min:
-        lines += ["", f"🕘 مهلت پرداخت: {ttl_min} دقیقه (قیمت {coin} مدام عوض می‌شود)."]
+        lines += ["", f"🕘 مهلت پرداخت: {ttl_min} دقیقه (قیمت {coin_label} مدام عوض می‌شود)."]
 
     detail_note = "📄 جزئیات برای کپی — مقادیر زیر را می‌توانید از دکمه‌های «کپی» بردارید"
     detail_note += "؛ کامنت باید عیناً در تراکنش باشد." if invoice.memo else "."
@@ -263,7 +297,7 @@ async def _send_invoice(update: Update, invoice) -> None:
         "مقصد (ولت دریافت):",
         f"`{invoice.deposit_address}`",
         "",
-        f"مقدار واریز ({coin}):",
+        f"مقدار واریز ({coin_label}):",
         f"`{invoice.expected_crypto}`",
     ]
     if invoice.memo:
@@ -275,7 +309,7 @@ async def _send_invoice(update: Update, invoice) -> None:
 
     buttons = [
         [_copy_button("📋 کپی آدرس مقصد", invoice.deposit_address)],
-        [_copy_button(f"📋 کپی مقدار ({coin})", str(invoice.expected_crypto))],
+        [_copy_button(f"📋 کپی مقدار ({coin_label})", str(invoice.expected_crypto))],
     ]
     if invoice.memo:
         buttons.append([_copy_button("📋 کپی کامنت/ممو", invoice.memo)])
@@ -286,8 +320,8 @@ async def _send_invoice(update: Update, invoice) -> None:
         ton_url = f"ton://transfer/{invoice.deposit_address}?amount={nano}"
         if invoice.memo:
             ton_url += f"&text={quote(invoice.memo)}"
-        buttons.append([InlineKeyboardButton("🌐 باز کردن کیف TON", url=ton_url)])
-        lines += ["", "🌐 دکمهٔ «باز کردن کیف TON» همان مقدار TON و کامنت را در کیف پر می‌کند."]
+        buttons.append([InlineKeyboardButton("🌐 باز کردن کیف گرام(تون)", url=ton_url)])
+        lines += ["", "🌐 دکمهٔ «باز کردن کیف گرام(تون)» همان مقدار گرام(تون) و کامنت را در کیف پر می‌کند."]
 
     await update.message.reply_text(
         "\n".join(lines),

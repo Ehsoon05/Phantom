@@ -164,6 +164,7 @@ def test_admin_category_button_label_is_short_and_hides_internal_key():
     from bot_package.handlers.admin_handlers import _category_label
 
     category = SimpleNamespace(
+        id=12,
         key="reality_servers_internal",
         title="سرورهای Reality",
         emoji="🌐",
@@ -172,8 +173,35 @@ def test_admin_category_button_label_is_short_and_hides_internal_key():
 
     label = _category_label(category)
 
-    assert label == "✅ 🌐 سرورهای Reality"
+    assert label == "#12 ✅ 🌐 سرورهای Reality"
     assert category.key not in label
+
+
+@pytest.mark.asyncio
+async def test_message_can_use_existing_button_action_with_style_and_premium_emoji(db):
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    async with db.async_session() as session:
+        await ShopCustomizationService.init_defaults(session)
+        buttons = await ShopCustomizationService.list_buttons(session)
+        source = next(button for button in buttons if button.action == "wallet")
+        message = await ShopCustomizationService.get_message_row(session, "account_info")
+        await ShopCustomizationService.update_message_settings(
+            session,
+            "account_info",
+            response_button_type="inline_action",
+            response_button_source_id=source.id,
+            response_button_style="danger",
+            response_button_premium_emoji_id="5373141891321699086",
+        )
+        markup = await ShopCustomizationService.message_reply_markup(session, "account_info")
+        action = await ShopCustomizationService.response_button_action(session, message.id)
+
+    button = markup.inline_keyboard[0][0]
+    assert button.callback_data == f"shop_response:{message.id}"
+    assert button.api_kwargs["style"] == "danger"
+    assert button.api_kwargs["icon_custom_emoji_id"] == "5373141891321699086"
+    assert action == "wallet"
 
 
 @pytest.mark.asyncio
@@ -266,6 +294,277 @@ async def test_shop_message_preserves_inline_premium_emojis(db):
     assert "&lt;Ehsan&gt;" in rendered
 
 
+@pytest.mark.asyncio
+async def test_shop_message_can_escape_dynamic_markdown_values(db):
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    async with db.async_session() as session:
+        await ShopCustomizationService.init_defaults(session)
+        rendered = await ShopCustomizationService.get_message(
+            session,
+            "service_details",
+            escape_markdown_values=True,
+            service_name="@Mmd1_1",
+            original_title="Phantom_Test",
+            category_key="express_v1",
+            total_volume="10 گیگ",
+            used_volume="0",
+            remaining_volume="10 گیگ",
+            expiry_text="2026-07-01",
+            remaining_time="18 روز",
+            config_count=10,
+            purchased_at="2026-06-12",
+            price="89,000",
+        )
+
+    assert "@Mmd1\\_1" in rendered
+    assert "Phantom\\_Test" in rendered
+    assert "express\\_v1" in rendered
+
+
+def test_pasarguard_and_marzban_inbound_formats_are_supported():
+    from bot_package.services.marzban_trial_service import MarzbanTrialService
+
+    assert MarzbanTrialService.inbound_tags(["one", "two"]) == ["one", "two"]
+    assert MarzbanTrialService.inbound_tags(
+        {"vless": [{"tag": "reality"}, {"tag": "ws"}]}
+    ) == ["reality", "ws"]
+
+
+def test_pasarguard_multilocation_group_is_preferred():
+    from bot_package.services.marzban_trial_service import MarzbanTrialService
+
+    assert MarzbanTrialService.group_ids(
+        {
+            "groups": [
+                {"id": 2, "name": "Other", "is_disabled": False},
+                {"id": 1, "name": "MultiLocation", "is_disabled": False},
+                {"id": 3, "name": "Disabled", "is_disabled": True},
+            ]
+        }
+    ) == [1]
+
+
+def test_all_enabled_pasarguard_groups_are_selected_without_multilocation():
+    from bot_package.services.marzban_trial_service import MarzbanTrialService
+
+    assert MarzbanTrialService.group_ids(
+        {
+            "groups": [
+                {"id": 2, "name": "Germany", "is_disabled": False},
+                {"id": 4, "name": "Finland", "is_disabled": False},
+                {"id": 5, "name": "Disabled", "is_disabled": True},
+            ]
+        }
+    ) == [2, 4]
+
+
+@pytest.mark.asyncio
+async def test_easy_provision_panel_sends_hwid_limit():
+    from bot_package.models import ProvisionPanel
+    from bot_package.services.provisioning_service import ProvisioningService
+
+    panel = ProvisionPanel(
+        key="mexico_hajmi",
+        title="Mexico Hajmi",
+        panel_type="easy",
+        base_url="https://example.com",
+        username="admin",
+        password="secret",
+        group_ids="[1]",
+        hwid_limit=2,
+    )
+
+    fields = await ProvisioningService._access_fields(None, panel, {})
+
+    assert fields["group_ids"] == [1]
+    assert fields["hwid_limit"] == 2
+
+
+@pytest.mark.asyncio
+async def test_pasarguard_groups_override_legacy_inbound_filters():
+    from bot_package.models import ProvisionPanel
+    from bot_package.services.provisioning_service import ProvisioningService
+
+    panel = ProvisionPanel(
+        key="alien",
+        title="Alien",
+        panel_type="pasarguard",
+        base_url="https://example.com",
+        username="admin",
+        password="secret",
+        group_ids="[1, 2]",
+        inbounds_json='{"vless": ["legacy-inbound"]}',
+    )
+
+    fields = await ProvisioningService._access_fields(None, panel, {})
+
+    assert fields == {"group_ids": [1, 2]}
+
+
+def test_provision_username_increments_trailing_number_without_separator():
+    from bot_package.services.provisioning_service import _username_base_and_start
+
+    base, start = _username_base_and_start("PhantomExpress10GB-VIP1")
+
+    assert base == "PhantomExpress10GB-VIP"
+    assert f"{base}{start}" == "PhantomExpress10GB-VIP1"
+    assert f"{base}{start + 1}" == "PhantomExpress10GB-VIP2"
+
+    base, start = _username_base_and_start("PhantomHubs-Vpn-1")
+    assert f"{base}{start}" == "PhantomHubs-Vpn-1"
+    assert f"{base}{start + 1}" == "PhantomHubs-Vpn-2"
+
+
+def test_provision_timing_payloads_respect_plan_settings():
+    from bot_package.models import ShopPlan
+    from bot_package.services.provisioning_service import _create_timing_payload, _renew_timing_payload
+
+    unlimited = ShopPlan(
+        volume_gb=0,
+        title="NoLimit",
+        category_key="nolimit",
+        duration_days=30,
+        provision_time_mode="unlimited",
+    )
+    assert _create_timing_payload(unlimited)["status"] == "active"
+    assert _create_timing_payload(unlimited)["expire"] == 0
+    assert _renew_timing_payload(unlimited)["expire"] == 0
+
+    hold = ShopPlan(
+        volume_gb=10,
+        title="Hold",
+        category_key="express",
+        duration_days=30,
+        provision_duration_days=7,
+        provision_time_mode="on_hold",
+    )
+    hold_payload = _create_timing_payload(hold)
+    assert hold_payload["status"] == "on_hold"
+    assert hold_payload["on_hold_expire_duration"] == 7 * 86400
+
+    dated = ShopPlan(
+        volume_gb=10,
+        title="Date",
+        category_key="express",
+        duration_days=30,
+        provision_time_mode="date",
+    )
+    assert _create_timing_payload(dated)["status"] == "active"
+    assert _create_timing_payload(dated)["expire"] > 0
+
+
+@pytest.mark.asyncio
+async def test_main_menu_keeps_original_layout(db):
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    async with db.async_session() as session:
+        await ShopCustomizationService.init_defaults(session)
+        buttons = await ShopCustomizationService.list_buttons(session, "shop_main")
+
+    positions = {button.action: (button.row, button.col) for button in buttons}
+
+    assert positions["custom_message:shop_main:1780731124"] == (0, 0)
+    assert positions["buy_subscription"] == (0, 1)
+    assert positions["trial_config"] == (1, 0)
+    assert positions["wallet"] == (2, 0)
+    assert positions["purchase_history"] == (2, 1)
+
+
+@pytest.mark.asyncio
+async def test_buy_plan_buttons_are_single_row(db):
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    async with db.async_session() as session:
+        await ShopCustomizationService.init_defaults(session)
+        await ShopCustomizationService.upsert_plan(
+            session,
+            volume_gb=20,
+            title="۲۰ گیگ",
+            price=180_000,
+            category_key="___phantom_express_-_فانتوم_اکسپرس",
+        )
+        plans = await ShopCustomizationService.get_active_plans(
+            session,
+            "___phantom_express_-_فانتوم_اکسپرس",
+        )
+        prices = {plan.id: plan.price or 0 for plan in plans}
+        keyboard = await ShopCustomizationService.buy_category_keyboard(
+            session,
+            "___phantom_express_-_فانتوم_اکسپرس",
+            prices,
+        )
+
+    assert len(plans) > 1
+    assert all(len(row) == 1 for row in keyboard.keyboard)
+
+
+@pytest.mark.asyncio
+async def test_same_volume_plans_keep_separate_inventory(db):
+    from bot_package.services.inventory_service import InventoryService
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    async with db.async_session() as session:
+        first = await ShopCustomizationService.create_plan(
+            session,
+            volume_gb=10,
+            title="ده گیگ اقتصادی",
+            price=100_000,
+            category_key="default",
+        )
+        second = await ShopCustomizationService.create_plan(
+            session,
+            volume_gb=10,
+            title="ده گیگ ویژه",
+            price=150_000,
+            category_key="default",
+        )
+        await InventoryService.add_configs(
+            session,
+            first.volume_gb,
+            ["https://example.com/first"],
+            first.category_key,
+            first.id,
+        )
+        await InventoryService.add_configs(
+            session,
+            second.volume_gb,
+            ["https://example.com/second"],
+            second.category_key,
+            second.id,
+        )
+
+    async with db.async_session() as session:
+        first_config = await InventoryService.get_available_config(
+            session, 10, "default", first.id
+        )
+        second_config = await InventoryService.get_available_config(
+            session, 10, "default", second.id
+        )
+        plans = await ShopCustomizationService.list_plans(session)
+
+    assert first.id != second.id
+    assert first_config.sub_link == "https://example.com/first"
+    assert second_config.sub_link == "https://example.com/second"
+    assert {plan.title for plan in plans} >= {"ده گیگ اقتصادی", "ده گیگ ویژه"}
+
+
+@pytest.mark.asyncio
+async def test_unlimited_plan_uses_zero_volume(db):
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    async with db.async_session() as session:
+        plan = await ShopCustomizationService.create_plan(
+            session,
+            volume_gb=0,
+            title="نامحدود",
+            price=200_000,
+            category_key="default",
+        )
+
+    assert plan.volume_gb == 0
+
+
 def test_admin_message_storage_uses_telegram_html_for_custom_emoji():
     from types import SimpleNamespace
 
@@ -280,12 +579,124 @@ def test_admin_message_storage_uses_telegram_html_for_custom_emoji():
                 custom_emoji_id="5373141891321699086",
             )
         ],
+        caption_entities=[],
+        photo=[],
     )
 
-    text, parse_mode = _message_text_for_storage(message)
+    text, parse_mode, photo_file_id = _message_text_for_storage(message)
 
     assert parse_mode == "HTML"
+    assert photo_file_id is None
     assert 'emoji-id="5373141891321699086"' in text
+
+
+def test_admin_can_read_premium_emoji_from_custom_emoji_sticker():
+    from types import SimpleNamespace
+
+    from bot_package.handlers.admin_handlers import _read_custom_emoji_id
+
+    message = SimpleNamespace(
+        text=None,
+        caption=None,
+        entities=[],
+        caption_entities=[],
+        sticker=SimpleNamespace(custom_emoji_id="6030657343744644592"),
+    )
+
+    assert _read_custom_emoji_id(message, "") == "6030657343744644592"
+
+
+@pytest.mark.asyncio
+async def test_delete_plan_removes_unsold_inventory_but_preserves_sold_services(db):
+    from bot_package.models import Config, ReferralRewardRule, ShopPlan
+    from bot_package.services.shop_customization_service import ShopCustomizationService
+
+    async with db.async_session() as session:
+        plan = ShopPlan(
+            volume_gb=10,
+            category_key="vip",
+            title="۱۰ گیگ VIP",
+            price=100_000,
+        )
+        unsold = Config(
+            volume_gb=10,
+            category_key="vip",
+            sub_link="https://example.com/unsold",
+            is_sold=False,
+        )
+        sold = Config(
+            volume_gb=10,
+            category_key="vip",
+            sub_link="https://example.com/sold",
+            is_sold=True,
+            sold_to_user_id=1001,
+        )
+        session.add_all([plan, unsold, sold])
+        await session.flush()
+        rule = ReferralRewardRule(
+            title="VIP Reward",
+            qualification_type="joined",
+            required_count=1,
+            is_repeatable=False,
+            reward_type="service",
+            shop_plan_id=plan.id,
+            is_active=True,
+            created_by=123456,
+        )
+        session.add(rule)
+        await session.commit()
+        plan_id = plan.id
+        sold_id = sold.id
+        unsold_id = unsold.id
+        rule_id = rule.id
+
+    async with db.async_session() as session:
+        result = await ShopCustomizationService.delete_plan(session, plan_id)
+
+    async with db.async_session() as session:
+        saved_plan = await session.get(ShopPlan, plan_id)
+        saved_sold = await session.get(Config, sold_id)
+        saved_unsold = await session.get(Config, unsold_id)
+        saved_rule = await session.get(ReferralRewardRule, rule_id)
+
+    assert result == {
+        "title": "۱۰ گیگ VIP",
+        "removed_inventory": 1,
+        "disabled_reward_rules": 1,
+    }
+    assert saved_plan is None
+    assert saved_unsold is None
+    assert saved_sold is not None
+    assert saved_sold.sold_to_user_id == 1001
+    assert saved_rule.is_active is False
+    assert saved_rule.shop_plan_id is None
+
+
+@pytest.mark.asyncio
+async def test_deleted_default_plan_is_not_recreated_on_startup(db):
+    from bot_package.services.shop_customization_service import (
+        DEFAULT_PLANS,
+        ShopCustomizationService,
+    )
+
+    definition = DEFAULT_PLANS[0]
+    async with db.async_session() as session:
+        await ShopCustomizationService.init_defaults(session)
+        plan = await ShopCustomizationService.get_plan_by_product(
+            session,
+            definition.volume_gb,
+            definition.category_key,
+        )
+        assert plan is not None
+        await ShopCustomizationService.delete_plan(session, plan.id)
+        await ShopCustomizationService.init_defaults(session)
+        recreated = await ShopCustomizationService.get_plan_by_product(
+            session,
+            definition.volume_gb,
+            definition.category_key,
+        )
+
+    assert recreated is None
 
 
 @pytest.mark.asyncio

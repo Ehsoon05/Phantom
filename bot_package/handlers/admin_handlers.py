@@ -1,26 +1,52 @@
+import json
+import logging
+import html
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
-from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, Update, constants
-from telegram.ext import CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+    Update,
+    constants,
+)
+from telegram.ext import (
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    ConversationHandler,
+    MessageHandler,
+    filters,
+)
+from telegram.error import BadRequest
+from telegram.helpers import escape_markdown
 
 from ..auth import AuthManager
 from ..config_loader import BotConfig
 from ..database import async_session
-from ..models import Purchase
+from ..models import Config, ProvisionPanel, Purchase, ReferralRewardRule, StartLink, User
 from ..services.admin_service import ALL_PERMISSIONS, AdminService, normalize_permissions
+from ..services.broadcast_service import BroadcastService
 from ..services.coupon_service import CouponError, CouponService
 from ..services.crypto_payment_service import CryptoPaymentService, available_coins
 from ..services.rate_service import RateService
 from ..services.rial_payment_service import RialPaymentService
 from ..services.settings_service import SettingsService
+from ..services.wallet_notification_service import WalletNotificationService
 from ..services.inventory_service import InventoryService
 from ..services.price_service import PriceService
+from ..services.provisioning_service import ProvisioningError, ProvisioningService
 from ..services.referral_service import ReferralService
 from ..services.required_channel_service import RequiredChannelService
-from ..services.shop_customization_service import ShopCustomizationService
+from ..services.shop_customization_service import ShopCustomizationService, clean_custom_variable_name
+from ..services.start_link_service import StartLinkService
+from ..services.subscription_link_service import SubscriptionLinkService
 from ..services.user_service import UserService
+from ..utils.datetime_format import TEHRAN_TZ, format_tehran_datetime
 from ..utils.keyboards import (
     ADMIN_ADMINS,
     ADMIN_ADD_ADMIN,
@@ -30,6 +56,8 @@ from ..utils.keyboards import (
     ADMIN_ADD_PLAN,
     ADMIN_ADD_CONFIG,
     ADMIN_BACK,
+    ADMIN_BROADCAST,
+    ADMIN_BROADCAST_SEND,
     ADMIN_CHANGE_ADMIN_PERMS,
     ADMIN_CHARGE_WALLET,
     ADMIN_COUPONS,
@@ -44,11 +72,37 @@ from ..utils.keyboards import (
     ADMIN_RIAL_HISTORY,
     ADMIN_RIAL_SETTINGS,
     ADMIN_RIAL_SET_MIN,
+    ADMIN_RIAL_SET_DEST_CARD,
+    ADMIN_RIAL_SET_DEST_HOLDER,
+    ADMIN_RIAL_SET_RECEIPT_ADMINS,
+    ADMIN_RIAL_SET_RECEIPT_BOT,
+    ADMIN_RIAL_SET_VALID_MINUTES,
     ADMIN_RIAL_SET_SUPPORT,
+    ADMIN_RIAL_TOGGLE_MODE,
     ADMIN_RIAL_TOGGLE_PHONE,
+    ADMIN_RIAL_TOGGLE_SOURCE_CARD,
     ADMIN_CREATE_COUPON,
     ADMIN_DEACTIVATE_COUPON,
     ADMIN_DELETE_BUTTON,
+    ADMIN_DELETE_PLAN,
+    ADMIN_DELETE_PLAN_CONFIRM,
+    ADMIN_PLAN_PROVISION_SETTINGS,
+    ADMIN_SET_PROVISION_MODE,
+    ADMIN_SET_PROVISION_PANEL,
+    ADMIN_TOGGLE_PROVISION,
+    ADMIN_TOGGLE_RENEW,
+    ADMIN_SET_NAME_PREFIX,
+    ADMIN_SET_PROVISION_DURATION,
+    ADMIN_SET_PROVISION_VOLUME,
+    ADMIN_SET_PROVISION_TIME_MODE,
+    ADMIN_SET_SUBSCRIPTION_DEVICE_LIMIT,
+    ADMIN_TOGGLE_SUBSCRIPTION_CONFIGS,
+    ADMIN_PLAN_BACK_TO_EDIT,
+    ADMIN_SET_PANEL_GROUPS,
+    ADMIN_SET_PANEL_HWID,
+    ADMIN_SET_PANEL_INBOUNDS,
+    ADMIN_SET_PANEL_PROTOCOLS,
+    ADMIN_TOGGLE_PANEL_ENABLED,
     ADMIN_DELETE_CATEGORY,
     ADMIN_DELETE_CHANNEL,
     ADMIN_DELETE_COUPON,
@@ -69,14 +123,27 @@ from ..utils.keyboards import (
     ADMIN_LOGOUT,
     ADMIN_PRICES,
     ADMIN_REFERRAL_REPORT,
+    ADMIN_REFERRAL_REWARDS,
+    ADMIN_REFERRAL_ADD_RULE,
+    ADMIN_REFERRAL_RECALCULATE,
+    ADMIN_REFERRAL_TOGGLE_RULE,
+    ADMIN_REFERRAL_DELETE_RULE,
+    ADMIN_START_LINKS,
+    ADMIN_START_LINK_CREATE,
+    ADMIN_START_LINK_LIST,
     ADMIN_REFRESH_ADMINS,
     ADMIN_REQUIRED_CHANNELS,
     ADMIN_REMOVE_ADMIN,
     ADMIN_REPORTS,
     ADMIN_RESPONSE_INLINE_COPY,
+    ADMIN_RESPONSE_INLINE_ACTION,
     ADMIN_RESPONSE_INLINE_URL,
+    ADMIN_RESPONSE_EDIT_PREMIUM_EMOJI,
+    ADMIN_RESPONSE_EDIT_STYLE,
     ADMIN_RESPONSE_REPLY_KEYBOARD,
+    ADMIN_RESPONSE_SELECT_EXISTING,
     ADMIN_RESPONSE_TEXT,
+    ADMIN_RESET_CONFIRM,
     ADMIN_SEARCH_USER,
     ADMIN_SET_WALLET,
     ADMIN_SHOP_BUTTONS,
@@ -87,11 +154,23 @@ from ..utils.keyboards import (
     ADMIN_SHOP_MENU_WALLET,
     ADMIN_SHOP_MESSAGES,
     ADMIN_SHOP_PLANS,
+    ADMIN_PROVISION_PANELS,
     ADMIN_SHOP_RESET_DEFAULTS,
     ADMIN_SHOP_SETTINGS,
     ADMIN_STOCK_STATUS,
     ADMIN_TOGGLE_ENABLED,
     ADMIN_TOGGLE_BRANDED_LINKS,
+    ADMIN_TRIAL_SETTINGS,
+    ADMIN_TRIAL_SET_DURATION,
+    ADMIN_TRIAL_SET_PANEL,
+    ADMIN_TRIAL_SET_TIME_MODE,
+    ADMIN_TRIAL_SET_VOLUME,
+    ADMIN_TRIAL_TOGGLE,
+    ADMIN_SERVICE_REMINDERS,
+    ADMIN_SERVICE_REMINDER_TOGGLE,
+    ADMIN_SERVICE_REMINDER_SET_VOLUME,
+    ADMIN_SERVICE_REMINDER_SET_DAYS,
+    ADMIN_SERVICE_REMINDER_SET_HOURS,
     ADMIN_USERS,
     ADMIN_USER_STATS,
     ADMIN_EMOJI_LEFT,
@@ -106,7 +185,9 @@ from ..utils.keyboards import (
     DONE_ADDING_CONFIGS,
     CHANGE_USER,
     CONFIRM_USER,
+    REPORT_45_DAYS,
     REPORT_MONTH,
+    REPORT_90_DAYS,
     REPORT_TODAY,
     REPORT_WEEK,
     add_links_collecting_keyboard,
@@ -119,15 +200,24 @@ from ..utils.keyboards import (
     admin_management_keyboard,
     admin_prices_keyboard,
     admin_reports_keyboard,
+    admin_start_links_keyboard,
     admin_shop_button_edit_keyboard,
     admin_shop_category_edit_keyboard,
     admin_shop_menus_keyboard,
     admin_shop_plan_edit_keyboard,
+    admin_shop_plan_provision_keyboard,
+    admin_shop_plan_delete_confirm_keyboard,
+    admin_provision_mode_keyboard,
+    admin_provision_panel_keyboard,
+    admin_provision_time_mode_keyboard,
     admin_shop_settings_keyboard,
     admin_emoji_position_keyboard,
     admin_response_button_keyboard,
+    admin_reset_confirm_keyboard,
     admin_required_channel_keyboard,
     admin_style_keyboard,
+    admin_trial_settings_keyboard,
+    admin_service_reminders_keyboard,
     admin_user_confirm_keyboard,
     admin_users_keyboard,
     coupon_target_keyboard,
@@ -159,6 +249,25 @@ from ..utils.messages import (
 )
 from ..utils.validators import extract_links_from_text
 
+logger = logging.getLogger(__name__)
+
+ADD_CONFIG_PAGE_SIZE = 8
+ADD_CONFIG_CALLBACK_PREFIX = "admin_addcfg"
+SHOP_PLAN_CALLBACK_PREFIX = "admin_planmgr"
+PROVISION_INBOUND_CALLBACK_PREFIX = "admin_inb"
+PROVISION_PROTOCOL_CALLBACK_PREFIX = "admin_proto"
+RIAL_REQUEST_CALLBACK_PREFIX = "admin_rial"
+START_LINK_CALLBACK_PREFIX = "admin_startlink"
+PROVISION_PROTOCOL_CHOICES = [
+    "vless",
+    "vmess",
+    "trojan",
+    "shadowsocks",
+    "ss",
+    "hysteria2",
+    "tuic",
+    "wireguard",
+]
 
 (
     CHOOSE_VOLUME_ADD,
@@ -190,6 +299,7 @@ from ..utils.validators import extract_links_from_text
     SHOP_BUTTON_SELECT,
     SHOP_BUTTON_OPTION,
     SHOP_BUTTON_VALUE,
+    SHOP_BUTTON_ADD_KEY,
     SHOP_BUTTON_ADD_TEXT,
     SHOP_BUTTON_ADD_MESSAGE,
     SHOP_PLAN_SELECT,
@@ -217,7 +327,36 @@ from ..utils.validators import extract_links_from_text
     CRYPTO_SET_TON_VALUE,
     RIAL_SET_MIN_VALUE,
     RIAL_SET_SUPPORT_VALUE,
-) = range(56)
+    RIAL_SET_DEST_CARD_VALUE,
+    RIAL_SET_DEST_HOLDER_VALUE,
+    RIAL_SET_VALID_MINUTES_VALUE,
+    RIAL_SET_RECEIPT_BOT_VALUE,
+    RIAL_SET_RECEIPT_ADMINS_VALUE,
+    SHOP_RESET_CONFIRM,
+    SHOP_RESET_PASSWORD,
+    TRIAL_SET_VOLUME_VALUE,
+    TRIAL_SET_DURATION_VALUE,
+    TRIAL_SET_PANEL_VALUE,
+    TRIAL_SET_TIME_MODE_VALUE,
+    REFERRAL_RULE_SELECT,
+    REFERRAL_RULE_TITLE,
+    REFERRAL_RULE_QUALIFICATION,
+    REFERRAL_RULE_COUNT,
+    REFERRAL_RULE_REPEAT,
+    REFERRAL_RULE_REWARD_TYPE,
+    REFERRAL_RULE_REWARD_VALUE,
+    REFERRAL_RULE_OPTION,
+    BROADCAST_MESSAGE,
+    BROADCAST_CONFIRM,
+    PROVISION_PANEL_SELECT,
+    PROVISION_PANEL_OPTION,
+    PROVISION_PANEL_VALUE,
+    SERVICE_REMINDER_VOLUME_VALUE,
+    SERVICE_REMINDER_DAYS_VALUE,
+    SERVICE_REMINDER_HOURS_VALUE,
+    START_LINK_SELECT,
+    START_LINK_NAME,
+) = range(86)
 
 
 SHOP_MENU_LABELS = {
@@ -233,7 +372,40 @@ RESPONSE_BUTTON_VALUES = {
     ADMIN_RESPONSE_TEXT: "text",
     ADMIN_RESPONSE_INLINE_COPY: "inline_copy",
     ADMIN_RESPONSE_INLINE_URL: "inline_url",
+    ADMIN_RESPONSE_INLINE_ACTION: "inline_action",
     ADMIN_RESPONSE_REPLY_KEYBOARD: "reply_keyboard",
+}
+
+ADMIN_MESSAGE_BUTTONS_LIST = "🔘 دکمه‌های شیشه‌ای پیام"
+ADMIN_MESSAGE_BUTTON_ADD = "➕ افزودن دکمه شیشه‌ای"
+ADMIN_MESSAGE_BUTTON_DELETE = "🗑 حذف دکمه شیشه‌ای"
+ADMIN_MESSAGE_BUTTON_TOGGLE = "🔛 خاموش/روشن دکمه شیشه‌ای"
+ADMIN_MESSAGE_BUTTON_TEXT = "✏️ متن دکمه شیشه‌ای"
+ADMIN_MESSAGE_BUTTON_PAYLOAD = "🔗 لینک/متن کپی دکمه شیشه‌ای"
+ADMIN_MESSAGE_BUTTON_TYPE = "🧩 نوع دکمه شیشه‌ای"
+ADMIN_MESSAGE_BUTTON_STYLE = "🎨 رنگ دکمه شیشه‌ای"
+ADMIN_MESSAGE_BUTTON_PREMIUM = "💎 ایموجی پریمیوم دکمه شیشه‌ای"
+ADMIN_MESSAGE_BUTTON_SOURCE = "⚙️ اکشن دکمه موجود"
+ADMIN_MESSAGE_BUTTON_ROW = "↕️ ردیف دکمه شیشه‌ای"
+ADMIN_MESSAGE_BUTTON_COL = "↔️ ستون دکمه شیشه‌ای"
+
+MESSAGE_BUTTON_TYPE_VALUES = {
+    "لینک شیشه‌ای": "inline_url",
+    "کپی شیشه‌ای": "inline_copy",
+    "اکشن دکمه موجود": "inline_action",
+}
+
+MESSAGE_BUTTON_ACTIONS = {
+    ADMIN_MESSAGE_BUTTON_DELETE: "delete",
+    ADMIN_MESSAGE_BUTTON_TOGGLE: "toggle",
+    ADMIN_MESSAGE_BUTTON_TEXT: "text",
+    ADMIN_MESSAGE_BUTTON_PAYLOAD: "payload",
+    ADMIN_MESSAGE_BUTTON_TYPE: "type",
+    ADMIN_MESSAGE_BUTTON_STYLE: "style",
+    ADMIN_MESSAGE_BUTTON_PREMIUM: "premium_emoji_id",
+    ADMIN_MESSAGE_BUTTON_SOURCE: "source_button_id",
+    ADMIN_MESSAGE_BUTTON_ROW: "row",
+    ADMIN_MESSAGE_BUTTON_COL: "col",
 }
 
 ADMIN_TOP_LEVEL_LABELS = {
@@ -252,9 +424,12 @@ SHOP_SETTINGS_LABELS = {
     ADMIN_SHOP_BUTTONS,
     ADMIN_SHOP_CATEGORIES,
     ADMIN_SHOP_PLANS,
+    ADMIN_PROVISION_PANELS,
     ADMIN_SHOP_RESET_DEFAULTS,
     ADMIN_REQUIRED_CHANNELS,
     ADMIN_TOGGLE_BRANDED_LINKS,
+    ADMIN_TRIAL_SETTINGS,
+    ADMIN_SERVICE_REMINDERS,
 }
 
 
@@ -277,11 +452,100 @@ def _cancel_back_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup([[CANCEL, ADMIN_BACK]], resize_keyboard=True, one_time_keyboard=True)
 
 
-def _message_label(key: str) -> str:
-    return f"📝 {key}"
+def _message_label(message) -> str:
+    return f"📝 #{message.id} {message.key}"
+
+
+def _message_preview(text: str | None, *, limit: int = 1800) -> str:
+    value = _html_message_preview(text or "-")
+    if len(value) <= limit:
+        return value
+    return (
+        value[:limit]
+        + "\n\n... متن فعلی طولانی است و برای جلوگیری از خطای تلگرام کوتاه نمایش داده شد."
+    )
+
+
+def _html_message_preview(text: str) -> str:
+    tokens: dict[str, str] = {}
+
+    def protect(value: str) -> str:
+        token = f"__HTML_PREVIEW_TOKEN_{len(tokens)}__"
+        tokens[token] = value
+        return token
+
+    value = html.unescape(text or "-")
+
+    def protect_custom_emoji(match: re.Match) -> str:
+        emoji_id = html.escape(match.group(1), quote=True)
+        fallback = html.escape(match.group(2), quote=False)
+        return protect(f'<tg-emoji emoji-id="{emoji_id}">{fallback}</tg-emoji>')
+
+    value = re.sub(
+        r'<tg-emoji\s+emoji-id="([^"]+)">(.+?)</tg-emoji>',
+        protect_custom_emoji,
+        value,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    replacements = {
+        r"<br\s*/?>": "\n",
+        r"</p\s*>": "\n",
+        r"<p[^>]*>": "",
+        r"</?(b|strong)[^>]*>": lambda match: protect("</b>" if match.group(0).startswith("</") else "<b>"),
+        r"</?(i|em)[^>]*>": lambda match: protect("</i>" if match.group(0).startswith("</") else "<i>"),
+        r"</?u[^>]*>": lambda match: protect("</u>" if match.group(0).startswith("</") else "<u>"),
+        r"</?s[^>]*>": lambda match: protect("</s>" if match.group(0).startswith("</") else "<s>"),
+        r"</?code[^>]*>": lambda match: protect("</code>" if match.group(0).startswith("</") else "<code>"),
+        r"</?pre[^>]*>": lambda match: protect("</pre>" if match.group(0).startswith("</") else "<pre>"),
+    }
+    for pattern, replacement in replacements.items():
+        value = re.sub(pattern, replacement, value, flags=re.IGNORECASE)
+    value = re.sub(r"<[^>]+>", "", value)
+    value = html.escape(value, quote=False)
+    for token, replacement in tokens.items():
+        value = value.replace(token, replacement)
+    return value
+
+
+async def _message_key_from_admin_label(text: str) -> str | None:
+    raw = (text or "").strip()
+    message_id = _parse_hash_id(raw)
+    if message_id:
+        async with async_session() as session:
+            message = await ShopCustomizationService.get_message_by_id(session, message_id)
+        return message.key if message else None
+    key = raw.removeprefix("📝").strip()
+    key = re.sub(r"^#\d+\s+", "", key).strip()
+    return key or None
 
 
 MESSAGE_PLACEHOLDER_HINTS = {
+    "referral": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{link}` `{count}` `{commission_text}`\n"
+        "متن `{commission_text}` از پیام جداگانه `referral_commission_text` خوانده می‌شود."
+    ),
+    "referral_commission_text": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{commission_percent}`\n"
+        "عدد درصد به صورت لاتین جایگزین می‌شود."
+    ),
+    "referral_user_identity": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{name}` `{username}` `{telegram_id}`\n"
+        "این قالب داخل `{referred_identity}` استفاده می‌شود."
+    ),
+    "referral_join_notification": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{referred_identity}` `{referred_name}` `{referred_username}` `{referred_id}`\n"
+        "این پیام برای معرف ارسال می‌شود، وقتی کاربر جدید با لینک دعوت او وارد ربات شود."
+    ),
+    "referral_commission_notification": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{source_label}` `{base_amount}` `{percent}` `{commission}` `{wallet_balance}`\n"
+        "`{referred_identity}` `{referred_name}` `{referred_username}` `{referred_id}`\n"
+        "این پیام برای معرف ارسال می‌شود، وقتی پورسانت خرید یا شارژ زیرمجموعه به کیف پولش اضافه شود."
+    ),
     "service_details": (
         "\n\nکلیدهای قابل استفاده:\n"
         "`{service_name}` `{original_title}` `{category_key}`\n"
@@ -296,6 +560,32 @@ MESSAGE_PLACEHOLDER_HINTS = {
         "`{tracking_code}` `{phone_number}` `{copy_text}`\n"
         "نام کلیدها را تغییر ندهید؛ فقط متن و جای آن‌ها را عوض کنید."
     ),
+    "rial_card_payment_instructions": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{destination_card}` `{destination_holder}` `{amount}` `{valid_minutes}` `{expires_at}` `{tracking_code}`\n"
+        "این پیام شماره کارت مقصد را به کاربر نشان می‌دهد و بعد از مهلت تعیین‌شده پاک می‌شود."
+    ),
+    "rial_receipt_bot_start": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{amount}` `{tracking_code}` `{expires_at}`"
+    ),
+    "rial_receipt_received": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{tracking_code}` `{amount}`"
+    ),
+    "rial_receipt_approved": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{amount}` `{wallet_balance}` `{tracking_code}`"
+    ),
+    "rial_receipt_rejected": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{amount}` `{tracking_code}` `{reason_text}`"
+    ),
+    "rial_receipt_expired": "\n\nاین پیام وقتی مهلت دو ساعته ارسال رسید تمام شده باشد ارسال می‌شود.",
+    "rial_receipt_admin_request": (
+        "\n\nکلیدهای قابل استفاده:\n"
+        "`{user_name}` `{username}` `{telegram_id}` `{phone_number}` `{amount}` `{source_card}` `{tracking_code}` `{created_at}`"
+    ),
 }
 
 
@@ -305,20 +595,324 @@ def _button_label(button) -> str:
     return f"#{button.id} {emoji}{button.text} ({status})"
 
 
+def _message_button_label(button) -> str:
+    status = "فعال" if button.is_enabled else "خاموش"
+    emoji = "💎 " if button.premium_emoji_id else ""
+    return f"#{button.id} {emoji}{button.text} | {button.button_type} | ردیف {button.row} ستون {button.col} ({status})"
+
+
+def _message_button_summary(button) -> str:
+    status = "فعال" if button.is_enabled else "خاموش"
+    style = button.style or "default"
+    payload = button.payload or "-"
+    premium = button.premium_emoji_id or "-"
+    source = f"#{button.source_button_id}" if button.source_button_id else "-"
+    return (
+        f"#{button.id} {button.text}\n"
+        f"  نوع: {button.button_type} | وضعیت: {status}\n"
+        f"  رنگ: {style} | ایموجی پریمیوم: {premium}\n"
+        f"  لینک/متن: {payload}\n"
+        f"  اکشن متصل: {source} | ردیف/ستون: {button.row}/{button.col}"
+    )
+
+
+def _message_buttons_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            [ADMIN_MESSAGE_BUTTONS_LIST, ADMIN_MESSAGE_BUTTON_ADD],
+            [ADMIN_MESSAGE_BUTTON_TEXT, ADMIN_MESSAGE_BUTTON_PAYLOAD],
+            [ADMIN_MESSAGE_BUTTON_TYPE, ADMIN_MESSAGE_BUTTON_STYLE],
+            [ADMIN_MESSAGE_BUTTON_PREMIUM, ADMIN_MESSAGE_BUTTON_SOURCE],
+            [ADMIN_MESSAGE_BUTTON_ROW, ADMIN_MESSAGE_BUTTON_COL],
+            [ADMIN_MESSAGE_BUTTON_TOGGLE, ADMIN_MESSAGE_BUTTON_DELETE],
+            [ADMIN_RESPONSE_TEXT, ADMIN_RESPONSE_INLINE_COPY],
+            [ADMIN_RESPONSE_INLINE_URL, ADMIN_RESPONSE_INLINE_ACTION],
+            [ADMIN_RESPONSE_REPLY_KEYBOARD, ADMIN_RESPONSE_SELECT_EXISTING],
+            [ADMIN_RESPONSE_EDIT_STYLE, ADMIN_RESPONSE_EDIT_PREMIUM_EMOJI],
+            [ADMIN_EDIT_PREMIUM_EMOJI, ADMIN_EDIT_PREMIUM_EMOJI_POSITION],
+            [CANCEL, ADMIN_BACK],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
+def _message_button_type_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [[label] for label in MESSAGE_BUTTON_TYPE_VALUES] + [[CANCEL, ADMIN_BACK]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
+async def _get_message_button_for_key(session, key: str, raw_value: str):
+    button_id = _parse_hash_id(raw_value)
+    button = await ShopCustomizationService.get_message_button(session, button_id) if button_id else None
+    if not button or button.message_key != key:
+        return None
+    return button
+
+
+def _volume_label(volume_gb: int) -> str:
+    return "نامحدود" if volume_gb <= 0 else f"{volume_gb} گیگ"
+
+
 def _plan_label(plan) -> str:
     status = "فعال" if plan.is_active else "غیرفعال"
     emoji = f"{plan.emoji} " if plan.emoji else ""
-    return f"#{plan.id} [{plan.category_key}] {emoji}{plan.title} - {plan.volume_gb} گیگ ({status})"
+    return f"#{plan.id} [{plan.category_key}] {emoji}{plan.title} - {_volume_label(plan.volume_gb)} ({status})"
+
+
+def _inline_plan_label(plan, *, include_status: bool = False) -> str:
+    status = "✅ " if include_status and plan.is_active else "⏸ " if include_status else ""
+    label = f"{status}📦 {plan.title} | {_volume_label(plan.volume_gb)} | {plan.category_key}"
+    return label if len(label) <= 60 else f"{label[:57]}..."
 
 
 def _category_label(category) -> str:
     status = "✅" if category.is_active else "⏸"
     emoji = f"{category.emoji} " if category.emoji else ""
-    return f"{status} {emoji}{category.title}"
+    return f"#{category.id} {status} {emoji}{category.title}"
+
+
+def _panel_label(panel: ProvisionPanel) -> str:
+    status = "✅" if panel.is_enabled else "⏸"
+    return f"#{panel.id} {status} {panel.title} ({panel.key})"
+
+
+def _panel_type_label(panel_type: str | None) -> str:
+    return {
+        "easy": "Easy",
+        "pasarguard": "Pasarguard",
+        "marzban": "Marzban",
+    }.get(panel_type or "", panel_type or "-")
+
+
+def _normalize_button_text(value: str | None) -> str:
+    return " ".join((value or "").strip().split())
+
+
+def _provision_mode_label(value: str | None) -> str:
+    return {
+        "inventory": "انبار فقط",
+        "inventory_then_panel": "اول انبار بعد پنل",
+        "panel_only": "فقط پنل",
+    }.get(value or "inventory", value or "inventory")
+
+
+PROVISION_MODE_VALUES = {
+    "انبار فقط": "inventory",
+    "اول انبار بعد پنل": "inventory_then_panel",
+    "فقط پنل": "panel_only",
+    "inventory": "inventory",
+    "inventory_then_panel": "inventory_then_panel",
+    "panel_only": "panel_only",
+}
+
+PROVISION_TIME_MODE_LABELS = {
+    "on_hold": "شروع از اولین اتصال",
+    "date": "تاریخ‌دار از زمان ساخت",
+    "unlimited": "زمان نامحدود",
+}
+
+PROVISION_TIME_MODE_VALUES = {
+    "شروع از اولین اتصال": "on_hold",
+    "تاریخ‌دار از زمان ساخت": "date",
+    "on_hold": "on_hold",
+    "date": "date",
+}
+
+
+def _provision_time_mode_label(value: str | None) -> str:
+    return PROVISION_TIME_MODE_LABELS.get(value or "on_hold", value or "on_hold")
+
+
+def _provision_duration_label(plan) -> str:
+    duration = plan.provision_duration_days if plan.provision_duration_days is not None else plan.duration_days
+    return "نامحدود" if int(duration or 0) <= 0 else f"{duration} روز"
+
+
+def _subscription_device_limit_label(value: int | None) -> str:
+    limit = int(value or 0)
+    return "نامحدود / بدون شمارش" if limit <= 0 else f"{limit} کاربر/دستگاه"
+
+
+async def _sync_plan_subscription_device_limit(plan_id: int, device_limit: int) -> int:
+    async with async_session() as session:
+        result = await session.execute(
+            select(Config).where(
+                Config.shop_plan_id == plan_id,
+                Config.public_sub_token.is_not(None),
+                Config.subscription_device_limit.is_(None),
+            )
+        )
+        configs = result.scalars().all()
+        synced_count = 0
+        for config in configs:
+            purchase = (
+                await session.execute(
+                    select(Purchase)
+                    .where(Purchase.config_id == config.id)
+                    .order_by(Purchase.purchased_at.desc(), Purchase.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if not purchase:
+                continue
+            await SubscriptionLinkService.sync_to_panel(
+                config,
+                purchase.service_name,
+                device_limit=device_limit,
+            )
+            synced_count += 1
+        return synced_count
+
+
+async def _sync_plan_subscription_config_preview(plan_id: int, show_config_preview: bool) -> int:
+    async with async_session() as session:
+        plan = await ShopCustomizationService.get_plan(session, plan_id)
+        result = await session.execute(
+            select(Config).where(
+                Config.shop_plan_id == plan_id,
+                Config.public_sub_token.is_not(None),
+            )
+        )
+        configs = result.scalars().all()
+        synced_count = 0
+        for config in configs:
+            purchase = (
+                await session.execute(
+                    select(Purchase)
+                    .where(Purchase.config_id == config.id)
+                    .order_by(Purchase.purchased_at.desc(), Purchase.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            device_limit = (
+                max(0, int(config.subscription_device_limit or 0))
+                if config.subscription_device_limit is not None
+                else max(0, int(plan.subscription_device_limit or 0)) if plan is not None else None
+            )
+            await SubscriptionLinkService.sync_to_panel(
+                config,
+                purchase.service_name if purchase else None,
+                device_limit=device_limit,
+                show_config_preview=show_config_preview,
+            )
+            synced_count += 1
+        return synced_count
+
+
+def _parse_inbounds_text(raw_value: str) -> dict[str, list[str]] | None:
+    value = raw_value.strip()
+    if value in {"-", "خاموش", "همه", "auto", "AUTO"}:
+        return {}
+    try:
+        payload = json.loads(value)
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict):
+        result = {}
+        for protocol, tags in payload.items():
+            if not isinstance(tags, list):
+                return None
+            clean_tags = [str(tag).strip() for tag in tags if str(tag).strip()]
+            if clean_tags:
+                result[str(protocol).strip()] = clean_tags
+        return result
+
+    result: dict[str, list[str]] = {}
+    for chunk in value.split(";"):
+        if not chunk.strip():
+            continue
+        if ":" not in chunk:
+            return None
+        protocol, tags_text = chunk.split(":", 1)
+        protocol = protocol.strip()
+        tags = [tag.strip() for tag in tags_text.split(",") if tag.strip()]
+        if not protocol or not tags:
+            return None
+        result[protocol] = tags
+    return result
+
+
+def _flatten_inbounds(inbounds: dict[str, list[str]]) -> list[tuple[str, str]]:
+    items: list[tuple[str, str]] = []
+    for protocol in sorted(inbounds):
+        for tag in sorted(inbounds[protocol]):
+            items.append((protocol, tag))
+    return items
+
+
+def _selected_inbounds_from_panel(panel: ProvisionPanel, available: dict[str, list[str]]) -> set[tuple[str, str]]:
+    configured = json.loads(panel.inbounds_json or "{}")
+    if not configured:
+        return set(_flatten_inbounds(available))
+    return {
+        (str(protocol), str(tag))
+        for protocol, tags in configured.items()
+        if isinstance(tags, list)
+        for tag in tags
+    }
+
+
+def _inbounds_keyboard(
+    available: dict[str, list[str]],
+    selected: set[tuple[str, str]],
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for index, (protocol, tag) in enumerate(_flatten_inbounds(available)):
+        mark = "✅" if (protocol, tag) in selected else "⬜️"
+        label = f"{mark} {protocol} | {tag}"
+        if len(label) > 62:
+            label = f"{label[:59]}..."
+        rows.append([
+            InlineKeyboardButton(
+                label,
+                callback_data=f"{PROVISION_INBOUND_CALLBACK_PREFIX}:toggle:{index}",
+            )
+        ])
+    rows.append([
+        InlineKeyboardButton("✅ انتخاب همه", callback_data=f"{PROVISION_INBOUND_CALLBACK_PREFIX}:all"),
+        InlineKeyboardButton("⬜️ حذف همه", callback_data=f"{PROVISION_INBOUND_CALLBACK_PREFIX}:none"),
+    ])
+    rows.append([
+        InlineKeyboardButton("🔄 دریافت دوباره", callback_data=f"{PROVISION_INBOUND_CALLBACK_PREFIX}:refresh"),
+        InlineKeyboardButton("💾 ذخیره", callback_data=f"{PROVISION_INBOUND_CALLBACK_PREFIX}:save"),
+    ])
+    rows.append([InlineKeyboardButton("⬅️ بازگشت", callback_data=f"{PROVISION_INBOUND_CALLBACK_PREFIX}:back")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _protocols_keyboard(selected: set[str]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    for protocol in PROVISION_PROTOCOL_CHOICES:
+        mark = "✅" if protocol in selected else "⬜️"
+        row.append(
+            InlineKeyboardButton(
+                f"{mark} {protocol}",
+                callback_data=f"{PROVISION_PROTOCOL_CALLBACK_PREFIX}:toggle:{protocol}",
+            )
+        )
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([
+        InlineKeyboardButton("✅ انتخاب همه", callback_data=f"{PROVISION_PROTOCOL_CALLBACK_PREFIX}:all"),
+        InlineKeyboardButton("⬜️ حذف همه", callback_data=f"{PROVISION_PROTOCOL_CALLBACK_PREFIX}:none"),
+    ])
+    rows.append([
+        InlineKeyboardButton("💾 ذخیره", callback_data=f"{PROVISION_PROTOCOL_CALLBACK_PREFIX}:save"),
+        InlineKeyboardButton("⬅️ بازگشت", callback_data=f"{PROVISION_PROTOCOL_CALLBACK_PREFIX}:back"),
+    ])
+    return InlineKeyboardMarkup(rows)
 
 
 def _parse_hash_id(text: str) -> int | None:
-    match = re.match(r"#(\d+)\b", text.strip())
+    match = re.search(r"#(\d+)\b", text.strip())
     return int(match.group(1)) if match else None
 
 
@@ -346,12 +940,21 @@ async def _leave_shop_flow_if_navigation(update: Update, context: ContextTypes.D
             await shop_categories_start(update, context)
         elif text == ADMIN_SHOP_PLANS:
             await shop_plans_start(update, context)
+        elif text == ADMIN_PROVISION_PANELS:
+            await provision_panels_start(update, context)
         elif text == ADMIN_REQUIRED_CHANNELS:
             await required_channels_start(update, context)
         elif text == ADMIN_TOGGLE_BRANDED_LINKS:
             await toggle_branded_subscription_links(update, context)
+        elif text == ADMIN_TRIAL_SETTINGS:
+            await trial_settings_menu(update, context)
+        elif text == ADMIN_SERVICE_REMINDERS:
+            await service_reminders_menu(update, context)
         elif text == ADMIN_SHOP_RESET_DEFAULTS:
-            await shop_reset_defaults(update, context)
+            await update.message.reply_text(
+                "از روند فعلی خارج شدید. برای بازگردانی، دکمه قرمز «بازگشت فروشگاه به پیش‌فرض» را دوباره بزنید.",
+                reply_markup=admin_shop_settings_keyboard(),
+            )
         return True
     return False
 
@@ -360,12 +963,120 @@ async def _admin_volume_keyboard(session, action: str) -> ReplyKeyboardMarkup:
     plans = await ShopCustomizationService.list_plans(session)
     active_plans = [plan for plan in plans if plan.is_active]
     if action == "edit_price":
-        labels = [f"#{plan.id} ✏️ [{plan.category_key}] {plan.title} - {plan.volume_gb} گیگ" for plan in active_plans]
+        labels = [f"#{plan.id} ✏️ [{plan.category_key}] {plan.title} - {_volume_label(plan.volume_gb)}" for plan in active_plans]
     else:
-        labels = [f"#{plan.id} 📦 [{plan.category_key}] {plan.title} - {plan.volume_gb} گیگ" for plan in active_plans]
+        labels = [f"#{plan.id} 📦 [{plan.category_key}] {plan.title} - {_volume_label(plan.volume_gb)}" for plan in active_plans]
     if not labels:
         labels = [f"📦 {volume} گیگ" for volume in (1, 2, 3, 5, 10, 20)]
     return _rows(labels, width=2)
+
+
+def _add_config_plan_keyboard(plans, page: int = 0) -> InlineKeyboardMarkup:
+    total_pages = max(1, (len(plans) + ADD_CONFIG_PAGE_SIZE - 1) // ADD_CONFIG_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * ADD_CONFIG_PAGE_SIZE
+    page_plans = plans[start : start + ADD_CONFIG_PAGE_SIZE]
+
+    rows = [
+        [
+            InlineKeyboardButton(
+                _inline_plan_label(plan),
+                callback_data=f"{ADD_CONFIG_CALLBACK_PREFIX}:select:{plan.id}",
+            )
+        ]
+        for plan in page_plans
+    ]
+    navigation = []
+    if page > 0:
+        navigation.append(
+            InlineKeyboardButton(
+                "قبلی",
+                callback_data=f"{ADD_CONFIG_CALLBACK_PREFIX}:page:{page - 1}",
+            )
+        )
+    navigation.append(
+        InlineKeyboardButton(
+            f"{page + 1} / {total_pages}",
+            callback_data=f"{ADD_CONFIG_CALLBACK_PREFIX}:noop",
+        )
+    )
+    if page + 1 < total_pages:
+        navigation.append(
+            InlineKeyboardButton(
+                "بعدی",
+                callback_data=f"{ADD_CONFIG_CALLBACK_PREFIX}:page:{page + 1}",
+            )
+        )
+    rows.append(navigation)
+    rows.append(
+        [
+            InlineKeyboardButton(
+                "لغو",
+                callback_data=f"{ADD_CONFIG_CALLBACK_PREFIX}:cancel",
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+def _shop_plan_management_keyboard(plans, page: int = 0) -> InlineKeyboardMarkup:
+    total_pages = max(1, (len(plans) + ADD_CONFIG_PAGE_SIZE - 1) // ADD_CONFIG_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * ADD_CONFIG_PAGE_SIZE
+    page_plans = plans[start : start + ADD_CONFIG_PAGE_SIZE]
+    rows = [
+        [
+            InlineKeyboardButton(
+                _inline_plan_label(plan, include_status=True),
+                callback_data=f"{SHOP_PLAN_CALLBACK_PREFIX}:select:{plan.id}",
+            )
+        ]
+        for plan in page_plans
+    ]
+    navigation = []
+    if page > 0:
+        navigation.append(
+            InlineKeyboardButton(
+                "قبلی",
+                callback_data=f"{SHOP_PLAN_CALLBACK_PREFIX}:page:{page - 1}",
+            )
+        )
+    navigation.append(
+        InlineKeyboardButton(
+            f"{page + 1} / {total_pages}",
+            callback_data=f"{SHOP_PLAN_CALLBACK_PREFIX}:noop",
+        )
+    )
+    if page + 1 < total_pages:
+        navigation.append(
+            InlineKeyboardButton(
+                "بعدی",
+                callback_data=f"{SHOP_PLAN_CALLBACK_PREFIX}:page:{page + 1}",
+            )
+        )
+    rows.append(navigation)
+    rows.append(
+        [
+            InlineKeyboardButton(
+                ADMIN_ADD_PLAN,
+                callback_data=f"{SHOP_PLAN_CALLBACK_PREFIX}:add",
+            )
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                "بازگشت",
+                callback_data=f"{SHOP_PLAN_CALLBACK_PREFIX}:back",
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+async def _active_plans_for_config(session):
+    plans = await ShopCustomizationService.list_plans(session)
+    return [plan for plan in plans if plan.is_active]
 
 
 def _normalize_nullable(text: str) -> str | None:
@@ -385,8 +1096,14 @@ def _normalize_custom_emoji_id(text: str) -> str | None:
 
 
 def _extract_custom_emoji_id(message) -> str | None:
+    sticker = getattr(message, "sticker", None)
+    sticker_custom_emoji_id = getattr(sticker, "custom_emoji_id", None)
+    if sticker_custom_emoji_id:
+        return str(sticker_custom_emoji_id)
     custom_emoji_type = getattr(constants.MessageEntityType, "CUSTOM_EMOJI", "custom_emoji")
-    for entity in message.entities or []:
+    entities = list(getattr(message, "entities", None) or [])
+    entities += list(getattr(message, "caption_entities", None) or [])
+    for entity in entities:
         entity_type = getattr(entity, "type", "")
         if entity_type == custom_emoji_type or str(entity_type) == "custom_emoji":
             custom_emoji_id = getattr(entity, "custom_emoji_id", None)
@@ -399,25 +1116,74 @@ def _read_custom_emoji_id(message, raw_text: str) -> str | None:
     return _extract_custom_emoji_id(message) or _normalize_custom_emoji_id(raw_text)
 
 
-def _message_text_for_storage(message) -> tuple[str, str]:
+def _message_text_for_storage(message) -> tuple[str, str, str | None]:
+    photo_file_id = None
+    if getattr(message, "photo", None):
+        photo_file_id = message.photo[-1].file_id
+        caption = message.caption or ""
+        caption_html = getattr(message, "caption_html", None)
+        if isinstance(caption_html, str) and caption_html:
+            return caption_html, constants.ParseMode.HTML, photo_file_id
+        return caption, constants.ParseMode.MARKDOWN, photo_file_id
     if _extract_custom_emoji_id(message):
         text_html = getattr(message, "text_html", None)
         if isinstance(text_html, str) and text_html:
+            return text_html, constants.ParseMode.HTML, None
+    return message.text or "", constants.ParseMode.MARKDOWN, None
+
+
+def _broadcast_text(message) -> tuple[str, str | None]:
+    if message.entities:
+        text_html = getattr(message, "text_html", None)
+        if isinstance(text_html, str) and text_html:
             return text_html, constants.ParseMode.HTML
-    return message.text, constants.ParseMode.MARKDOWN
+    return message.text or "", None
 
 
 def _admin_user_preview(user) -> str:
-    username = f"@{user.username}" if user.username else "ندارد"
+    first_name = escape_markdown(user.first_name or "بدون نام", version=1)
+    username = f"@{escape_markdown(user.username, version=1)}" if user.username else "ندارد"
     status = "مسدود" if user.is_blocked else "فعال"
     return (
         "**تایید کاربر**\n\n"
         f"آیدی عددی: `{user.telegram_id}`\n"
-        f"نام: {user.first_name}\n"
+        f"نام: {first_name}\n"
         f"یوزرنیم: {username}\n"
         f"موجودی کیف پول: **{user.wallet_balance:,} تومان**\n"
         f"وضعیت: {status}\n\n"
         "اگر کاربر درست است، دکمه تایید کاربر را بزنید."
+    )
+
+
+def _rial_request_decision_keyboard(request_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "✅ تایید و شارژ",
+                    callback_data=f"{RIAL_REQUEST_CALLBACK_PREFIX}:approve:{request_id}",
+                ),
+                InlineKeyboardButton(
+                    "❌ رد درخواست",
+                    callback_data=f"{RIAL_REQUEST_CALLBACK_PREFIX}:reject:{request_id}",
+                ),
+            ]
+        ]
+    )
+
+
+def _format_admin_rial_request(request) -> str:
+    when = format_tehran_datetime(request.created_at) if request.created_at else "-"
+    phone = request.phone_number or "دریافت نشده"
+    return (
+        f"درخواست واریز ریالی #{request.id}\n\n"
+        f"👤 کاربر: `{request.user_id}`\n"
+        f"💰 مبلغ: **{request.amount_toman:,} تومان**\n"
+        f"📱 تماس: `{phone}`\n"
+        f"💳 کارت مبدا: `{request.source_card}`\n"
+        f"🧾 کد پیگیری: `{request.tracking_code}`\n"
+        f"🕒 {when}\n\n"
+        "برای شارژ سریع، دکمه تایید و شارژ را بزنید."
     )
 
 
@@ -549,13 +1315,72 @@ async def admin_logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @require_auth(permission="inventory")
 async def add_config_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with async_session() as session:
-        keyboard = await _admin_volume_keyboard(session, "add")
+        plans = await _active_plans_for_config(session)
+    if not plans:
+        await update.message.reply_text(
+            "هیچ سرویس فعالی برای افزودن کانفیگ وجود ندارد.",
+            reply_markup=admin_inventory_keyboard(),
+        )
+        return ConversationHandler.END
     await update.message.reply_text(
-        ADD_CONFIG_VOLUME,
-        reply_markup=keyboard,
+        f"{ADD_CONFIG_VOLUME}\n\nتعداد سرویس‌های فعال: **{len(plans)}**",
+        reply_markup=_add_config_plan_keyboard(plans),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     return CHOOSE_VOLUME_ADD
+
+
+@require_auth(permission="inventory")
+async def add_config_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = (query.data or "").split(":")
+    action = parts[1] if len(parts) > 1 else ""
+
+    if action == "noop":
+        return CHOOSE_VOLUME_ADD
+    if action == "cancel":
+        await query.edit_message_text("افزودن کانفیگ لغو شد.")
+        await query.message.reply_text(
+            ADMIN_INVENTORY_MENU,
+            reply_markup=admin_inventory_keyboard(),
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
+        return ConversationHandler.END
+
+    async with async_session() as session:
+        plans = await _active_plans_for_config(session)
+        if action == "page":
+            page = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+            await query.edit_message_reply_markup(
+                reply_markup=_add_config_plan_keyboard(plans, page)
+            )
+            return CHOOSE_VOLUME_ADD
+
+        plan_id = int(parts[2]) if action == "select" and len(parts) > 2 and parts[2].isdigit() else None
+        plan = await ShopCustomizationService.get_plan(session, plan_id) if plan_id else None
+
+    if not plan or not plan.is_active:
+        await query.message.reply_text("این سرویس دیگر فعال نیست؛ یک سرویس دیگر انتخاب کنید.")
+        return CHOOSE_VOLUME_ADD
+
+    context.user_data["adding_plan_id"] = plan.id
+    context.user_data["adding_volume"] = plan.volume_gb
+    context.user_data["adding_category_key"] = plan.category_key
+    context.user_data["collected_links"] = []
+    await query.edit_message_text(
+        f"سرویس انتخاب شد:\n"
+        f"**{escape_markdown(plan.title, version=1)}**\n"
+        f"دسته: `{escape_markdown(plan.category_key, version=1)}`\n"
+        f"حجم: **{_volume_label(plan.volume_gb)}**",
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    await query.message.reply_text(
+        SEND_LINKS_PROMPT,
+        reply_markup=add_links_collecting_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return COLLECT_LINKS
 
 
 @require_auth(permission="inventory")
@@ -602,15 +1427,21 @@ async def done_collecting(update: Update, context: ContextTypes.DEFAULT_TYPE):
     volume = context.user_data.get("adding_volume")
     category_key = context.user_data.get("adding_category_key", "default")
     links = context.user_data.get("collected_links", [])
-    if not volume or not links:
+    if volume is None or not links:
         await update.message.reply_text("لینکی برای ثبت وجود ندارد.", reply_markup=admin_inventory_keyboard())
         return ConversationHandler.END
 
     async with async_session() as session:
-        count = await InventoryService.add_configs(session, volume, links, category_key)
+        count = await InventoryService.add_configs(
+            session,
+            volume,
+            links,
+            category_key,
+            context.user_data.get("adding_plan_id"),
+        )
 
     await update.message.reply_text(
-        f"{count} لینک برای پلن {volume} گیگ در دسته `{category_key}` ثبت شد.",
+        f"{count} لینک برای پلن {_volume_label(volume)} در دسته `{category_key}` ثبت شد.",
         reply_markup=admin_inventory_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
@@ -623,14 +1454,14 @@ async def stock_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         stock = await InventoryService.get_stock_status(session)
 
     message = STOCK_STATUS_HEADER
-    for category_key, volume, title, count in stock:
+    for _plan_id, category_key, volume, title, count in stock:
         if count < 5:
             status = "بحرانی"
         elif count <= 10:
             status = "متوسط"
         else:
             status = "مناسب"
-        message += f"[{category_key}] {title} - {volume} گیگ: {count} عدد ({status})\n"
+        message += f"[{category_key}] {title} - {_volume_label(volume)}: {count} عدد ({status})\n"
 
     await update.message.reply_text(
         message,
@@ -644,11 +1475,11 @@ async def view_prices(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with async_session() as session:
         plans = await ShopCustomizationService.list_plans(session)
 
-    message = PRICE_LIST_HEADER.format(datetime.now().strftime("%Y-%m-%d %H:%M"))
+    message = PRICE_LIST_HEADER.format(format_tehran_datetime(datetime.now(timezone.utc)))
     async with async_session() as session:
         for plan in plans:
             price = await PriceService.get_plan_price(session, plan)
-            message += f"#{plan.id} [{plan.category_key}] {plan.title} - {plan.volume_gb} گیگ: {(price or 0):,} تومان\n"
+            message += f"#{plan.id} [{plan.category_key}] {plan.title} - {_volume_label(plan.volume_gb)}: {(price or 0):,} تومان\n"
 
     await update.message.reply_text(
         message,
@@ -712,7 +1543,7 @@ async def save_new_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if success:
         await update.message.reply_text(
-            PRICE_UPDATED.format(context.user_data.get("editing_volume"), f"{new_price:,}", datetime.now().strftime("%H:%M:%S")),
+            PRICE_UPDATED.format(context.user_data.get("editing_volume"), f"{new_price:,}", datetime.now(TEHRAN_TZ).strftime("%H:%M:%S")),
             reply_markup=admin_prices_keyboard(),
             parse_mode=constants.ParseMode.MARKDOWN,
         )
@@ -745,7 +1576,7 @@ async def search_user_result(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"نام: {user.first_name}\n"
             f"یوزرنیم: @{user.username or 'ندارد'}\n"
             f"موجودی کیف پول: **{user.wallet_balance:,} تومان**\n"
-            f"تاریخ عضویت: {user.created_at.strftime('%Y-%m-%d')}\n"
+            f"تاریخ عضویت: {format_tehran_datetime(user.created_at, include_time=False)}\n"
             f"وضعیت: {status}\n\n"
             "**خلاصه خرید**\n"
             f"تعداد خرید: **{purchase_summary['total_count']}**\n"
@@ -757,7 +1588,7 @@ async def search_user_result(update: Update, context: ContextTypes.DEFAULT_TYPE)
             for purchase in purchase_summary["purchases"]:
                 coupon_text = f" | کد تخفیف: {purchase.coupon_code}" if purchase.coupon_code else ""
                 message += (
-                    f"{purchase.purchased_at.strftime('%Y-%m-%d %H:%M')} | "
+                    f"{format_tehran_datetime(purchase.purchased_at)} | "
                     f"{purchase.volume_gb} گیگ | {purchase.price:,} تومان{coupon_text}\n"
                 )
         else:
@@ -789,6 +1620,11 @@ async def charge_wallet_user(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     async with async_session() as session:
         user = await UserService.search_user(session, query_text)
+        pending_rial_requests = (
+            await RialPaymentService.list_pending_for_user(session, user.telegram_id)
+            if user
+            else []
+        )
 
     if not user:
         await update.message.reply_text("کاربری با این آیدی یا یوزرنیم پیدا نشد. دوباره ارسال کنید.")
@@ -800,6 +1636,17 @@ async def charge_wallet_user(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup=admin_user_confirm_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
+    if pending_rial_requests:
+        await update.message.reply_text(
+            f"{len(pending_rial_requests)} درخواست واریز ریالی در انتظار برای این کاربر پیدا شد:",
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
+        for request in pending_rial_requests:
+            await update.message.reply_text(
+                _format_admin_rial_request(request),
+                reply_markup=_rial_request_decision_keyboard(request.id),
+                parse_mode=constants.ParseMode.MARKDOWN,
+            )
     return CHARGE_CONFIRM_USER
 
 
@@ -827,21 +1674,144 @@ async def charge_wallet_execute(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("مبلغ شارژ را فقط به صورت عددی ارسال کنید.")
         return CHARGE_AMOUNT
 
-    if amount <= 0:
-        await update.message.reply_text("مبلغ شارژ باید بیشتر از صفر باشد.")
+    if amount == 0:
+        await update.message.reply_text("مبلغ تغییر موجودی نمی‌تواند صفر باشد.")
         return CHARGE_AMOUNT
 
     async with async_session() as session:
         success = await UserService.charge_wallet(session, user_id, amount, update.effective_user.id)
+        if success:
+            user = (
+                await session.execute(select(User).where(User.telegram_id == user_id))
+            ).scalar_one()
 
     if success:
+        if amount > 0:
+            async with async_session() as session:
+                notified = await WalletNotificationService.send_charge_notification(
+                    session,
+                    telegram_id=user_id,
+                    amount=amount,
+                    wallet_balance=user.wallet_balance,
+                )
+            if notified:
+                notification_status = "\nپیام شارژ نیز برای کاربر ارسال شد."
+            else:
+                notification_status = "\nشارژ ثبت شد، اما ارسال پیام به کاربر ممکن نبود."
+        else:
+            notification_status = "\nکسر موجودی ثبت شد."
         await update.message.reply_text(
-            CHARGE_SUCCESS.format(user_id, f"{amount:,}", datetime.now().strftime("%H:%M:%S")),
+            CHARGE_SUCCESS.format(user_id, f"{amount:,}", datetime.now(TEHRAN_TZ).strftime("%H:%M:%S"))
+            + notification_status,
             reply_markup=admin_users_keyboard(),
             parse_mode=constants.ParseMode.MARKDOWN,
         )
     else:
-        await update.message.reply_text("کاربر پیدا نشد.", reply_markup=admin_users_keyboard())
+        await update.message.reply_text(
+            "کاربر پیدا نشد یا موجودی کیف پول برای کسر این مبلغ کافی نیست.",
+            reply_markup=admin_users_keyboard(),
+        )
+
+
+async def _execute_broadcast(
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    admin_chat_id: int,
+    text: str,
+    parse_mode: str | None,
+) -> None:
+    try:
+        async with async_session() as session:
+            user_ids = await BroadcastService.recipient_ids(session)
+        stats = await BroadcastService.send_text(user_ids, text=text, parse_mode=parse_mode)
+        await context.bot.send_message(
+            chat_id=admin_chat_id,
+            text=(
+                "✅ **ارسال همگانی تمام شد**\n\n"
+                f"کل مخاطبان: **{stats['total']:,}**\n"
+                f"ارسال موفق: **{stats['sent']:,}**\n"
+                f"مسدود یا چت غیرفعال: **{stats['blocked']:,}**\n"
+                f"خطاهای دیگر: **{stats['failed']:,}**"
+            ),
+            parse_mode=constants.ParseMode.MARKDOWN,
+            reply_markup=admin_main_keyboard(),
+        )
+    except Exception:
+        logger.exception("Broadcast failed")
+        await context.bot.send_message(
+            chat_id=admin_chat_id,
+            text="ارسال همگانی به دلیل خطای داخلی متوقف شد. جزئیات در لاگ سرور ثبت شد.",
+            reply_markup=admin_main_keyboard(),
+        )
+
+
+@require_auth(permission="users")
+async def broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("broadcast_text", None)
+    context.user_data.pop("broadcast_parse_mode", None)
+    await update.message.reply_text(
+        "📢 **ارسال پیام همگانی**\n\n"
+        "متن موردنظر را ارسال کنید. قالب‌بندی متن و ایموجی پریمیوم حفظ می‌شود.\n"
+        "پس از آن پیش‌نمایش و تأیید نهایی نمایش داده می‌شود.",
+        reply_markup=_cancel_back_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return BROADCAST_MESSAGE
+
+
+@require_auth(permission="users")
+async def broadcast_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text, parse_mode = _broadcast_text(update.message)
+    if not text.strip():
+        await update.message.reply_text("متن پیام نمی‌تواند خالی باشد.")
+        return BROADCAST_MESSAGE
+    if len(text) > 4096:
+        await update.message.reply_text("متن پیام بیشتر از محدودیت ۴۰۹۶ کاراکتری تلگرام است.")
+        return BROADCAST_MESSAGE
+
+    context.user_data["broadcast_text"] = text
+    context.user_data["broadcast_parse_mode"] = parse_mode
+    await update.message.reply_text("پیش‌نمایش پیام:")
+    await update.message.reply_text(
+        text,
+        parse_mode=parse_mode,
+        reply_markup=ReplyKeyboardMarkup(
+            [[ADMIN_BROADCAST_SEND], [CANCEL, ADMIN_BACK]],
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        ),
+    )
+    return BROADCAST_CONFIRM
+
+
+@require_auth(permission="users")
+async def broadcast_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text != ADMIN_BROADCAST_SEND:
+        await update.message.reply_text("برای ارسال، دکمه تأیید را انتخاب کنید.")
+        return BROADCAST_CONFIRM
+
+    text = context.user_data.pop("broadcast_text", None)
+    parse_mode = context.user_data.pop("broadcast_parse_mode", None)
+    if not text:
+        return await broadcast_start(update, context)
+
+    async with async_session() as session:
+        recipient_count = len(await BroadcastService.recipient_ids(session))
+    await update.message.reply_text(
+        f"ارسال پیام به {recipient_count:,} کاربر در پس‌زمینه شروع شد. پس از پایان، گزارش ارسال می‌شود.",
+        reply_markup=admin_main_keyboard(),
+    )
+    context.application.create_task(
+        _execute_broadcast(
+            context,
+            admin_chat_id=update.effective_chat.id,
+            text=text,
+            parse_mode=parse_mode,
+        ),
+        update=update,
+        name=f"broadcast-{update.effective_user.id}",
+    )
+    return ConversationHandler.END
 
     return ConversationHandler.END
 
@@ -934,29 +1904,80 @@ async def sales_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         REPORT_TODAY: (1, "امروز"),
         REPORT_WEEK: (7, "هفته جاری"),
         REPORT_MONTH: (30, "ماه جاری"),
+        REPORT_45_DAYS: (45, "۴۵ روز اخیر"),
+        REPORT_90_DAYS: (90, "۹۰ روز اخیر"),
     }
     days, period_name = period_map[update.message.text]
-    since = datetime.now(timezone.utc) - timedelta(days=days)
+    tehran = ZoneInfo("Asia/Tehran")
+    today = datetime.now(tehran).date()
+    since = datetime.combine(today - timedelta(days=days - 1), time.min, tehran).astimezone(timezone.utc)
+    until = datetime.combine(today + timedelta(days=1), time.min, tehran).astimezone(timezone.utc)
 
     async with async_session() as session:
-        result = await session.execute(select(Purchase).where(Purchase.purchased_at >= since))
+        result = await session.execute(
+            select(Purchase).where(Purchase.purchased_at >= since, Purchase.purchased_at < until)
+        )
         purchases = result.scalars().all()
 
+    purchases = sorted(purchases, key=lambda item: item.purchased_at, reverse=True)
     total_revenue = sum(purchase.price for purchase in purchases)
+    sale_count = sum(1 for purchase in purchases if purchase.kind != "renewal")
+    renewals = sum(1 for purchase in purchases if purchase.kind == "renewal")
     volume_stats = {}
+    category_stats = {}
+    plan_stats = {}
+    source_stats = {"inventory": 0, "panel": 0}
     for purchase in purchases:
         volume_stats[purchase.volume_gb] = volume_stats.get(purchase.volume_gb, 0) + 1
+        category = purchase.category_key or "default"
+        category_bucket = category_stats.setdefault(category, {"count": 0, "revenue": 0})
+        category_bucket["count"] += 1
+        category_bucket["revenue"] += purchase.price
+        plan_key = purchase.service_name or f"{_volume_label(purchase.volume_gb)} [{category}]"
+        plan_bucket = plan_stats.setdefault(plan_key, {"count": 0, "revenue": 0})
+        plan_bucket["count"] += 1
+        plan_bucket["revenue"] += purchase.price
+        if purchase.provision_source == "panel":
+            source_stats["panel"] += 1
+        else:
+            source_stats["inventory"] += 1
 
     message = f"**گزارش فروش {period_name}**\n\n"
-    message += f"تعداد فروش: {len(purchases)}\n"
+    message += f"کل تراکنش‌های فروش/تمدید: **{len(purchases)}**\n"
+    message += f"خرید جدید: **{sale_count}**\n"
+    message += f"تمدید: **{renewals}**\n"
+    message += f"ارسال از انبار: **{source_stats['inventory']}**\n"
+    message += f"ساخت مستقیم از پنل: **{source_stats['panel']}**\n"
     message += f"درآمد کل: **{total_revenue:,} تومان**\n\n"
+
+    if category_stats:
+        message += "**تفکیک دسته‌ها:**\n"
+        for category, data in sorted(category_stats.items(), key=lambda item: item[1]["revenue"], reverse=True)[:10]:
+            message += f"`{category}`: {data['count']} مورد | {data['revenue']:,} تومان\n"
+        message += "\n"
+
+    if plan_stats:
+        message += "**پرفروش‌ترین سرویس‌ها:**\n"
+        for title, data in sorted(plan_stats.items(), key=lambda item: item[1]["count"], reverse=True)[:10]:
+            safe_title = escape_markdown(title, version=1)
+            message += f"{safe_title}: {data['count']} مورد | {data['revenue']:,} تومان\n"
+        message += "\n"
+
     if volume_stats:
-        message += "تفکیک بر اساس حجم:\n"
+        message += "**تفکیک حجم نمایشی:**\n"
         for volume, count in sorted(volume_stats.items()):
-            message += f"{volume} گیگ: {count} فروش\n"
+            message += f"{_volume_label(volume)}: {count} مورد\n"
+
+    if purchases:
+        message += "\n**آخرین فروش‌ها:**\n"
+        for purchase in purchases[:12]:
+            kind = "تمدید" if purchase.kind == "renewal" else "خرید"
+            source = "پنل" if purchase.provision_source == "panel" else "انبار"
+            title = escape_markdown(purchase.service_name or _volume_label(purchase.volume_gb), version=1)
+            message += f"{format_tehran_datetime(purchase.purchased_at)} | {kind} | {source} | {title} | {purchase.price:,} تومان\n"
 
     await update.message.reply_text(
-        message,
+        message[:3900],
         reply_markup=admin_reports_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
@@ -994,7 +2015,7 @@ async def referral_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     lines = ["**گزارش دعوت‌ها**\n"]
     for referred_id, referrer_id, referred_at in rows[:50]:
-        when = referred_at.strftime("%Y-%m-%d %H:%M") if referred_at else "-"
+        when = format_tehran_datetime(referred_at) if referred_at else "-"
         lines.append(f"`{referred_id}` ← `{referrer_id}` | {when}")
 
     await update.message.reply_text(
@@ -1002,6 +2023,407 @@ async def referral_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=admin_users_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
+
+
+def _start_link_label(link: StartLink, visit_count: int | None = None) -> str:
+    status = "✅" if link.is_active else "⏸"
+    suffix = f" | {visit_count} ورودی" if visit_count is not None else ""
+    return f"#{link.id} {status} {link.name}{suffix}"
+
+
+def _parse_start_link_id(text: str) -> int | None:
+    match = re.search(r"#(\d+)", text or "")
+    return int(match.group(1)) if match else None
+
+
+async def _start_link_details_text(session, link: StartLink) -> str:
+    visits = await StartLinkService.visits_for_link(session, link.id, limit=30)
+    visit_count = await StartLinkService.visit_count(session, link.id)
+    status = "فعال" if link.is_active else "غیرفعال"
+    url = StartLinkService.url_for(link.code)
+    lines = [
+        f"**لینک ورودی #{link.id}**",
+        "",
+        f"نام: **{escape_markdown(link.name, version=1)}**",
+        f"کد: `{link.code}`",
+        f"وضعیت: **{status}**",
+        f"تعداد کاربران ورودی: **{visit_count}**",
+        "",
+        "لینک:",
+        f"`{url}`",
+    ]
+    if visits:
+        lines.extend(["", "**آخرین کاربران واردشده:**"])
+        for visit in visits[:20]:
+            user = visit.user
+            username = f"@{user.username.lstrip('@')}" if user and user.username else "-"
+            first_name = escape_markdown(user.first_name if user else "-", version=1)
+            when = format_tehran_datetime(visit.first_seen_at)
+            lines.append(
+                f"`{visit.user_id}` | {first_name} | {username} | {when} | {visit.hit_count} بار"
+            )
+    else:
+        lines.extend(["", "هنوز کاربری با این لینک وارد نشده است."])
+    return "\n".join(lines)
+
+
+def _start_link_actions(link: StartLink) -> InlineKeyboardMarkup:
+    toggle_text = "⏸ قطع/غیرفعال کردن لینک" if link.is_active else "✅ فعال کردن لینک"
+    url = StartLinkService.url_for(link.code)
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(toggle_text, callback_data=f"{START_LINK_CALLBACK_PREFIX}:toggle:{link.id}"),
+            ],
+            [
+                InlineKeyboardButton("🗑 حذف لینک", callback_data=f"{START_LINK_CALLBACK_PREFIX}:delete:{link.id}"),
+            ],
+            [
+                InlineKeyboardButton("باز کردن لینک", url=url),
+                InlineKeyboardButton("کپی لینک", api_kwargs={"copy_text": {"text": url}}),
+            ],
+        ]
+    )
+
+
+@require_auth(permission="reports")
+async def start_links_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("start_link_id", None)
+    async with async_session() as session:
+        rows = await StartLinkService.list_links(session)
+    total_visits = sum(count for _, count in rows)
+    active_count = sum(1 for link, _ in rows if link.is_active)
+    text = (
+        "**لینک‌های ورودی**\n\n"
+        "برای کمپین‌ها، تبلیغات، کانال‌ها یا هر مسیر ورودی یک لینک جدا بسازید تا ببینید چند نفر و چه کسانی با آن وارد ربات شده‌اند.\n\n"
+        f"تعداد لینک‌ها: **{len(rows)}**\n"
+        f"لینک‌های فعال: **{active_count}**\n"
+        f"کل ورودی‌های ثبت‌شده: **{total_visits}**"
+    )
+    await update.message.reply_text(
+        text,
+        reply_markup=admin_start_links_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return START_LINK_SELECT
+
+
+@require_auth(permission="reports")
+async def start_link_create_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "**ساخت لینک ورودی**\n\n"
+        "یک اسم برای لینک بفرستید؛ مثلا:\n"
+        "`تبلیغ کانال X`\n"
+        "`استوری اینستاگرام تیرماه`",
+        reply_markup=_rows([CANCEL, ADMIN_BACK], width=2),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return START_LINK_NAME
+
+
+@require_auth(permission="reports")
+async def start_link_create_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    name = (update.message.text or "").strip()
+    try:
+        async with async_session() as session:
+            link = await StartLinkService.create_link(session, name, created_by=update.effective_user.id)
+            text = await _start_link_details_text(session, link)
+    except ValueError:
+        await update.message.reply_text("اسم لینک نمی‌تواند خالی باشد. یک اسم معتبر بفرستید.")
+        return START_LINK_NAME
+    await update.message.reply_text(
+        text,
+        reply_markup=_start_link_actions(link),
+        parse_mode=constants.ParseMode.MARKDOWN,
+        disable_web_page_preview=True,
+    )
+    await update.message.reply_text("لینک ساخته شد.", reply_markup=admin_start_links_keyboard())
+    return START_LINK_SELECT
+
+
+@require_auth(permission="reports")
+async def start_link_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        rows = await StartLinkService.list_links(session)
+    if not rows:
+        await update.message.reply_text(
+            "هنوز لینک ورودی ساخته نشده است.",
+            reply_markup=admin_start_links_keyboard(),
+        )
+        return START_LINK_SELECT
+    labels = [ADMIN_START_LINK_CREATE, *[_start_link_label(link, count) for link, count in rows], ADMIN_BACK]
+    await update.message.reply_text(
+        "**لیست لینک‌های ورودی**\n\n"
+        "روی لینک مورد نظر بزنید تا جزئیات، کاربران ورودی و دکمه‌های قطع/حذف را ببینید.",
+        reply_markup=_rows(labels, width=1),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return START_LINK_SELECT
+
+
+@require_auth(permission="reports")
+async def start_link_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    if text == ADMIN_START_LINK_CREATE:
+        return await start_link_create_start(update, context)
+    if text == ADMIN_START_LINK_LIST:
+        return await start_link_list(update, context)
+    link_id = _parse_start_link_id(text)
+    if not link_id:
+        await update.message.reply_text("گزینه معتبر نیست.", reply_markup=admin_start_links_keyboard())
+        return START_LINK_SELECT
+    async with async_session() as session:
+        link = await StartLinkService.get_link(session, link_id)
+        if not link:
+            await update.message.reply_text("لینک پیدا نشد.", reply_markup=admin_start_links_keyboard())
+            return START_LINK_SELECT
+        details = await _start_link_details_text(session, link)
+    await update.message.reply_text(
+        details,
+        reply_markup=_start_link_actions(link),
+        parse_mode=constants.ParseMode.MARKDOWN,
+        disable_web_page_preview=True,
+    )
+    return START_LINK_SELECT
+
+
+@require_auth(permission="reports")
+async def start_link_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = (query.data or "").split(":")
+    action = parts[1] if len(parts) > 1 else ""
+    try:
+        link_id = int(parts[2])
+    except (IndexError, ValueError):
+        await query.message.reply_text("دکمه معتبر نیست.")
+        return
+    async with async_session() as session:
+        if action == "toggle":
+            link = await StartLinkService.toggle_link(session, link_id)
+        elif action == "delete":
+            ok = await StartLinkService.delete_link(session, link_id)
+            if not ok:
+                await query.message.reply_text("لینک پیدا نشد.", reply_markup=admin_start_links_keyboard())
+                return
+            await query.message.reply_text("لینک ورودی حذف شد.", reply_markup=admin_start_links_keyboard())
+            return
+        else:
+            await query.message.reply_text("دکمه معتبر نیست.")
+            return
+        if not link:
+            await query.message.reply_text("لینک پیدا نشد.", reply_markup=admin_start_links_keyboard())
+            return
+        details = await _start_link_details_text(session, link)
+    await query.message.reply_text(
+        details,
+        reply_markup=_start_link_actions(link),
+        parse_mode=constants.ParseMode.MARKDOWN,
+        disable_web_page_preview=True,
+    )
+
+
+def _referral_rule_label(rule: ReferralRewardRule) -> str:
+    status = "✅" if rule.is_active else "⏸"
+    condition = ReferralService.QUALIFICATION_LABELS.get(rule.qualification_type, rule.qualification_type)
+    reward = (
+        f"{rule.wallet_amount or 0:,} تومان"
+        if rule.reward_type == "wallet"
+        else f"سرویس پلن #{rule.shop_plan_id}"
+    )
+    repeat = "هر بار" if rule.is_repeatable else "یک‌بار"
+    return f"#{rule.id} {status} {rule.title} | {rule.required_count} نفر | {condition} | {reward} | {repeat}"
+
+
+@require_auth(permission="users")
+async def referral_rewards_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("referral_rule_draft", None)
+    context.user_data.pop("referral_rule_id", None)
+    async with async_session() as session:
+        rules = await ReferralService.list_rules(session)
+    labels = [
+        ADMIN_REFERRAL_ADD_RULE,
+        ADMIN_REFERRAL_RECALCULATE,
+        *[_referral_rule_label(rule) for rule in rules],
+    ]
+    await update.message.reply_text(
+        "🎁 **مدیریت پاداش‌های رفرال**\n\n"
+        "می‌توانید چند قانون هم‌زمان بسازید. قانون تکرارشونده در هر مضرب تعداد تعیین‌شده جایزه می‌دهد.",
+        reply_markup=_rows(labels, width=1),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return REFERRAL_RULE_SELECT
+
+
+@require_auth(permission="users")
+async def referral_rule_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == ADMIN_REFERRAL_ADD_RULE:
+        context.user_data["referral_rule_draft"] = {}
+        await update.message.reply_text("یک عنوان کوتاه برای قانون بفرستید.", reply_markup=_cancel_back_keyboard())
+        return REFERRAL_RULE_TITLE
+    if update.message.text == ADMIN_REFERRAL_RECALCULATE:
+        async with async_session() as session:
+            rewards = await ReferralService.evaluate_all_referrers(session)
+            await session.commit()
+        for reward in rewards:
+            if reward["config"] is not None:
+                await SubscriptionLinkService.sync_to_panel(reward["config"], reward["service_name"])
+        await update.message.reply_text(f"✅ محاسبه انجام شد و {len(rewards)} جایزه جدید ثبت شد.")
+        return await referral_rewards_start(update, context)
+
+    rule_id = _parse_hash_id(update.message.text)
+    if not rule_id:
+        await update.message.reply_text("قانون معتبر نیست.")
+        return REFERRAL_RULE_SELECT
+    async with async_session() as session:
+        rule = await session.get(ReferralRewardRule, rule_id)
+    if not rule:
+        await update.message.reply_text("این قانون پیدا نشد.")
+        return await referral_rewards_start(update, context)
+    context.user_data["referral_rule_id"] = rule_id
+    await update.message.reply_text(
+        _referral_rule_label(rule),
+        reply_markup=_rows([ADMIN_REFERRAL_TOGGLE_RULE, ADMIN_REFERRAL_DELETE_RULE], width=1),
+    )
+    return REFERRAL_RULE_OPTION
+
+
+@require_auth(permission="users")
+async def referral_rule_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    title = update.message.text.strip()
+    if not title:
+        await update.message.reply_text("عنوان نمی‌تواند خالی باشد.")
+        return REFERRAL_RULE_TITLE
+    context.user_data["referral_rule_draft"]["title"] = title
+    labels = list(ReferralService.QUALIFICATION_LABELS.values())
+    await update.message.reply_text("چه زمانی یک زیرمجموعه معتبر حساب شود؟", reply_markup=_rows(labels, width=1))
+    return REFERRAL_RULE_QUALIFICATION
+
+
+@require_auth(permission="users")
+async def referral_rule_qualification(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    reverse = {label: key for key, label in ReferralService.QUALIFICATION_LABELS.items()}
+    qualification = reverse.get(update.message.text)
+    if not qualification:
+        await update.message.reply_text("شرط معتبر نیست.")
+        return REFERRAL_RULE_QUALIFICATION
+    context.user_data["referral_rule_draft"]["qualification_type"] = qualification
+    await update.message.reply_text(
+        "جایزه بعد از چند زیرمجموعه معتبر داده شود؟ فقط عدد بفرستید.",
+        reply_markup=_cancel_back_keyboard(),
+    )
+    return REFERRAL_RULE_COUNT
+
+
+@require_auth(permission="users")
+async def referral_rule_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        count = int(update.message.text.strip())
+    except ValueError:
+        count = 0
+    if count <= 0:
+        await update.message.reply_text("تعداد باید یک عدد بزرگ‌تر از صفر باشد.")
+        return REFERRAL_RULE_COUNT
+    context.user_data["referral_rule_draft"]["required_count"] = count
+    await update.message.reply_text(
+        "این جایزه فقط یک‌بار داده شود یا در هر بار رسیدن به این تعداد تکرار شود؟",
+        reply_markup=_rows(["یک‌بار", "تکرارشونده"], width=2),
+    )
+    return REFERRAL_RULE_REPEAT
+
+
+@require_auth(permission="users")
+async def referral_rule_repeat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text not in {"یک‌بار", "تکرارشونده"}:
+        await update.message.reply_text("یکی از گزینه‌ها را انتخاب کنید.")
+        return REFERRAL_RULE_REPEAT
+    context.user_data["referral_rule_draft"]["is_repeatable"] = update.message.text == "تکرارشونده"
+    await update.message.reply_text(
+        "نوع جایزه را انتخاب کنید.",
+        reply_markup=_rows(list(ReferralService.REWARD_LABELS.values()), width=2),
+    )
+    return REFERRAL_RULE_REWARD_TYPE
+
+
+@require_auth(permission="users")
+async def referral_rule_reward_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    reverse = {label: key for key, label in ReferralService.REWARD_LABELS.items()}
+    reward_type = reverse.get(update.message.text)
+    if not reward_type:
+        await update.message.reply_text("نوع جایزه معتبر نیست.")
+        return REFERRAL_RULE_REWARD_TYPE
+    context.user_data["referral_rule_draft"]["reward_type"] = reward_type
+    if reward_type == "wallet":
+        await update.message.reply_text(
+            "مبلغ جایزه را به تومان و فقط به‌صورت عدد ارسال کنید.",
+            reply_markup=_cancel_back_keyboard(),
+        )
+    else:
+        async with async_session() as session:
+            plans = await ShopCustomizationService.list_plans(session, active_only=True)
+        if not plans:
+            await update.message.reply_text("هیچ سرویس فعالی برای جایزه وجود ندارد.")
+            return await referral_rewards_start(update, context)
+        await update.message.reply_text(
+            "سرویس رایگان را انتخاب کنید. تحویل جایزه به موجودی همین سرویس وابسته است.",
+            reply_markup=_rows([_plan_label(plan) for plan in plans], width=1),
+        )
+    return REFERRAL_RULE_REWARD_VALUE
+
+
+@require_auth(permission="users")
+async def referral_rule_reward_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    draft = context.user_data.get("referral_rule_draft", {})
+    if draft.get("reward_type") == "wallet":
+        try:
+            amount = int(update.message.text.replace(",", "").strip())
+        except ValueError:
+            amount = 0
+        if amount <= 0:
+            await update.message.reply_text("مبلغ باید بزرگ‌تر از صفر باشد.")
+            return REFERRAL_RULE_REWARD_VALUE
+        draft["wallet_amount"] = amount
+    else:
+        plan_id = _parse_hash_id(update.message.text)
+        if not plan_id:
+            await update.message.reply_text("سرویس معتبر نیست.")
+            return REFERRAL_RULE_REWARD_VALUE
+        draft["shop_plan_id"] = plan_id
+
+    try:
+        async with async_session() as session:
+            rule = await ReferralService.create_rule(
+                session,
+                created_by=update.effective_user.id,
+                **draft,
+            )
+            await session.commit()
+    except ValueError as exc:
+        await update.message.reply_text(f"ساخت قانون انجام نشد: {exc}")
+        return await referral_rewards_start(update, context)
+
+    context.user_data.pop("referral_rule_draft", None)
+    await update.message.reply_text(f"✅ قانون «{rule.title}» ساخته شد.")
+    return await referral_rewards_start(update, context)
+
+
+@require_auth(permission="users")
+async def referral_rule_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    rule_id = context.user_data.get("referral_rule_id")
+    if not rule_id:
+        return await referral_rewards_start(update, context)
+    async with async_session() as session:
+        if update.message.text == ADMIN_REFERRAL_TOGGLE_RULE:
+            rule = await ReferralService.toggle_rule(session, rule_id)
+            message = "وضعیت قانون تغییر کرد." if rule else "قانون پیدا نشد."
+        elif update.message.text == ADMIN_REFERRAL_DELETE_RULE:
+            deleted = await ReferralService.delete_rule(session, rule_id)
+            message = "قانون حذف شد." if deleted else "قانون پیدا نشد."
+        else:
+            await update.message.reply_text("گزینه معتبر نیست.")
+            return REFERRAL_RULE_OPTION
+    await update.message.reply_text(message)
+    return await referral_rewards_start(update, context)
 
 
 @require_auth(permission="coupons")
@@ -1749,13 +3171,324 @@ async def toggle_branded_subscription_links(update: Update, context: ContextType
 
 
 @require_auth(permission="shop")
+async def trial_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        enabled = await SettingsService.trial_enabled(session)
+        volume_mb = await SettingsService.get_trial_volume_mb(session)
+        duration_hours = await SettingsService.get_trial_duration_hours(session)
+        panel_key = await SettingsService.get_trial_panel_key(session)
+        time_mode = await SettingsService.get_trial_time_mode(session)
+        panel = (
+            await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == panel_key))
+        ).scalar_one_or_none()
+        panel_label = f"{panel.title} ({panel.key})" if panel else panel_key or "-"
+    await update.message.reply_text(
+        "**تنظیمات کانفیگ تست**\n\n"
+        f"وضعیت: **{'روشن' if enabled else 'خاموش'}**\n"
+        f"حجم: **{volume_mb} مگابایت**\n"
+        f"مدت: **{duration_hours} ساعت**\n"
+        f"نوع زمان: **{_provision_time_mode_label(time_mode)}**\n"
+        f"پنل ساخت: `{panel_label}`\n"
+        "هر حساب تلگرام فقط یک‌بار می‌تواند تست دریافت کند.",
+        reply_markup=admin_trial_settings_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+
+
+@require_auth(permission="shop")
+async def trial_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        enabled = not await SettingsService.trial_enabled(session)
+        await SettingsService.set_trial_enabled(session, enabled)
+    await update.message.reply_text(f"دریافت تست {'روشن' if enabled else 'خاموش'} شد.")
+    await trial_settings_menu(update, context)
+
+
+@require_auth(permission="shop")
+async def trial_set_volume_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "حجم تست را به مگابایت وارد کنید. مثال: `500`",
+        reply_markup=_cancel_back_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return TRIAL_SET_VOLUME_VALUE
+
+
+@require_auth(permission="shop")
+async def trial_set_volume_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        value = int(update.message.text.replace(",", "").strip())
+    except ValueError:
+        value = 0
+    if value <= 0:
+        await update.message.reply_text("حجم باید یک عدد مثبت برحسب مگابایت باشد.")
+        return TRIAL_SET_VOLUME_VALUE
+    async with async_session() as session:
+        await SettingsService.set_trial_volume_mb(session, value)
+    await update.message.reply_text("حجم کانفیگ تست ذخیره شد.")
+    await trial_settings_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="shop")
+async def trial_set_duration_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "مدت تست را به ساعت وارد کنید. مثال: `24`",
+        reply_markup=_cancel_back_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return TRIAL_SET_DURATION_VALUE
+
+
+@require_auth(permission="shop")
+async def trial_set_duration_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        value = int(update.message.text.replace(",", "").strip())
+    except ValueError:
+        value = 0
+    if value <= 0:
+        await update.message.reply_text("مدت باید یک عدد مثبت برحسب ساعت باشد.")
+        return TRIAL_SET_DURATION_VALUE
+    async with async_session() as session:
+        await SettingsService.set_trial_duration_hours(session, value)
+    await update.message.reply_text("مدت کانفیگ تست ذخیره شد.")
+    await trial_settings_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="shop")
+async def trial_set_panel_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        panels = (
+            await session.execute(
+                select(ProvisionPanel).where(ProvisionPanel.is_enabled.is_(True)).order_by(ProvisionPanel.key)
+            )
+        ).scalars().all()
+    if not panels:
+        await update.message.reply_text(
+            "هیچ پنل ساخت فعالی وجود ندارد. اول از بخش «مدیریت پنل‌های ساخت» یک پنل را فعال کنید.",
+            reply_markup=admin_trial_settings_keyboard(),
+        )
+        return ConversationHandler.END
+    labels = [f"{panel.title} ({panel.key})" for panel in panels]
+    await update.message.reply_text(
+        "**انتخاب پنل ساخت تست**\n\n"
+        "پنلی را انتخاب کنید که کانفیگ تست از آن ساخته شود.",
+        reply_markup=_rows([*labels, CANCEL, ADMIN_BACK], width=1),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return TRIAL_SET_PANEL_VALUE
+
+
+@require_auth(permission="shop")
+async def trial_set_panel_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text or ""
+    match = re.search(r"\(([^()]+)\)\s*$", text)
+    panel_key = match.group(1).strip() if match else text.strip()
+    async with async_session() as session:
+        panel = (
+            await session.execute(
+                select(ProvisionPanel).where(
+                    ProvisionPanel.key == panel_key,
+                    ProvisionPanel.is_enabled.is_(True),
+                )
+            )
+        ).scalar_one_or_none()
+        if not panel:
+            await update.message.reply_text("پنل انتخاب‌شده معتبر یا فعال نیست.")
+            return TRIAL_SET_PANEL_VALUE
+        await SettingsService.set_trial_panel_key(session, panel.key)
+    await update.message.reply_text("پنل ساخت تست ذخیره شد.")
+    await trial_settings_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="shop")
+async def trial_set_time_mode_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "**نوع زمان کانفیگ تست**\n\n"
+        "برای تست، گزینه «تاریخ‌دار از زمان ساخت» پیشنهاد می‌شود تا تست همان لحظه شروع و بعد از مدت تعیین‌شده تمام شود.",
+        reply_markup=admin_provision_time_mode_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return TRIAL_SET_TIME_MODE_VALUE
+
+
+@require_auth(permission="shop")
+async def trial_set_time_mode_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    raw = (update.message.text or "").strip()
+    value = PROVISION_TIME_MODE_VALUES.get(raw, raw)
+    if value not in {"date", "on_hold", "unlimited"}:
+        await update.message.reply_text("نوع زمان معتبر نیست.", reply_markup=admin_provision_time_mode_keyboard())
+        return TRIAL_SET_TIME_MODE_VALUE
+    async with async_session() as session:
+        await SettingsService.set_trial_time_mode(session, value)
+    await update.message.reply_text("نوع زمان کانفیگ تست ذخیره شد.")
+    await trial_settings_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="shop")
+async def service_reminders_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        enabled = await SettingsService.service_reminders_enabled(session)
+        volume_percents = await SettingsService.get_service_reminder_volume_percents(session)
+        time_days = await SettingsService.get_service_reminder_time_days(session)
+        time_hours = await SettingsService.get_service_reminder_time_hours(session)
+        interval = await SettingsService.get_service_reminder_interval_seconds(session)
+    await update.message.reply_text(
+        "**هشدار تمدید سرویس**\n\n"
+        f"وضعیت: **{'روشن' if enabled else 'خاموش'}**\n"
+        f"هشدار حجم: **{', '.join(str(value) + '٪' for value in volume_percents) or '-'}**\n"
+        f"هشدار روزانه: **{', '.join(str(value) + ' روز' for value in time_days) or '-'}**\n"
+        f"هشدار ساعتی: **{', '.join(str(value) + ' ساعت' for value in time_hours) or '-'}**\n"
+        f"فاصله بررسی خودکار: **{interval // 60} دقیقه**\n\n"
+        "متن پیام از بخش مدیریت پیام‌ها با کلید `service_expiry_reminder` قابل تغییر است.",
+        reply_markup=admin_service_reminders_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+
+
+@require_auth(permission="shop")
+async def service_reminders_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        enabled = not await SettingsService.service_reminders_enabled(session)
+        await SettingsService.set_service_reminders_enabled(session, enabled)
+    await update.message.reply_text(f"هشدار تمدید سرویس {'روشن' if enabled else 'خاموش'} شد.")
+    await service_reminders_menu(update, context)
+
+
+@require_auth(permission="shop")
+async def service_reminder_volume_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "درصدهای هشدار حجم را با کاما بفرستید.\nمثال: `20,10`\nبرای غیرفعال کردن هشدار حجم، `-` بفرستید.",
+        reply_markup=_cancel_back_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return SERVICE_REMINDER_VOLUME_VALUE
+
+
+@require_auth(permission="shop")
+async def service_reminder_volume_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    values = _parse_positive_int_list(update.message.text, maximum=100)
+    if update.message.text.strip() != "-" and not values:
+        await update.message.reply_text("درصدها معتبر نیستند. مثال: `20,10`", parse_mode=constants.ParseMode.MARKDOWN)
+        return SERVICE_REMINDER_VOLUME_VALUE
+    async with async_session() as session:
+        await SettingsService.set_service_reminder_volume_percents(session, values)
+    await update.message.reply_text("درصدهای هشدار حجم ذخیره شد.")
+    await service_reminders_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="shop")
+async def service_reminder_days_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "روزهای هشدار زمان را با کاما بفرستید.\nمثال: `3,1`\nبرای غیرفعال کردن هشدار زمان، `-` بفرستید.",
+        reply_markup=_cancel_back_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return SERVICE_REMINDER_DAYS_VALUE
+
+
+@require_auth(permission="shop")
+async def service_reminder_days_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    values = _parse_positive_int_list(update.message.text)
+    if update.message.text.strip() != "-" and not values:
+        await update.message.reply_text("روزها معتبر نیستند. مثال: `3,1`", parse_mode=constants.ParseMode.MARKDOWN)
+        return SERVICE_REMINDER_DAYS_VALUE
+    async with async_session() as session:
+        await SettingsService.set_service_reminder_time_days(session, values)
+    await update.message.reply_text("روزهای هشدار زمان ذخیره شد.")
+    await service_reminders_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="shop")
+async def service_reminder_hours_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "ساعت‌های هشدار زمان را با کاما بفرستید.\nمثال: `2,1`\nبرای غیرفعال کردن هشدار ساعتی، `-` بفرستید.",
+        reply_markup=_cancel_back_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return SERVICE_REMINDER_HOURS_VALUE
+
+
+@require_auth(permission="shop")
+async def service_reminder_hours_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    values = _parse_positive_int_list(update.message.text)
+    if update.message.text.strip() != "-" and not values:
+        await update.message.reply_text("ساعت‌ها معتبر نیستند. مثال: `2,1`", parse_mode=constants.ParseMode.MARKDOWN)
+        return SERVICE_REMINDER_HOURS_VALUE
+    async with async_session() as session:
+        await SettingsService.set_service_reminder_time_hours(session, values)
+    await update.message.reply_text("ساعت‌های هشدار زمان ذخیره شد.")
+    await service_reminders_menu(update, context)
+    return ConversationHandler.END
+
+
+def _parse_positive_int_list(text: str, *, maximum: int | None = None) -> list[int]:
+    if text.strip() == "-":
+        return []
+    values: list[int] = []
+    for part in text.replace("،", ",").split(","):
+        try:
+            value = int(part.strip())
+        except ValueError:
+            continue
+        if value <= 0:
+            continue
+        if maximum is not None:
+            value = min(maximum, value)
+        values.append(value)
+    return sorted(set(values), reverse=True)
+
+
+@require_auth(permission="shop")
 async def shop_reset_defaults(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["shop_reset_pending"] = True
+    await update.message.reply_text(
+        "⚠️ با این کار تمام متن‌ها، دکمه‌ها، رنگ‌ها، ایموجی‌ها، دسته‌ها و سرویس‌های قابل فروش "
+        "به نسخه پیش‌فرض برمی‌گردند.\n\nبرای ادامه، دکمه قرمز زیر را بزنید.",
+        reply_markup=admin_reset_confirm_keyboard(),
+    )
+    return SHOP_RESET_CONFIRM
+
+
+@require_auth(permission="shop")
+async def shop_reset_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text != ADMIN_RESET_CONFIRM:
+        await update.message.reply_text("بازگردانی لغو شد.", reply_markup=admin_shop_settings_keyboard())
+        context.user_data.pop("shop_reset_pending", None)
+        return ConversationHandler.END
+    await update.message.reply_text(
+        "برای تأیید نهایی، رمز ورود ربات ادمین را وارد کنید.\nرمز پس از بررسی از گفتگو حذف می‌شود.",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    return SHOP_RESET_PASSWORD
+
+
+@require_auth(permission="shop")
+async def shop_reset_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    password = update.message.text
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+    if password != BotConfig.ADMIN_PASSWORD:
+        await update.effective_message.reply_text(
+            "رمز اشتباه است؛ هیچ تغییری انجام نشد. دوباره رمز را وارد کنید یا /cancel بزنید."
+        )
+        return SHOP_RESET_PASSWORD
+
     async with async_session() as session:
         await ShopCustomizationService.reset_defaults(session)
+    context.user_data.pop("shop_reset_pending", None)
     await update.message.reply_text(
         "تنظیمات ربات فروش به حالت پیش‌فرض برگشت.",
         reply_markup=admin_shop_settings_keyboard(),
     )
+    return ConversationHandler.END
 
 
 @require_auth(permission="shop")
@@ -1764,7 +3497,7 @@ async def shop_messages_start(update: Update, context: ContextTypes.DEFAULT_TYPE
         messages = await ShopCustomizationService.list_messages(session)
     await update.message.reply_text(
         "**مدیریت پیام‌ها**\n\nپیامی را که می‌خواهید تغییر دهید انتخاب کنید.",
-        reply_markup=_rows([_message_label(message.key) for message in messages], width=2),
+        reply_markup=_rows([_message_label(message) for message in messages], width=2),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     return SHOP_MESSAGE_SELECT
@@ -1774,46 +3507,90 @@ async def shop_messages_start(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def shop_message_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await _leave_shop_flow_if_navigation(update, context):
         return ConversationHandler.END
-    key = update.message.text.removeprefix("📝").strip()
+    key = await _message_key_from_admin_label(update.message.text or "")
+    if not key:
+        await update.message.reply_text("این پیام پیدا نشد.")
+        return SHOP_MESSAGE_SELECT
     return await _show_shop_message_editor(update, context, key)
 
 
 async def _show_shop_message_editor(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str):
     async with async_session() as session:
         message = await ShopCustomizationService.get_message_row(session, key)
+        message_buttons = await ShopCustomizationService.list_message_buttons(session, key)
     if not message:
         await update.message.reply_text("این پیام پیدا نشد.", reply_markup=admin_shop_settings_keyboard())
         return ConversationHandler.END
 
     context.user_data["shop_message_key"] = key
     context.user_data.pop("shop_message_field", None)
+    context.user_data.pop("shop_message_button_action", None)
+    context.user_data.pop("shop_message_button_id", None)
     button_type = message.response_button_type or "text"
     button_text = message.response_button_text or "-"
     button_url = message.response_button_url or "-"
+    button_style = message.response_button_style or "default"
+    button_premium_emoji = message.response_button_premium_emoji_id or "-"
+    source_button_id = message.response_button_source_id or "-"
     premium_emoji = message.premium_emoji_id or "-"
+    photo_status = "دارد" if message.photo_file_id else "ندارد"
     premium_position = {
         "left": "چپ",
         "right": "راست",
         "none": "غیرفعال",
     }.get(message.premium_emoji_position, "غیرفعال")
+    message_button_lines = (
+        "\n\nدکمه‌های شیشه‌ای چندتایی این پیام:\n"
+        + ("\n\n".join(_message_button_summary(button) for button in message_buttons) if message_buttons else "ندارد")
+    )
     extra_note = (
         "\n\nایموجی پریمیوم پیام:\n"
         f"آیدی فعلی: {premium_emoji}\n"
         f"جای فعلی: {premium_position}\n"
+        f"{message_button_lines}"
         "\n\nتنظیم دکمه جواب همین پیام:\n"
         f"نوع فعلی: {button_type}\n"
         f"متن دکمه: {button_text}\n"
-        f"لینک/متن کپی: {button_url}\n\n"
+        f"لینک/متن کپی: {button_url}\n"
+        f"رنگ دکمه جواب: {button_style}\n"
+        f"ایموجی پریمیوم دکمه جواب: {button_premium_emoji}\n"
+        f"دکمه متصل: #{source_button_id}\n\n"
         "برای تغییر نوع دکمه، یکی از گزینه‌های کیبورد را بزنید.\n"
         "برای تغییر متن دکمه بنویسید: متن دکمه: دریافت لینک\n"
         "برای تنظیم لینک یا متن قابل کپی بنویسید: لینک دکمه: https://example.com\n"
         "برای حذف لینک/متن کپی بنویسید: لینک دکمه: -"
     )
     placeholder_note = MESSAGE_PLACEHOLDER_HINTS.get(key, "")
-    await update.message.reply_text(
-        f"ویرایش پیام {key}\n\nمتن فعلی:\n\n{message.text}{placeholder_note}{extra_note}\n\nمتن جدید را ارسال کنید.",
-        reply_markup=admin_response_button_keyboard(),
+    editor_text = (
+        f"ویرایش پیام {key}\n\n"
+        f"عکس پیام: {photo_status}\n\n"
+        f"متن فعلی:\n\n{_message_preview(message.text)}{placeholder_note}{extra_note}\n\n"
+        "متن جدید را ارسال کنید؛ اگر می‌خواهید پاسخ عکس‌دار باشد، عکس را همراه کپشن بفرستید."
     )
+    if len(editor_text) > 3900:
+        editor_text = (
+            f"ویرایش پیام {key}\n\n"
+            f"عکس پیام: {photo_status}\n\n"
+            f"متن فعلی:\n\n{_message_preview(message.text, limit=900)}{placeholder_note}{extra_note}\n\n"
+            "متن جدید را ارسال کنید؛ اگر می‌خواهید پاسخ عکس‌دار باشد، عکس را همراه کپشن بفرستید."
+        )
+    fallback_text = (
+        f"ویرایش پیام {key}\n\n"
+        "متن فعلی این پیام طولانی یا دارای قالب‌بندی خاص است، برای همین فقط حالت ویرایش باز شد.\n"
+        f"عکس پیام: {photo_status}\n\n"
+        "متن جدید را ارسال کنید؛ اگر می‌خواهید پاسخ عکس‌دار باشد، عکس را همراه کپشن بفرستید."
+    )
+    try:
+        await update.message.reply_text(
+            editor_text,
+            reply_markup=_message_buttons_keyboard(),
+            parse_mode=constants.ParseMode.HTML,
+        )
+    except BadRequest:
+        await update.message.reply_text(
+            fallback_text,
+            reply_markup=_message_buttons_keyboard(),
+        )
     return SHOP_MESSAGE_TEXT
 
 
@@ -1823,8 +3600,164 @@ async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("shop_message_key", None)
         return ConversationHandler.END
     key = context.user_data.get("shop_message_key")
-    raw_value = update.message.text.strip()
+    raw_value = (update.message.text or update.message.caption or "").strip()
     pending_field = context.user_data.get("shop_message_field")
+    pending_button_action = context.user_data.get("shop_message_button_action")
+    if raw_value.startswith("📝"):
+        selected_key = await _message_key_from_admin_label(raw_value)
+        if selected_key:
+            return await _show_shop_message_editor(update, context, selected_key)
+        await update.message.reply_text("این پیام پیدا نشد.")
+        return SHOP_MESSAGE_TEXT
+    if pending_field and str(pending_field).startswith("message_button_"):
+        button_id = context.user_data.get("shop_message_button_id")
+        async with async_session() as session:
+            button = await ShopCustomizationService.get_message_button(session, button_id) if button_id else None
+            if not button or button.message_key != key:
+                context.user_data.pop("shop_message_field", None)
+                context.user_data.pop("shop_message_button_id", None)
+                await update.message.reply_text("دکمه معتبر نیست؛ دوباره از فهرست انتخاب کنید.")
+                return await _show_shop_message_editor(update, context, key)
+
+            update_values = {}
+            if pending_field == "message_button_text":
+                if not raw_value:
+                    await update.message.reply_text("متن دکمه نمی‌تواند خالی باشد.")
+                    return SHOP_MESSAGE_TEXT
+                update_values["text"] = raw_value
+            elif pending_field == "message_button_payload":
+                update_values["payload"] = None if raw_value in {"", "-", "حذف"} else raw_value
+            elif pending_field == "message_button_type":
+                button_type = MESSAGE_BUTTON_TYPE_VALUES.get(raw_value)
+                if not button_type:
+                    await update.message.reply_text("نوع دکمه معتبر نیست.", reply_markup=_message_button_type_keyboard())
+                    return SHOP_MESSAGE_TEXT
+                update_values["button_type"] = button_type
+            elif pending_field == "message_button_style":
+                style = raw_value if raw_value in STYLE_VALUES else None
+                if style is None:
+                    await update.message.reply_text("رنگ معتبر نیست.", reply_markup=admin_style_keyboard())
+                    return SHOP_MESSAGE_TEXT
+                update_values["style"] = None if style == "default" else style
+            elif pending_field == "message_button_premium_emoji_id":
+                premium_emoji_id = _read_custom_emoji_id(update.message, raw_value)
+                if premium_emoji_id == "":
+                    await update.message.reply_text("ایموجی پریمیوم معتبر بفرستید یا برای حذف `-` ارسال کنید.")
+                    return SHOP_MESSAGE_TEXT
+                update_values["premium_emoji_id"] = premium_emoji_id
+            elif pending_field == "message_button_source_id":
+                source_id = _parse_hash_id(raw_value)
+                source_button = await ShopCustomizationService.get_button(session, source_id) if source_id else None
+                if not source_button:
+                    await update.message.reply_text("دکمه معتبر نیست؛ یکی از دکمه‌های فهرست را انتخاب کنید.")
+                    return SHOP_MESSAGE_TEXT
+                update_values["source_button_id"] = source_button.id
+                update_values["button_type"] = "inline_action"
+            elif pending_field == "message_button_row":
+                if not raw_value.isdigit():
+                    await update.message.reply_text("ردیف باید عدد باشد؛ مثلا 0 یا 1.")
+                    return SHOP_MESSAGE_TEXT
+                update_values["row"] = int(raw_value)
+            elif pending_field == "message_button_col":
+                if not raw_value.isdigit():
+                    await update.message.reply_text("ستون باید عدد باشد؛ مثلا 0 یا 1.")
+                    return SHOP_MESSAGE_TEXT
+                update_values["col"] = int(raw_value)
+
+            await ShopCustomizationService.update_message_button(session, button.id, **update_values)
+        context.user_data.pop("shop_message_field", None)
+        context.user_data.pop("shop_message_button_id", None)
+        await update.message.reply_text("تنظیمات دکمه شیشه‌ای ذخیره شد.")
+        return await _show_shop_message_editor(update, context, key)
+
+    if pending_button_action:
+        async with async_session() as session:
+            button = await _get_message_button_for_key(session, key, raw_value)
+            if not button:
+                await update.message.reply_text("دکمه معتبر نیست؛ یکی از دکمه‌های همین پیام را انتخاب کنید.")
+                return SHOP_MESSAGE_TEXT
+
+            if pending_button_action == "delete":
+                await ShopCustomizationService.delete_message_button(session, button.id)
+                context.user_data.pop("shop_message_button_action", None)
+                await update.message.reply_text("دکمه شیشه‌ای حذف شد.")
+                return await _show_shop_message_editor(update, context, key)
+            if pending_button_action == "toggle":
+                await ShopCustomizationService.update_message_button(session, button.id, is_enabled=not button.is_enabled)
+                context.user_data.pop("shop_message_button_action", None)
+                await update.message.reply_text("وضعیت دکمه شیشه‌ای تغییر کرد.")
+                return await _show_shop_message_editor(update, context, key)
+            if pending_button_action == "source_button_id":
+                buttons = await ShopCustomizationService.list_buttons(session)
+                labels = [_button_label(item) for item in buttons if item.is_enabled]
+                if not labels:
+                    await update.message.reply_text("دکمه فعالی برای اتصال وجود ندارد.")
+                    return SHOP_MESSAGE_TEXT
+                context.user_data["shop_message_field"] = "message_button_source_id"
+                context.user_data["shop_message_button_id"] = button.id
+                context.user_data.pop("shop_message_button_action", None)
+                await update.message.reply_text(
+                    "دکمه موجود را انتخاب کنید تا اکشن آن به این دکمه شیشه‌ای وصل شود.",
+                    reply_markup=_rows(labels, width=1),
+                )
+                return SHOP_MESSAGE_TEXT
+
+        context.user_data["shop_message_button_id"] = button.id
+        context.user_data.pop("shop_message_button_action", None)
+        context.user_data["shop_message_field"] = f"message_button_{pending_button_action}"
+        prompts = {
+            "text": "متن جدید دکمه شیشه‌ای را بفرستید.",
+            "payload": "لینک یا متن کپی را بفرستید. برای حذف مقدار، `-` بفرستید.",
+            "premium_emoji_id": "ایموجی پریمیوم دکمه را مستقیم ارسال کنید تا آیدی آن خوانده شود. برای حذف `-` بفرستید.",
+            "row": "شماره ردیف را بفرستید؛ از 0 شروع می‌شود.",
+            "col": "شماره ستون را بفرستید؛ از 0 شروع می‌شود.",
+        }
+        if pending_button_action == "type":
+            await update.message.reply_text("نوع دکمه شیشه‌ای را انتخاب کنید.", reply_markup=_message_button_type_keyboard())
+        elif pending_button_action == "style":
+            await update.message.reply_text("رنگ دکمه شیشه‌ای را انتخاب کنید.", reply_markup=admin_style_keyboard())
+        else:
+            await update.message.reply_text(prompts.get(pending_button_action, "مقدار جدید را بفرستید."), reply_markup=_cancel_back_keyboard())
+        return SHOP_MESSAGE_TEXT
+
+    if raw_value == ADMIN_MESSAGE_BUTTONS_LIST:
+        async with async_session() as session:
+            buttons = await ShopCustomizationService.list_message_buttons(session, key)
+        text = "دکمه شیشه‌ای برای این پیام ثبت نشده است." if not buttons else "\n\n".join(_message_button_summary(button) for button in buttons)
+        await update.message.reply_text(text, reply_markup=_message_buttons_keyboard())
+        return SHOP_MESSAGE_TEXT
+    if raw_value == ADMIN_MESSAGE_BUTTON_ADD:
+        async with async_session() as session:
+            buttons = await ShopCustomizationService.list_message_buttons(session, key)
+            next_row = max((button.row for button in buttons), default=-1) + 1
+            button = await ShopCustomizationService.create_message_button(
+                session,
+                message_key=key,
+                button_type="inline_url",
+                text="دکمه جدید",
+                payload=None,
+                row=next_row,
+                col=0,
+            )
+        if not button:
+            await update.message.reply_text("ساخت دکمه انجام نشد؛ پیام معتبر نیست.")
+            return SHOP_MESSAGE_TEXT
+        await update.message.reply_text(
+            f"دکمه شیشه‌ای ساخته شد: #{button.id}\nحالا با گزینه‌های ویرایش، متن، نوع، لینک، رنگ و ایموجی‌اش را تنظیم کن."
+        )
+        return await _show_shop_message_editor(update, context, key)
+    if raw_value in MESSAGE_BUTTON_ACTIONS:
+        async with async_session() as session:
+            buttons = await ShopCustomizationService.list_message_buttons(session, key)
+        if not buttons:
+            await update.message.reply_text("برای این پیام هنوز دکمه شیشه‌ای ساخته نشده است. اول «افزودن دکمه شیشه‌ای» را بزن.")
+            return SHOP_MESSAGE_TEXT
+        context.user_data["shop_message_button_action"] = MESSAGE_BUTTON_ACTIONS[raw_value]
+        await update.message.reply_text(
+            "کدام دکمه شیشه‌ای را می‌خواهی تغییر بدهی؟",
+            reply_markup=_rows([_message_button_label(button) for button in buttons], width=1),
+        )
+        return SHOP_MESSAGE_TEXT
     if pending_field == "premium_emoji_id":
         premium_emoji_id = _read_custom_emoji_id(update.message, raw_value)
         if premium_emoji_id == "":
@@ -1855,6 +3788,49 @@ async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         await update.message.reply_text("جای ایموجی پریمیوم پیام ذخیره شد.")
         return await _show_shop_message_editor(update, context, key)
+    if pending_field == "response_button_style":
+        style = raw_value if raw_value in STYLE_VALUES else None
+        if style is None:
+            await update.message.reply_text("رنگ معتبر نیست.", reply_markup=admin_style_keyboard())
+            return SHOP_MESSAGE_TEXT
+        async with async_session() as session:
+            await ShopCustomizationService.update_message_settings(
+                session,
+                key,
+                response_button_style=None if style == "default" else style,
+            )
+        await update.message.reply_text("رنگ دکمه جواب ذخیره شد.")
+        return await _show_shop_message_editor(update, context, key)
+    if pending_field == "response_button_premium_emoji_id":
+        premium_emoji_id = _read_custom_emoji_id(update.message, raw_value)
+        if premium_emoji_id == "":
+            await update.message.reply_text("ایموجی پریمیوم معتبر بفرستید یا برای حذف `-` ارسال کنید.")
+            return SHOP_MESSAGE_TEXT
+        async with async_session() as session:
+            await ShopCustomizationService.update_message_settings(
+                session,
+                key,
+                response_button_premium_emoji_id=premium_emoji_id,
+            )
+        await update.message.reply_text("ایموجی پریمیوم دکمه جواب ذخیره شد.")
+        return await _show_shop_message_editor(update, context, key)
+    if pending_field == "response_button_source_id":
+        button_id = _parse_hash_id(raw_value)
+        async with async_session() as session:
+            button = await ShopCustomizationService.get_button(session, button_id) if button_id else None
+            if button:
+                await ShopCustomizationService.update_message_settings(
+                    session,
+                    key,
+                    response_button_source_id=button.id,
+                    response_button_type="inline_action",
+                    response_button_text=None,
+                )
+        if not button:
+            await update.message.reply_text("دکمه معتبر نیست؛ یکی از دکمه‌های فهرست را انتخاب کنید.")
+            return SHOP_MESSAGE_TEXT
+        await update.message.reply_text("دکمه موجود به جواب متصل شد و اکشن آن حفظ می‌شود.")
+        return await _show_shop_message_editor(update, context, key)
     if raw_value == ADMIN_EDIT_PREMIUM_EMOJI:
         context.user_data["shop_message_field"] = "premium_emoji_id"
         await update.message.reply_text(
@@ -1868,6 +3844,30 @@ async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "جای نمایش ایموجی پریمیوم را انتخاب کنید.",
             reply_markup=admin_emoji_position_keyboard(),
+        )
+        return SHOP_MESSAGE_TEXT
+    if raw_value == ADMIN_RESPONSE_EDIT_STYLE:
+        context.user_data["shop_message_field"] = "response_button_style"
+        await update.message.reply_text("رنگ دکمه جواب را انتخاب کنید.", reply_markup=admin_style_keyboard())
+        return SHOP_MESSAGE_TEXT
+    if raw_value == ADMIN_RESPONSE_EDIT_PREMIUM_EMOJI:
+        context.user_data["shop_message_field"] = "response_button_premium_emoji_id"
+        await update.message.reply_text(
+            "ایموجی پریمیوم دکمه جواب را بفرستید تا آیدی آن خودکار خوانده شود. برای حذف `-` بفرستید.",
+            reply_markup=_cancel_back_keyboard(),
+        )
+        return SHOP_MESSAGE_TEXT
+    if raw_value == ADMIN_RESPONSE_SELECT_EXISTING:
+        async with async_session() as session:
+            buttons = await ShopCustomizationService.list_buttons(session)
+        labels = [_button_label(button) for button in buttons if button.is_enabled]
+        if not labels:
+            await update.message.reply_text("دکمه فعالی برای اتصال وجود ندارد.")
+            return SHOP_MESSAGE_TEXT
+        context.user_data["shop_message_field"] = "response_button_source_id"
+        await update.message.reply_text(
+            "دکمه‌ای را انتخاب کنید. دکمه شیشه‌ای جواب، همان اکشن این دکمه را اجرا خواهد کرد.",
+            reply_markup=_rows(labels, width=1),
         )
         return SHOP_MESSAGE_TEXT
     if raw_value in RESPONSE_BUTTON_VALUES:
@@ -1896,13 +3896,14 @@ async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("لینک/متن کپی دکمه جواب پیام ذخیره شد.")
         return await _show_shop_message_editor(update, context, key)
 
-    message_text, parse_mode = _message_text_for_storage(update.message)
+    message_text, parse_mode, photo_file_id = _message_text_for_storage(update.message)
     async with async_session() as session:
         message = await ShopCustomizationService.update_message(
             session,
             key,
             message_text,
             parse_mode=parse_mode,
+            photo_file_id=photo_file_id,
         )
 
     context.user_data.pop("shop_message_key", None)
@@ -1913,7 +3914,8 @@ async def shop_message_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"پیام `{key}` ذخیره شد.",
     )
-    return await shop_messages_start(update, context)
+    context.user_data["shop_message_key"] = key
+    return await _show_shop_message_editor(update, context, key)
 
 
 @require_auth(permission="shop")
@@ -1992,8 +3994,13 @@ async def shop_button_select(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data.pop("shop_button_id", None)
         return ConversationHandler.END
     if update.message.text == ADMIN_ADD_BUTTON:
-        await update.message.reply_text("متن دکمه سفارشی جدید را ارسال کنید.")
-        return SHOP_BUTTON_ADD_TEXT
+        await update.message.reply_text(
+            "نام متغیر دکمه سفارشی را ارسال کنید.\n\n"
+            "مثال: `tariffs` یا `special_offer`\n"
+            "فقط حروف انگلیسی، عدد، `_`، `-` و `:` استفاده کنید.",
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
+        return SHOP_BUTTON_ADD_KEY
 
     button_id = _parse_hash_id(update.message.text)
     if button_id is None:
@@ -2012,8 +4019,34 @@ async def shop_button_select(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 @require_auth(permission="shop")
+async def shop_button_add_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("shop_custom_button_key", None)
+        context.user_data.pop("shop_custom_button_text", None)
+        return ConversationHandler.END
+    variable_name = clean_custom_variable_name(update.message.text or "")
+    if not variable_name:
+        await update.message.reply_text("نام متغیر معتبر نیست. مثال درست: `tariffs`", parse_mode=constants.ParseMode.MARKDOWN)
+        return SHOP_BUTTON_ADD_KEY
+    menu = context.user_data.get("shop_button_menu")
+    action = f"custom_message:{menu}:{variable_name}"
+    async with async_session() as session:
+        existing = await ShopCustomizationService.get_message_row(session, action)
+    if existing:
+        await update.message.reply_text(
+            f"این نام متغیر قبلاً استفاده شده است: `{variable_name}`\nیک نام دیگر بفرستید.",
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
+        return SHOP_BUTTON_ADD_KEY
+    context.user_data["shop_custom_button_key"] = variable_name
+    await update.message.reply_text("حالا متن دکمه سفارشی جدید را ارسال کنید.")
+    return SHOP_BUTTON_ADD_TEXT
+
+
+@require_auth(permission="shop")
 async def shop_button_add_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("shop_custom_button_key", None)
         context.user_data.pop("shop_custom_button_text", None)
         return ConversationHandler.END
     text = update.message.text.strip()
@@ -2028,17 +4061,35 @@ async def shop_button_add_text(update: Update, context: ContextTypes.DEFAULT_TYP
 @require_auth(permission="shop")
 async def shop_button_add_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("shop_custom_button_key", None)
         context.user_data.pop("shop_custom_button_text", None)
         return ConversationHandler.END
     menu = context.user_data.get("shop_button_menu")
+    variable_name = context.user_data.get("shop_custom_button_key")
     text = context.user_data.get("shop_custom_button_text")
-    if not menu or not text:
+    if not menu or not variable_name or not text:
         await update.message.reply_text("اطلاعات دکمه کامل نیست.", reply_markup=admin_shop_settings_keyboard())
         return ConversationHandler.END
 
     async with async_session() as session:
-        button = await ShopCustomizationService.create_custom_button(session, menu, text, update.message.text)
+        try:
+            button = await ShopCustomizationService.create_custom_button(
+                session,
+                menu,
+                variable_name,
+                text,
+                update.message.text,
+            )
+        except ValueError as exc:
+            if str(exc) == "duplicate_variable_name":
+                await update.message.reply_text("این نام متغیر قبلاً استفاده شده است. دوباره از افزودن دکمه شروع کنید.")
+            else:
+                await update.message.reply_text("نام متغیر معتبر نیست. دوباره از افزودن دکمه شروع کنید.")
+            context.user_data.pop("shop_custom_button_key", None)
+            context.user_data.pop("shop_custom_button_text", None)
+            return ConversationHandler.END
 
+    context.user_data.pop("shop_custom_button_key", None)
     context.user_data.pop("shop_custom_button_text", None)
     await update.message.reply_text(
         f"دکمه سفارشی **{button.text}** ساخته شد.",
@@ -2103,7 +4154,7 @@ async def shop_button_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     button_id = context.user_data.get("shop_button_id")
     field = context.user_data.get("shop_button_field")
-    raw_value = update.message.text.strip()
+    raw_value = (update.message.text or update.message.caption or "").strip()
     updates = {}
 
     if field == "position":
@@ -2153,14 +4204,57 @@ async def shop_button_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def shop_plans_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with async_session() as session:
         plans = await ShopCustomizationService.list_plans(session)
-    labels = [_plan_label(plan) for plan in plans]
-    labels.append(ADMIN_ADD_PLAN)
     await update.message.reply_text(
-        "**مدیریت سرویس‌ها**\n\nپلن موردنظر را انتخاب کنید یا سرویس جدید بسازید.",
-        reply_markup=_rows(labels, width=1),
+        "**مدیریت سرویس‌ها**\n\n"
+        f"تعداد کل سرویس‌ها: **{len(plans)}**\n"
+        "سرویس موردنظر را انتخاب کنید یا سرویس جدید بسازید.",
+        reply_markup=_shop_plan_management_keyboard(plans),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     return SHOP_PLAN_SELECT
+
+
+@require_auth(permission="shop")
+async def shop_plan_management_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = (query.data or "").split(":")
+    action = parts[1] if len(parts) > 1 else ""
+
+    if action == "noop":
+        return SHOP_PLAN_SELECT
+    if action == "back":
+        await query.edit_message_text("از مدیریت سرویس‌ها خارج شدید.")
+        await query.message.reply_text(
+            "به تنظیمات ربات فروش برگشتید.",
+            reply_markup=admin_shop_settings_keyboard(),
+        )
+        return ConversationHandler.END
+    if action == "add":
+        await query.edit_message_text("در حال ساخت سرویس جدید")
+        await query.message.reply_text(
+            "حجم سرویس جدید را به گیگ ارسال کنید؛ برای حجم نامحدود، `نامحدود` بفرستید. مثال: `30`",
+            reply_markup=_cancel_back_keyboard(),
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
+        return SHOP_PLAN_ADD_VOLUME
+
+    async with async_session() as session:
+        plans = await ShopCustomizationService.list_plans(session)
+    if action == "page":
+        page = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+        await query.edit_message_reply_markup(
+            reply_markup=_shop_plan_management_keyboard(plans, page)
+        )
+        return SHOP_PLAN_SELECT
+
+    plan_id = int(parts[2]) if action == "select" and len(parts) > 2 and parts[2].isdigit() else None
+    if plan_id is None:
+        await query.message.reply_text("سرویس انتخاب‌شده معتبر نیست.")
+        return SHOP_PLAN_SELECT
+    context.user_data["shop_plan_id"] = plan_id
+    await query.edit_message_text("سرویس انتخاب شد.")
+    return await _show_shop_plan_options(update, context)
 
 
 @require_auth(permission="shop")
@@ -2192,9 +4286,15 @@ async def shop_category_select(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return SHOP_CATEGORY_ADD
 
+    category_id = _parse_hash_id(update.message.text)
     async with async_session() as session:
         categories = await ShopCustomizationService.list_categories(session)
-    matches = [category for category in categories if _category_label(category) == update.message.text]
+    matches = [
+        category
+        for category in categories
+        if (category_id is not None and category.id == category_id)
+        or _category_label(category) == update.message.text
+    ]
     if len(matches) != 1:
         await update.message.reply_text("دسته انتخاب‌شده معتبر نیست.")
         return SHOP_CATEGORY_SELECT
@@ -2363,7 +4463,7 @@ async def shop_plan_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     if update.message.text == ADMIN_ADD_PLAN:
         await update.message.reply_text(
-            "حجم سرویس جدید را به گیگ ارسال کنید. مثال: `30`",
+            "حجم سرویس جدید را به گیگ ارسال کنید؛ برای حجم نامحدود، `نامحدود` بفرستید. مثال: `30`",
             reply_markup=_cancel_back_keyboard(),
             parse_mode=constants.ParseMode.MARKDOWN,
         )
@@ -2383,15 +4483,19 @@ async def _show_shop_plan_options(update: Update, context: ContextTypes.DEFAULT_
     async with async_session() as session:
         plan = await ShopCustomizationService.get_plan(session, plan_id)
         price = await PriceService.get_plan_price(session, plan) if plan else None
+        panel = await ProvisioningService.panel_for_plan(session, plan) if plan else None
 
     if not plan:
-        await update.message.reply_text("پلن پیدا نشد.", reply_markup=admin_shop_settings_keyboard())
+        await update.effective_message.reply_text(
+            "پلن پیدا نشد.",
+            reply_markup=admin_shop_settings_keyboard(),
+        )
         return ConversationHandler.END
 
-    await update.message.reply_text(
+    await update.effective_message.reply_text(
         "**ویرایش سرویس**\n\n"
         f"شناسه: `#{plan.id}`\n"
-        f"حجم: **{plan.volume_gb} گیگ**\n"
+        f"حجم: **{_volume_label(plan.volume_gb)}**\n"
         f"عنوان: {plan.title}\n"
         f"دسته‌بندی: `{plan.category_key}`\n"
         f"قیمت: **{price or 0:,} تومان**\n"
@@ -2401,8 +4505,57 @@ async def _show_shop_plan_options(update: Update, context: ContextTypes.DEFAULT_
         f"جای ایموجی پریمیوم: {'راست' if plan.premium_emoji_position == 'right' else 'چپ'}\n"
         f"رنگ: `{plan.style or 'default'}`\n"
         f"ترتیب: {plan.display_order}\n"
+        f"ساخت از پنل: **{'روشن' if plan.provision_enabled else 'خاموش'}**\n"
+        f"حالت تامین: **{_provision_mode_label(plan.provision_mode)}**\n"
+        f"پنل ساخت: `{plan.provision_panel_key or (panel.key if panel else '-')}`\n"
+        f"پیشوند نام ساب: `{plan.name_prefix or '-'}`\n"
+        f"حجم واقعی ساخت/تمدید: **{_volume_label(plan.provision_volume_gb if plan.provision_volume_gb is not None else plan.volume_gb)}**\n"
+        f"نوع زمان ساخت: **{_provision_time_mode_label(plan.provision_time_mode)}**\n"
+        f"مدت واقعی ساخت/تمدید: **{_provision_duration_label(plan)}**\n"
+        f"محدودیت کاربر لینک ساب: **{_subscription_device_limit_label(plan.subscription_device_limit)}**\n"
+        f"نمایش کانفیگ‌ها در صفحه ساب: **{'روشن' if plan.show_subscription_configs else 'خاموش'}**\n"
+        f"تمدید: **{'روشن' if plan.renew_enabled else 'خاموش'}**\n"
         f"وضعیت: {'فعال' if plan.is_active else 'غیرفعال'}",
         reply_markup=admin_shop_plan_edit_keyboard(),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return SHOP_PLAN_OPTION
+
+
+async def _show_shop_plan_provision_options(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    plan_id = context.user_data.get("shop_plan_id")
+    async with async_session() as session:
+        plan = await ShopCustomizationService.get_plan(session, plan_id)
+        category = await ShopCustomizationService.get_category(session, plan.category_key) if plan else None
+        panel = await ProvisioningService.panel_for_plan(session, plan) if plan else None
+    if not plan:
+        await update.effective_message.reply_text("سرویس پیدا نشد.", reply_markup=admin_shop_settings_keyboard())
+        return ConversationHandler.END
+
+    category_panel = category.provision_panel_key if category else None
+    await update.effective_message.reply_text(
+        "**تنظیمات ساخت از پنل**\n\n"
+        f"سرویس: **{plan.title}** `#{plan.id}`\n"
+        f"دسته: `{plan.category_key}`\n"
+        f"ساخت خودکار پلن: **{'روشن' if plan.provision_enabled else 'خاموش'}**\n"
+        f"ساخت خودکار دسته: **{'روشن' if category and category.provision_enabled else 'خاموش'}**\n"
+        f"حالت تامین: **{_provision_mode_label(plan.provision_mode)}**\n"
+        f"پنل سرویس: `{plan.provision_panel_key or '-'}`\n"
+        f"پنل دسته: `{category_panel or '-'}`\n"
+        f"پنل موثر: `{panel.key if panel else '-'}`\n"
+        f"نوع پنل: `{panel.panel_type if panel else '-'}`\n"
+        f"پیشوند نام ساب: `{plan.name_prefix or '-'}`\n"
+        f"حجم واقعی ساخت/تمدید: **{_volume_label(plan.provision_volume_gb if plan.provision_volume_gb is not None else plan.volume_gb)}**\n"
+        f"نوع زمان ساخت: **{_provision_time_mode_label(plan.provision_time_mode)}**\n"
+        f"مدت واقعی ساخت/تمدید: **{_provision_duration_label(plan)}**\n"
+        f"محدودیت کاربر لینک ساب: **{_subscription_device_limit_label(plan.subscription_device_limit)}**\n"
+        f"نمایش کانفیگ‌ها در صفحه ساب: **{'روشن' if plan.show_subscription_configs else 'خاموش'}**\n"
+        f"تمدید: **{'روشن' if plan.renew_enabled else 'خاموش'}**\n\n"
+        "حالت‌ها:\n"
+        "`انبار فقط`: فقط از لینک‌های آماده می‌فروشد.\n"
+        "`اول انبار بعد پنل`: اول انبار، اگر نبود از پنل می‌سازد.\n"
+        "`فقط پنل`: همیشه مستقیم از پنل می‌سازد.",
+        reply_markup=admin_shop_plan_provision_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     return SHOP_PLAN_OPTION
@@ -2416,6 +4569,158 @@ async def shop_plan_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
     option = update.message.text
     plan_id = context.user_data.get("shop_plan_id")
 
+    if option == ADMIN_PLAN_BACK_TO_EDIT:
+        context.user_data.pop("shop_plan_provision_mode", None)
+        return await _show_shop_plan_options(update, context)
+
+    if option == ADMIN_PLAN_PROVISION_SETTINGS:
+        context.user_data["shop_plan_provision_mode"] = True
+        return await _show_shop_plan_provision_options(update, context)
+
+    if context.user_data.get("shop_plan_provision_mode"):
+        if option == ADMIN_TOGGLE_PROVISION:
+            async with async_session() as session:
+                plan = await ShopCustomizationService.get_plan(session, plan_id)
+                if plan:
+                    await ShopCustomizationService.update_plan(
+                        session,
+                        plan_id,
+                        provision_enabled=not plan.provision_enabled,
+                    )
+            await update.message.reply_text("وضعیت ساخت خودکار تغییر کرد.")
+            return await _show_shop_plan_provision_options(update, context)
+
+        if option == ADMIN_TOGGLE_RENEW:
+            async with async_session() as session:
+                plan = await ShopCustomizationService.get_plan(session, plan_id)
+                if plan:
+                    await ShopCustomizationService.update_plan(
+                        session,
+                        plan_id,
+                        renew_enabled=not plan.renew_enabled,
+                    )
+            await update.message.reply_text("وضعیت تمدید تغییر کرد.")
+            return await _show_shop_plan_provision_options(update, context)
+
+        if option == ADMIN_TOGGLE_SUBSCRIPTION_CONFIGS:
+            synced_count = 0
+            async with async_session() as session:
+                plan = await ShopCustomizationService.get_plan(session, plan_id)
+                if plan:
+                    new_value = not plan.show_subscription_configs
+                    await ShopCustomizationService.update_plan(
+                        session,
+                        plan_id,
+                        show_subscription_configs=new_value,
+                    )
+                    synced_count = await _sync_plan_subscription_config_preview(plan_id, new_value)
+            message = "وضعیت نمایش کانفیگ‌ها در صفحه ساب تغییر کرد."
+            if synced_count:
+                message += f"\n{synced_count} لینک قبلی این سرویس هم به‌روزرسانی شد."
+            await update.message.reply_text(message)
+            return await _show_shop_plan_provision_options(update, context)
+
+        provision_fields = {
+            ADMIN_SET_PROVISION_MODE: (
+                "provision_mode",
+                "حالت تامین را انتخاب کنید.",
+                admin_provision_mode_keyboard(),
+            ),
+            ADMIN_SET_PROVISION_PANEL: (
+                "provision_panel_key",
+                "پنل ساخت را انتخاب کنید یا کلیدش را بفرستید.",
+                None,
+            ),
+            ADMIN_SET_NAME_PREFIX: (
+                "name_prefix",
+                "پیشوند نام ساب را بفرستید.\nمثال: `PhantomHubs_Express10gig`\nبرای پاک کردن، `-` بفرستید.",
+                _cancel_back_keyboard(),
+            ),
+            ADMIN_SET_PROVISION_VOLUME: (
+                "provision_volume_gb",
+                "حجم واقعی ساخت/تمدید در پنل را به گیگ بفرستید.\nبرای استفاده از حجم نمایشی سرویس، `-` بفرستید.\nبرای ۳۰۰ گیگ: `300`",
+                _cancel_back_keyboard(),
+            ),
+            ADMIN_SET_PROVISION_TIME_MODE: (
+                "provision_time_mode",
+                "نوع زمان ساخت کانفیگ از پنل را انتخاب کنید.\nبرای بدون محدودیت زمانی، مدت سرویس/مدت واقعی را عدد `0` بگذارید.",
+                admin_provision_time_mode_keyboard(),
+            ),
+            ADMIN_SET_PROVISION_DURATION: (
+                "provision_duration_days",
+                "مدت واقعی ساخت/تمدید در پنل را به روز بفرستید.\nبرای استفاده از مدت سرویس، `-` بفرستید.\nبرای بدون محدودیت زمانی، عدد `0` بفرستید.",
+                _cancel_back_keyboard(),
+            ),
+            ADMIN_SET_SUBSCRIPTION_DEVICE_LIMIT: (
+                "subscription_device_limit",
+                "محدودیت کاربر/دستگاه لینک ساب برای همین سرویس را عددی بفرستید.\n`0` یعنی نامحدود و بدون شمارش، یعنی هیچ فشاری برای ثبت دستگاه روی پنل ساب ندارد.\nمثال: `2`",
+                _cancel_back_keyboard(),
+            ),
+        }
+        selected = provision_fields.get(option)
+        if selected:
+            field, prompt, keyboard = selected
+            context.user_data["shop_plan_field"] = field
+            if field == "provision_panel_key":
+                async with async_session() as session:
+                    await ProvisioningService.ensure_env_panels(session)
+                    panels = (await session.execute(select(ProvisionPanel).order_by(ProvisionPanel.id))).scalars().all()
+                labels = [_panel_label(panel) for panel in panels]
+                labels.append("استفاده از پنل دسته")
+                keyboard = _rows(labels, width=1)
+            await update.message.reply_text(prompt, reply_markup=keyboard, parse_mode=constants.ParseMode.MARKDOWN)
+            return SHOP_PLAN_VALUE
+
+        await update.message.reply_text("گزینه تنظیمات ساخت معتبر نیست.", reply_markup=admin_shop_plan_provision_keyboard())
+        return SHOP_PLAN_OPTION
+
+    if option == ADMIN_DELETE_PLAN:
+        async with async_session() as session:
+            plan = await ShopCustomizationService.get_plan(session, plan_id)
+            if not plan:
+                await update.message.reply_text("سرویس پیدا نشد.")
+                return await shop_plans_start(update, context)
+            stock = await session.execute(
+                select(Config).where(
+                    Config.volume_gb == plan.volume_gb,
+                    Config.category_key == plan.category_key,
+                    Config.is_sold.is_(False),
+                )
+            )
+            stock_count = len(stock.scalars().all())
+        context.user_data["shop_plan_delete_pending"] = True
+        await update.message.reply_text(
+            "⚠️ **تأیید حذف کامل سرویس**\n\n"
+            f"سرویس: **{plan.title}**\n"
+            f"دسته: `{plan.category_key}`\n"
+            f"موجودی فروخته‌نشده‌ای که پاک می‌شود: **{stock_count} لینک**\n\n"
+            "خریدها و سرویس‌های تحویل‌شده مشتریان حذف نمی‌شوند.\n"
+            "قوانین رفرال وابسته به این سرویس غیرفعال خواهند شد.",
+            reply_markup=admin_shop_plan_delete_confirm_keyboard(),
+            parse_mode=constants.ParseMode.MARKDOWN,
+        )
+        return SHOP_PLAN_OPTION
+
+    if option == ADMIN_DELETE_PLAN_CONFIRM:
+        if not context.user_data.pop("shop_plan_delete_pending", False):
+            await update.message.reply_text("ابتدا دکمه «حذف کامل سرویس» را بزنید.")
+            return await _show_shop_plan_options(update, context)
+        async with async_session() as session:
+            result = await ShopCustomizationService.delete_plan(session, plan_id)
+        context.user_data.pop("shop_plan_id", None)
+        if not result:
+            await update.message.reply_text("سرویس پیدا نشد یا قبلاً حذف شده است.")
+        else:
+            await update.message.reply_text(
+                "✅ **سرویس کامل حذف شد**\n\n"
+                f"عنوان: {result['title']}\n"
+                f"موجودی حذف‌شده: **{result['removed_inventory']} لینک**\n"
+                f"قوانین جایزه غیرفعال‌شده: **{result['disabled_reward_rules']}**",
+                parse_mode=constants.ParseMode.MARKDOWN,
+            )
+        return await shop_plans_start(update, context)
+
+    context.user_data.pop("shop_plan_delete_pending", None)
     if option == ADMIN_TOGGLE_ENABLED:
         async with async_session() as session:
             plan = await ShopCustomizationService.get_plan(session, plan_id)
@@ -2474,7 +4779,82 @@ async def shop_plan_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("قیمت سرویس ذخیره شد.")
         return await _show_shop_plan_options(update, context)
 
-    if field == "display_order":
+    if field == "provision_mode":
+        value = PROVISION_MODE_VALUES.get(raw_value)
+        if not value:
+            await update.message.reply_text("حالت تامین معتبر نیست.", reply_markup=admin_provision_mode_keyboard())
+            return SHOP_PLAN_VALUE
+        updates = {"provision_mode": value, "provision_enabled": value != "inventory"}
+    elif field == "provision_panel_key":
+        if raw_value == "استفاده از پنل دسته" or raw_value == "-":
+            updates = {"provision_panel_key": None}
+        else:
+            panel_id = _parse_hash_id(raw_value)
+            panel_text = _normalize_button_text(raw_value)
+            async with async_session() as session:
+                await ProvisioningService.ensure_env_panels(session)
+                panels = (await session.execute(select(ProvisionPanel).order_by(ProvisionPanel.id))).scalars().all()
+            panel = next(
+                (
+                    item
+                    for item in panels
+                    if (panel_id is not None and item.id == panel_id)
+                    or item.key == panel_text
+                    or item.title == panel_text
+                    or f"({item.key})" in panel_text
+                    or _normalize_button_text(_panel_label(item)) == panel_text
+                ),
+                None,
+            )
+            if not panel:
+                await update.message.reply_text("پنل معتبر نیست. از لیست انتخاب کنید یا کلید پنل را بفرستید.")
+                return SHOP_PLAN_VALUE
+            updates = {"provision_panel_key": panel.key}
+    elif field == "name_prefix":
+        updates = {"name_prefix": _normalize_nullable(raw_value)}
+    elif field == "provision_volume_gb":
+        if raw_value == "-":
+            updates = {"provision_volume_gb": None}
+        else:
+            try:
+                value = int(raw_value.replace(",", ""))
+            except ValueError:
+                await update.message.reply_text("حجم واقعی باید عدد باشد یا `-` بفرستید.", parse_mode=constants.ParseMode.MARKDOWN)
+                return SHOP_PLAN_VALUE
+            if value < 0:
+                await update.message.reply_text("حجم واقعی نمی‌تواند منفی باشد.")
+                return SHOP_PLAN_VALUE
+            updates = {"provision_volume_gb": value}
+    elif field == "provision_time_mode":
+        value = PROVISION_TIME_MODE_VALUES.get(raw_value)
+        if not value:
+            await update.message.reply_text("نوع زمان ساخت معتبر نیست.", reply_markup=admin_provision_time_mode_keyboard())
+            return SHOP_PLAN_VALUE
+        updates = {"provision_time_mode": value}
+    elif field == "provision_duration_days":
+        if raw_value == "-":
+            updates = {"provision_duration_days": None}
+        else:
+            try:
+                value = int(raw_value.replace(",", ""))
+            except ValueError:
+                await update.message.reply_text("مدت واقعی باید عدد روز باشد یا `-` بفرستید.", parse_mode=constants.ParseMode.MARKDOWN)
+                return SHOP_PLAN_VALUE
+            if value < 0:
+                await update.message.reply_text("مدت واقعی نمی‌تواند منفی باشد. برای نامحدود، `0` بفرستید.", parse_mode=constants.ParseMode.MARKDOWN)
+                return SHOP_PLAN_VALUE
+            updates = {"provision_duration_days": value}
+    elif field == "subscription_device_limit":
+        try:
+            value = int(raw_value.replace(",", ""))
+        except ValueError:
+            await update.message.reply_text("محدودیت کاربر/دستگاه باید عدد باشد. برای نامحدود `0` بفرستید.", parse_mode=constants.ParseMode.MARKDOWN)
+            return SHOP_PLAN_VALUE
+        if value < 0:
+            await update.message.reply_text("محدودیت نمی‌تواند منفی باشد.")
+            return SHOP_PLAN_VALUE
+        updates = {"subscription_device_limit": value}
+    elif field == "display_order":
         try:
             updates = {"display_order": int(raw_value)}
         except ValueError:
@@ -2521,7 +4901,16 @@ async def shop_plan_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("سرویس ذخیره نشد.", reply_markup=admin_shop_settings_keyboard())
         return ConversationHandler.END
 
-    await update.message.reply_text("سرویس ذخیره شد.")
+    synced_count = 0
+    if field == "subscription_device_limit":
+        synced_count = await _sync_plan_subscription_device_limit(plan_id, updates["subscription_device_limit"])
+
+    message = "سرویس ذخیره شد."
+    if synced_count:
+        message += f"\nمحدودیت کاربر برای {synced_count} لینک قبلی این سرویس هم به‌روزرسانی شد."
+    await update.message.reply_text(message)
+    if context.user_data.get("shop_plan_provision_mode"):
+        return await _show_shop_plan_provision_options(update, context)
     return await _show_shop_plan_options(update, context)
 
 
@@ -2530,13 +4919,17 @@ async def shop_plan_add_volume(update: Update, context: ContextTypes.DEFAULT_TYP
     if await _leave_shop_flow_if_navigation(update, context):
         context.user_data.pop("shop_new_plan", None)
         return ConversationHandler.END
-    try:
-        volume = int(update.message.text.strip())
-    except ValueError:
-        await update.message.reply_text("حجم باید عددی باشد.")
-        return SHOP_PLAN_ADD_VOLUME
-    if volume <= 0:
-        await update.message.reply_text("حجم باید بیشتر از صفر باشد.")
+    raw_volume = update.message.text.strip().lower()
+    if raw_volume in {"نامحدود", "unlimited", "0"}:
+        volume = 0
+    else:
+        try:
+            volume = int(raw_volume)
+        except ValueError:
+            await update.message.reply_text("حجم باید عددی باشد یا کلمه «نامحدود» را ارسال کنید.")
+            return SHOP_PLAN_ADD_VOLUME
+    if volume < 0:
+        await update.message.reply_text("حجم نمی‌تواند منفی باشد.")
         return SHOP_PLAN_ADD_VOLUME
 
     context.user_data["shop_new_plan"] = {"volume": volume}
@@ -2569,13 +4962,20 @@ async def shop_plan_add_category(update: Update, context: ContextTypes.DEFAULT_T
     if await _leave_shop_flow_if_navigation(update, context):
         context.user_data.pop("shop_new_plan", None)
         return ConversationHandler.END
-    category_key = None
-    if update.message.text.startswith("#"):
-        category_key = update.message.text.split(" ", 1)[0].lstrip("#")
-    else:
-        category_key = update.message.text.strip()
+    category_id = _parse_hash_id(update.message.text)
+    category_key = update.message.text.strip()
     async with async_session() as session:
-        category = await ShopCustomizationService.get_category(session, category_key)
+        categories = await ShopCustomizationService.list_categories(session, active_only=True)
+    category = next(
+        (
+            item
+            for item in categories
+            if (category_id is not None and item.id == category_id)
+            or item.key == category_key
+            or _category_label(item) == update.message.text
+        ),
+        None,
+    )
     if not category:
         await update.message.reply_text("دسته معتبر نیست. از لیست دکمه‌ها انتخاب کنید.")
         return SHOP_PLAN_ADD_CATEGORY
@@ -2600,7 +5000,7 @@ async def shop_plan_add_price(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     draft = context.user_data.get("shop_new_plan", {})
     async with async_session() as session:
-        plan = await ShopCustomizationService.upsert_plan(
+        plan = await ShopCustomizationService.create_plan(
             session,
             volume_gb=draft["volume"],
             title=draft["title"],
@@ -2610,11 +5010,465 @@ async def shop_plan_add_price(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     context.user_data.pop("shop_new_plan", None)
     await update.message.reply_text(
-        f"سرویس **{plan.title}** با حجم **{plan.volume_gb} گیگ** ساخته شد.",
+        f"سرویس **{plan.title}** با حجم **{_volume_label(plan.volume_gb)}** ساخته شد.",
         reply_markup=admin_shop_settings_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     return ConversationHandler.END
+
+
+@require_auth(permission="shop")
+async def provision_panels_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        await ProvisioningService.ensure_env_panels(session)
+        panels = (await session.execute(select(ProvisionPanel).order_by(ProvisionPanel.id))).scalars().all()
+    labels = [_panel_label(panel) for panel in panels]
+    await update.message.reply_text(
+        "**مدیریت پنل‌های ساخت**\n\n"
+        "پنل موردنظر را انتخاب کنید.\n"
+        "برای پنل‌های گروهی می‌توانید گروه و HWID را جداگانه تنظیم کنید. برای Marzban/Alien/Pasarguard هم اینباندها و پروتکل‌ها قابل انتخاب هستند.",
+        reply_markup=_rows(labels, width=1),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return PROVISION_PANEL_SELECT
+
+
+@require_auth(permission="shop")
+async def provision_panel_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("provision_panel_key", None)
+        return ConversationHandler.END
+    panel_id = _parse_hash_id(update.message.text)
+    raw_text = _normalize_button_text(update.message.text)
+    async with async_session() as session:
+        await ProvisioningService.ensure_env_panels(session)
+        panels = (await session.execute(select(ProvisionPanel).order_by(ProvisionPanel.id))).scalars().all()
+    panel = next(
+        (
+            item
+            for item in panels
+            if (panel_id is not None and item.id == panel_id)
+            or item.key == raw_text
+            or item.title == raw_text
+            or f"({item.key})" in raw_text
+            or _normalize_button_text(_panel_label(item)) == raw_text
+        ),
+        None,
+    )
+    if not panel:
+        await update.message.reply_text("پنل انتخاب‌شده معتبر نیست.")
+        return PROVISION_PANEL_SELECT
+    context.user_data["provision_panel_key"] = panel.key
+    return await _show_provision_panel_options(update, context)
+
+
+async def _show_provision_panel_options(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = context.user_data.get("provision_panel_key")
+    async with async_session() as session:
+        panel = (
+            await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == key))
+        ).scalar_one_or_none()
+    if not panel:
+        await update.effective_message.reply_text("پنل پیدا نشد.", reply_markup=admin_shop_settings_keyboard())
+        return ConversationHandler.END
+
+    group_ids = json.loads(panel.group_ids or "[]")
+    inbounds = json.loads(panel.inbounds_json or "{}")
+    protocols = json.loads(panel.protocols_json or "[]")
+    if panel.panel_type in {"easy", "pasarguard"}:
+        panel_specific = (
+            f"گروه‌های پنل: `{group_ids or '-'}`\n"
+            f"محدودیت HWID: `{panel.hwid_limit if panel.hwid_limit is not None else '-'}`"
+        )
+        if panel.panel_type == "pasarguard":
+            panel_specific += (
+                f"\nاینباندهای پنل: `{inbounds or '-'}`\n"
+                f"پروتکل‌ها: `{protocols or '-'}`"
+            )
+    else:
+        panel_specific = (
+            f"اینباندهای پنل: `{inbounds or '-'}`\n"
+            f"پروتکل‌ها: `{protocols or '-'}`"
+        )
+    await update.effective_message.reply_text(
+        "**تنظیمات پنل ساخت**\n\n"
+        f"عنوان: **{panel.title}**\n"
+        f"کلید: `{panel.key}`\n"
+        f"نوع: `{_panel_type_label(panel.panel_type)}`\n"
+        f"آدرس: `{panel.base_url}`\n"
+        f"وضعیت: **{'فعال' if panel.is_enabled else 'غیرفعال'}**\n"
+        f"{panel_specific}",
+        reply_markup=admin_provision_panel_keyboard(panel.panel_type),
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    return PROVISION_PANEL_OPTION
+
+
+@require_auth(permission="shop")
+async def provision_panel_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("provision_panel_key", None)
+        context.user_data.pop("provision_panel_field", None)
+        return ConversationHandler.END
+    key = context.user_data.get("provision_panel_key")
+    if not key:
+        return await provision_panels_start(update, context)
+    option = update.message.text
+    if option == ADMIN_TOGGLE_PANEL_ENABLED:
+        async with async_session() as session:
+            panel = (
+                await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == key))
+            ).scalar_one_or_none()
+            if panel:
+                panel.is_enabled = not panel.is_enabled
+                panel.updated_at = datetime.now(timezone.utc)
+                await session.commit()
+        await update.message.reply_text("وضعیت پنل تغییر کرد.")
+        return await _show_provision_panel_options(update, context)
+
+    if option == ADMIN_SET_PANEL_INBOUNDS:
+        return await _show_panel_inbound_selector(update, context, refresh=True)
+
+    if option == ADMIN_SET_PANEL_PROTOCOLS:
+        return await _show_panel_protocol_selector(update, context)
+
+    fields = {
+        ADMIN_SET_PANEL_GROUPS: (
+            "group_ids",
+            "شناسه گروه‌های همین پنل را با کاما بفرستید.\nمثال: `1,2,3`\nبرای پیش‌فرض/خالی، `-` بفرستید.",
+        ),
+        ADMIN_SET_PANEL_HWID: (
+            "hwid_limit",
+            "عدد محدودیت HWID این پنل را بفرستید.\nبرای حذف مقدار اختصاصی و استفاده از پیش‌فرض پنل، `-` بفرستید.\nمثال: `2`",
+        ),
+    }
+    selected = fields.get(option)
+    if not selected:
+        async with async_session() as session:
+            panel = (
+                await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == key))
+            ).scalar_one_or_none()
+        await update.message.reply_text(
+            "گزینه معتبر نیست.",
+            reply_markup=admin_provision_panel_keyboard(panel.panel_type if panel else None),
+        )
+        return PROVISION_PANEL_OPTION
+    field, prompt = selected
+    context.user_data["provision_panel_field"] = field
+    await update.message.reply_text(prompt, reply_markup=_cancel_back_keyboard(), parse_mode=constants.ParseMode.MARKDOWN)
+    return PROVISION_PANEL_VALUE
+
+
+async def _show_panel_inbound_selector(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    refresh: bool = False,
+):
+    key = context.user_data.get("provision_panel_key")
+    async with async_session() as session:
+        panel = (
+            await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == key))
+        ).scalar_one_or_none()
+    if not panel:
+        await update.effective_message.reply_text("پنل پیدا نشد.", reply_markup=admin_shop_settings_keyboard())
+        return ConversationHandler.END
+    if panel.panel_type == "easy":
+        await update.effective_message.reply_text(
+            "این پنل از نوع Easy است و اینباند جداگانه ندارد. برای این پنل از گزینه «گروه‌های پنل» استفاده کنید.",
+            reply_markup=admin_provision_panel_keyboard(panel.panel_type),
+        )
+        return PROVISION_PANEL_OPTION
+
+    cached_key = context.user_data.get("provision_inbounds_panel_key")
+    available = context.user_data.get("provision_inbounds_available")
+    if refresh or cached_key != panel.key or not isinstance(available, dict):
+        try:
+            available = await ProvisioningService.fetch_inbounds(panel)
+        except Exception as exc:
+            if panel.panel_type == "pasarguard":
+                await update.effective_message.reply_text(
+                    "دریافت خودکار اینباندها از این پنل انجام نشد.\n"
+                    f"خطا: `{exc}`\n\n"
+                    "چون لیست اینباند دریافت نشد، پروتکل‌های مجاز را با دکمه انتخاب کنید.",
+                    reply_markup=admin_provision_panel_keyboard(panel.panel_type),
+                    parse_mode=constants.ParseMode.MARKDOWN,
+                )
+                return await _show_panel_protocol_selector(update, context)
+            await update.effective_message.reply_text(
+                f"دریافت اینباندها از پنل انجام نشد:\n{exc}",
+                reply_markup=admin_provision_panel_keyboard(panel.panel_type),
+            )
+            return PROVISION_PANEL_OPTION
+        if not available:
+            if panel.panel_type == "pasarguard":
+                await update.effective_message.reply_text(
+                    "این پنل از API لیست اینباند خالی برگرداند.\n\n"
+                    "پروتکل‌های مجاز را با دکمه انتخاب کنید.",
+                    reply_markup=admin_provision_panel_keyboard(panel.panel_type),
+                    parse_mode=constants.ParseMode.MARKDOWN,
+                )
+                return await _show_panel_protocol_selector(update, context)
+            await update.effective_message.reply_text(
+                "هیچ اینباند فعالی از پنل دریافت نشد.",
+                reply_markup=admin_provision_panel_keyboard(panel.panel_type),
+            )
+            return PROVISION_PANEL_OPTION
+        selected = _selected_inbounds_from_panel(panel, available)
+        context.user_data["provision_inbounds_panel_key"] = panel.key
+        context.user_data["provision_inbounds_available"] = available
+        context.user_data["provision_inbounds_selected"] = list(selected)
+    else:
+        selected = {
+            tuple(item)
+            for item in context.user_data.get("provision_inbounds_selected", [])
+            if isinstance(item, (list, tuple)) and len(item) == 2
+        }
+
+    text = (
+        "**انتخاب اینباندهای پنل**\n\n"
+        f"پنل: **{panel.title}** `{panel.key}`\n"
+        "اینباندهایی که روشن باشند برای ساخت کانفیگ استفاده می‌شوند.\n"
+        "روی هر مورد بزنید تا روشن/خاموش شود، بعد «ذخیره» را بزنید."
+    )
+    markup = _inbounds_keyboard(available, selected)
+    message = update.effective_message
+    if update.callback_query:
+        try:
+            await update.callback_query.edit_message_text(text, reply_markup=markup, parse_mode=constants.ParseMode.MARKDOWN)
+        except Exception:
+            await message.reply_text(text, reply_markup=markup, parse_mode=constants.ParseMode.MARKDOWN)
+    else:
+        await message.reply_text(text, reply_markup=markup, parse_mode=constants.ParseMode.MARKDOWN)
+    return PROVISION_PANEL_OPTION
+
+
+async def _show_panel_protocol_selector(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = context.user_data.get("provision_panel_key")
+    async with async_session() as session:
+        panel = (
+            await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == key))
+        ).scalar_one_or_none()
+    if not panel:
+        await update.effective_message.reply_text("پنل پیدا نشد.", reply_markup=admin_shop_settings_keyboard())
+        return ConversationHandler.END
+
+    cached_key = context.user_data.get("provision_protocols_panel_key")
+    selected = context.user_data.get("provision_protocols_selected")
+    if cached_key != panel.key or not isinstance(selected, list):
+        selected = json.loads(panel.protocols_json or "[]")
+        context.user_data["provision_protocols_panel_key"] = panel.key
+        context.user_data["provision_protocols_selected"] = selected
+
+    selected_set = {str(item) for item in selected}
+    text = (
+        "**انتخاب پروتکل‌های پنل**\n\n"
+        f"پنل: **{panel.title}** `{panel.key}`\n"
+        "هر پروتکلی که روشن باشد در ساخت کانفیگ استفاده می‌شود.\n"
+        "اگر اینباندها را جدا انتخاب کرده باشید، همان اینباندها اولویت دارند."
+    )
+    markup = _protocols_keyboard(selected_set)
+    message = update.effective_message
+    if update.callback_query:
+        try:
+            await update.callback_query.edit_message_text(text, reply_markup=markup, parse_mode=constants.ParseMode.MARKDOWN)
+        except Exception:
+            await message.reply_text(text, reply_markup=markup, parse_mode=constants.ParseMode.MARKDOWN)
+    else:
+        await message.reply_text(text, reply_markup=markup, parse_mode=constants.ParseMode.MARKDOWN)
+    return PROVISION_PANEL_OPTION
+
+
+@require_auth(permission="shop")
+async def provision_inbound_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = (query.data or "").split(":")
+    if parts and parts[0] == PROVISION_PROTOCOL_CALLBACK_PREFIX:
+        return await provision_protocol_callback(update, context)
+    action = parts[1] if len(parts) > 1 else ""
+    key = context.user_data.get("provision_panel_key")
+    available = context.user_data.get("provision_inbounds_available")
+    if not key or not isinstance(available, dict):
+        await query.message.reply_text("ابتدا پنل را دوباره انتخاب کنید.", reply_markup=admin_provision_panel_keyboard())
+        return PROVISION_PANEL_OPTION
+
+    items = _flatten_inbounds(available)
+    selected = {
+        tuple(item)
+        for item in context.user_data.get("provision_inbounds_selected", [])
+        if isinstance(item, (list, tuple)) and len(item) == 2
+    }
+
+    if action == "toggle":
+        index = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else -1
+        if 0 <= index < len(items):
+            item = items[index]
+            if item in selected:
+                selected.remove(item)
+            else:
+                selected.add(item)
+            context.user_data["provision_inbounds_selected"] = list(selected)
+        return await _show_panel_inbound_selector(update, context)
+
+    if action == "all":
+        context.user_data["provision_inbounds_selected"] = list(items)
+        return await _show_panel_inbound_selector(update, context)
+
+    if action == "none":
+        context.user_data["provision_inbounds_selected"] = []
+        return await _show_panel_inbound_selector(update, context)
+
+    if action == "refresh":
+        return await _show_panel_inbound_selector(update, context, refresh=True)
+
+    if action == "back":
+        await query.edit_message_text("به تنظیمات پنل برگشتید.")
+        return await _show_provision_panel_options(update, context)
+
+    if action == "save":
+        configured: dict[str, list[str]] = {}
+        for protocol, tag in sorted(selected):
+            configured.setdefault(protocol, []).append(tag)
+        async with async_session() as session:
+            panel = (
+                await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == key))
+            ).scalar_one_or_none()
+            if not panel:
+                await query.message.reply_text("پنل پیدا نشد.")
+                return ConversationHandler.END
+            panel.inbounds_json = json.dumps(configured, ensure_ascii=False)
+            panel.protocols_json = json.dumps(sorted(configured), ensure_ascii=False)
+            panel.updated_at = datetime.now(timezone.utc)
+            await session.commit()
+        context.user_data.pop("provision_inbounds_available", None)
+        context.user_data.pop("provision_inbounds_selected", None)
+        context.user_data.pop("provision_inbounds_panel_key", None)
+        await query.edit_message_text("اینباندهای انتخاب‌شده ذخیره شدند.")
+        return await _show_provision_panel_options(update, context)
+
+    return PROVISION_PANEL_OPTION
+
+
+async def provision_protocol_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    parts = (query.data or "").split(":")
+    action = parts[1] if len(parts) > 1 else ""
+    key = context.user_data.get("provision_panel_key")
+    if not key:
+        await query.message.reply_text("ابتدا پنل را دوباره انتخاب کنید.", reply_markup=admin_provision_panel_keyboard())
+        return PROVISION_PANEL_OPTION
+
+    selected = {
+        str(item)
+        for item in context.user_data.get("provision_protocols_selected", [])
+        if str(item) in PROVISION_PROTOCOL_CHOICES
+    }
+
+    if action == "toggle" and len(parts) > 2:
+        protocol = parts[2]
+        if protocol in PROVISION_PROTOCOL_CHOICES:
+            if protocol in selected:
+                selected.remove(protocol)
+            else:
+                selected.add(protocol)
+            context.user_data["provision_protocols_selected"] = sorted(selected)
+        return await _show_panel_protocol_selector(update, context)
+
+    if action == "all":
+        context.user_data["provision_protocols_selected"] = list(PROVISION_PROTOCOL_CHOICES)
+        return await _show_panel_protocol_selector(update, context)
+
+    if action == "none":
+        context.user_data["provision_protocols_selected"] = []
+        return await _show_panel_protocol_selector(update, context)
+
+    if action == "back":
+        await query.edit_message_text("به تنظیمات پنل برگشتید.")
+        return await _show_provision_panel_options(update, context)
+
+    if action == "save":
+        async with async_session() as session:
+            panel = (
+                await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == key))
+            ).scalar_one_or_none()
+            if not panel:
+                await query.message.reply_text("پنل پیدا نشد.")
+                return ConversationHandler.END
+            panel.protocols_json = json.dumps(sorted(selected), ensure_ascii=False)
+            if not selected:
+                panel.inbounds_json = None
+            panel.updated_at = datetime.now(timezone.utc)
+            await session.commit()
+        context.user_data.pop("provision_protocols_panel_key", None)
+        context.user_data.pop("provision_protocols_selected", None)
+        await query.edit_message_text("پروتکل‌های انتخاب‌شده ذخیره شدند.")
+        return await _show_provision_panel_options(update, context)
+
+    return PROVISION_PANEL_OPTION
+
+
+@require_auth(permission="shop")
+async def provision_panel_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _leave_shop_flow_if_navigation(update, context):
+        context.user_data.pop("provision_panel_key", None)
+        context.user_data.pop("provision_panel_field", None)
+        return ConversationHandler.END
+    key = context.user_data.get("provision_panel_key")
+    field = context.user_data.get("provision_panel_field")
+    raw_value = update.message.text.strip()
+    if not key or not field:
+        return await provision_panels_start(update, context)
+
+    if field == "group_ids":
+        if raw_value == "-":
+            value = None
+        else:
+            try:
+                value = json.dumps([int(item.strip()) for item in raw_value.split(",") if item.strip()])
+            except ValueError:
+                await update.message.reply_text("گروه‌ها باید عددی و با کاما جدا شده باشند.")
+                return PROVISION_PANEL_VALUE
+    elif field == "hwid_limit":
+        if raw_value == "-":
+            value = None
+        else:
+            try:
+                value = int(raw_value)
+            except ValueError:
+                await update.message.reply_text("محدودیت HWID باید عدد صحیح باشد.")
+                return PROVISION_PANEL_VALUE
+            if value < 0:
+                await update.message.reply_text("محدودیت HWID نمی‌تواند منفی باشد.")
+                return PROVISION_PANEL_VALUE
+    elif field == "inbounds_json":
+        parsed = _parse_inbounds_text(raw_value)
+        if parsed is None:
+            await update.message.reply_text("فرمت اینباندها معتبر نیست.")
+            return PROVISION_PANEL_VALUE
+        value = json.dumps(parsed, ensure_ascii=False)
+    elif field == "protocols_json":
+        if raw_value == "-":
+            value = None
+        else:
+            value = json.dumps([item.strip() for item in raw_value.split(",") if item.strip()], ensure_ascii=False)
+    else:
+        return await _show_provision_panel_options(update, context)
+
+    async with async_session() as session:
+        panel = (
+            await session.execute(select(ProvisionPanel).where(ProvisionPanel.key == key))
+        ).scalar_one_or_none()
+        if not panel:
+            await update.message.reply_text("پنل پیدا نشد.")
+            return ConversationHandler.END
+        setattr(panel, field, value)
+        panel.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+
+    context.user_data.pop("provision_panel_field", None)
+    await update.message.reply_text("تنظیمات پنل ذخیره شد.")
+    return await _show_provision_panel_options(update, context)
 
 
 # ---------------------------------------------------------------------------
@@ -2639,17 +5493,23 @@ def _shorten(value: str | None, head: int = 8, tail: int = 6) -> str:
     return f"{value[:head]}…{value[-tail:]}"
 
 
+def _crypto_asset_label(value: str | None) -> str:
+    return "گرام(تون)" if (value or "").upper() == "TON" else (value or "")
+
+
 def _format_invoice(invoice) -> str:
     status = _CRYPTO_STATUS_FA.get(invoice.status, invoice.status)
-    when = invoice.created_at.strftime("%Y-%m-%d %H:%M") if invoice.created_at else "-"
+    when = format_tehran_datetime(invoice.created_at) if invoice.created_at else "-"
+    coin_label = _crypto_asset_label(invoice.coin)
+    network_label = _crypto_asset_label(invoice.network)
     lines = [
         f"#{invoice.id} | {status}",
         f"👤 کاربر: `{invoice.user_id}`",
         f"💰 مبلغ: {invoice.quoted_toman:,} تومان",
-        f"🪙 ارز: {invoice.coin}/{invoice.network} | مقدار: {invoice.expected_crypto}",
+        f"🪙 ارز: {coin_label}/{network_label} | مقدار: {invoice.expected_crypto}",
     ]
     if invoice.received_crypto:
-        lines.append(f"📥 دریافت‌شده: {invoice.received_crypto} {invoice.coin}")
+        lines.append(f"📥 دریافت‌شده: {invoice.received_crypto} {coin_label}")
     lines.append(f"🏦 به آدرس: `{_shorten(invoice.deposit_address)}`")
     if invoice.memo:
         lines.append(f"📝 ممو: `{invoice.memo}`")
@@ -2759,10 +5619,10 @@ async def crypto_rates_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"کارمزد: *{margin}%*\n\n"
         "نرخ‌های دستی (تومان به ازای هر واحد):\n"
         f"• USDT: {manual_usdt:,}\n"
-        f"• TON: {manual_ton:,}\n\n"
+        f"• گرام(تون): {manual_ton:,}\n\n"
         "آخرین نرخ آنلاین کش‌شده:\n"
         f"• USDT: {_fmt(online_usdt)}\n"
-        f"• TON: {_fmt(online_ton)}"
+        f"• گرام(تون): {_fmt(online_ton)}"
     )
     await update.message.reply_text(
         text,
@@ -2839,7 +5699,7 @@ async def crypto_set_usdt_save(update: Update, context: ContextTypes.DEFAULT_TYP
 @require_auth(permission="users")
 async def crypto_set_ton_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "نرخ دستی TON را به تومان وارد کنید (به ازای هر ۱ TON):",
+        "نرخ دستی گرام(تون) را به تومان وارد کنید (به ازای هر ۱ گرام(تون)):",
         reply_markup=_cancel_back_keyboard(),
     )
     return CRYPTO_SET_TON_VALUE
@@ -2853,13 +5713,13 @@ async def crypto_set_ton_save(update: Update, context: ContextTypes.DEFAULT_TYPE
         return CRYPTO_SET_TON_VALUE
     async with async_session() as session:
         await SettingsService.set_manual_rate(session, "TON", amount)
-    await update.message.reply_text(f"نرخ دستی TON روی {amount:,} تومان تنظیم شد.")
+    await update.message.reply_text(f"نرخ دستی گرام(تون) روی {amount:,} تومان تنظیم شد.")
     await crypto_rates_menu(update, context)
     return ConversationHandler.END
 
 
 def _format_rial_request(request) -> str:
-    when = request.created_at.strftime("%Y-%m-%d %H:%M") if request.created_at else "-"
+    when = format_tehran_datetime(request.created_at) if request.created_at else "-"
     phone = request.phone_number or "دریافت نشده"
     return (
         f"#{request.id} | {request.status}\n"
@@ -2891,16 +5751,92 @@ async def rial_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @require_auth(permission="users")
+async def rial_request_decision_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = (query.data or "").split(":")
+    if len(parts) != 3 or parts[0] != RIAL_REQUEST_CALLBACK_PREFIX:
+        await query.edit_message_text("درخواست معتبر نیست.")
+        return
+    action = parts[1]
+    try:
+        request_id = int(parts[2])
+    except ValueError:
+        await query.edit_message_text("شناسه درخواست معتبر نیست.")
+        return
+
+    approve = action == "approve"
+    if action not in {"approve", "reject"}:
+        await query.edit_message_text("عملیات معتبر نیست.")
+        return
+
+    async with async_session() as session:
+        request, wallet_balance = await RialPaymentService.decide_request(
+            session,
+            request_id=request_id,
+            approve=approve,
+            admin_id=update.effective_user.id,
+        )
+
+    if request is None:
+        await query.edit_message_text("درخواست یا کاربر پیدا نشد.")
+        return
+    if wallet_balance is None and request.status != ("rejected" if not approve else "approved"):
+        await query.edit_message_text(f"این درخواست قبلا از حالت انتظار خارج شده است: {request.status}")
+        return
+
+    notification_status = ""
+    if approve and wallet_balance is not None:
+        async with async_session() as session:
+            notified = await WalletNotificationService.send_charge_notification(
+                session,
+                telegram_id=request.user_id,
+                amount=request.amount_toman,
+                wallet_balance=wallet_balance,
+            )
+        notification_status = (
+            "\nپیام شارژ برای کاربر ارسال شد."
+            if notified
+            else "\nشارژ انجام شد، اما ارسال پیام به کاربر ممکن نبود."
+        )
+        result_text = (
+            f"✅ درخواست #{request.id} تایید شد و کیف پول کاربر `{request.user_id}` "
+            f"به مبلغ **{request.amount_toman:,} تومان** شارژ شد."
+            f"{notification_status}"
+        )
+    elif not approve:
+        result_text = f"❌ درخواست #{request.id} رد شد."
+    else:
+        result_text = f"این درخواست قبلا تعیین تکلیف شده است: {request.status}"
+
+    await query.edit_message_text(result_text, parse_mode=constants.ParseMode.MARKDOWN)
+
+
+@require_auth(permission="users")
 async def rial_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with async_session() as session:
         minimum = await SettingsService.get_rial_min_amount(session)
         require_phone = await SettingsService.rial_phone_required(session)
+        require_source_card = await SettingsService.rial_source_card_required(session)
         support_handle = await SettingsService.get_rial_support_handle(session)
+        payment_mode = await SettingsService.get_rial_payment_mode(session)
+        dest_card = await SettingsService.get_rial_destination_card_number(session)
+        dest_holder = await SettingsService.get_rial_destination_card_holder(session)
+        valid_minutes = await SettingsService.get_rial_receipt_valid_minutes(session)
+        receipt_bot = await SettingsService.get_rial_receipt_bot_username(session)
+        receipt_admins = await SettingsService.get_rial_receipt_admin_ids(session)
     await update.message.reply_text(
         "**تنظیمات کارت‌به‌کارت**\n\n"
         f"حداقل مبلغ: **{minimum:,} تومان**\n"
-        f"دریافت شماره تماس: **{'روشن' if require_phone else 'خاموش'}**\n"
-        f"آیدی پشتیبانی: **{support_handle}**",
+        f"الزام تایید شماره در ربات: **{'روشن' if require_phone else 'خاموش'}**\n"
+        f"دریافت شماره کارت مبدا: **{'روشن' if require_source_card else 'خاموش'}**\n"
+        f"آیدی پشتیبانی: **{support_handle}**\n"
+        f"روش فعلی: **{'بات دریافت رسید' if payment_mode == 'receipt_bot' else 'ارسال به پشتیبانی'}**\n"
+        f"شماره کارت مقصد: `{dest_card or '-'}`\n"
+        f"صاحب کارت مقصد: **{dest_holder or '-'}**\n"
+        f"اعتبار پرداخت: **{valid_minutes} دقیقه**\n"
+        f"بات دریافت رسید: @{receipt_bot}\n"
+        f"ادمین‌های رسید: `{', '.join(str(item) for item in receipt_admins)}`",
         reply_markup=admin_rial_settings_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
@@ -2912,7 +5848,32 @@ async def rial_toggle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         enabled = not await SettingsService.rial_phone_required(session)
         await SettingsService.set_rial_phone_required(session, enabled)
     await update.message.reply_text(
-        f"دریافت شماره تماس برای پرداخت ریالی **{'روشن' if enabled else 'خاموش'}** شد.",
+        f"الزام تایید شماره در ربات برای پرداخت ریالی **{'روشن' if enabled else 'خاموش'}** شد.",
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    await rial_settings_menu(update, context)
+
+
+@require_auth(permission="users")
+async def rial_toggle_source_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        enabled = not await SettingsService.rial_source_card_required(session)
+        await SettingsService.set_rial_source_card_required(session, enabled)
+    await update.message.reply_text(
+        f"دریافت شماره کارت مبدا برای پرداخت ریالی **{'روشن' if enabled else 'خاموش'}** شد.",
+        parse_mode=constants.ParseMode.MARKDOWN,
+    )
+    await rial_settings_menu(update, context)
+
+
+@require_auth(permission="users")
+async def rial_toggle_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with async_session() as session:
+        current = await SettingsService.get_rial_payment_mode(session)
+        new_mode = "direct_support" if current == "receipt_bot" else "receipt_bot"
+        await SettingsService.set_rial_payment_mode(session, new_mode)
+    await update.message.reply_text(
+        f"روش پرداخت ریالی روی **{'بات دریافت رسید' if new_mode == 'receipt_bot' else 'ارسال به پشتیبانی'}** تنظیم شد.",
         parse_mode=constants.ParseMode.MARKDOWN,
     )
     await rial_settings_menu(update, context)
@@ -2959,6 +5920,108 @@ async def rial_set_support_save(update: Update, context: ContextTypes.DEFAULT_TY
     async with async_session() as session:
         await SettingsService.set_rial_support_handle(session, username)
     await update.message.reply_text(f"آیدی پشتیبانی ریالی روی **@{username}** تنظیم شد.", parse_mode=constants.ParseMode.MARKDOWN)
+    await rial_settings_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="users")
+async def rial_set_dest_card_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("شماره کارت مقصد را ۱۶ رقمی وارد کنید:", reply_markup=_cancel_back_keyboard())
+    return RIAL_SET_DEST_CARD_VALUE
+
+
+@require_auth(permission="users")
+async def rial_set_dest_card_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    card = re.sub(r"\D", "", update.message.text or "")
+    if len(card) != 16:
+        await update.message.reply_text("شماره کارت باید ۱۶ رقم باشد.")
+        return RIAL_SET_DEST_CARD_VALUE
+    async with async_session() as session:
+        await SettingsService.set_rial_destination_card_number(session, card)
+    await update.message.reply_text("شماره کارت مقصد ذخیره شد.")
+    await rial_settings_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="users")
+async def rial_set_dest_holder_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("نام صاحب کارت مقصد را وارد کنید:", reply_markup=_cancel_back_keyboard())
+    return RIAL_SET_DEST_HOLDER_VALUE
+
+
+@require_auth(permission="users")
+async def rial_set_dest_holder_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    holder = (update.message.text or "").strip()
+    if not holder:
+        await update.message.reply_text("نام صاحب کارت نمی‌تواند خالی باشد.")
+        return RIAL_SET_DEST_HOLDER_VALUE
+    async with async_session() as session:
+        await SettingsService.set_rial_destination_card_holder(session, holder)
+    await update.message.reply_text("صاحب کارت مقصد ذخیره شد.")
+    await rial_settings_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="users")
+async def rial_set_valid_minutes_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("مدت اعتبار پرداخت را به دقیقه وارد کنید. مثال: `120`", reply_markup=_cancel_back_keyboard(), parse_mode=constants.ParseMode.MARKDOWN)
+    return RIAL_SET_VALID_MINUTES_VALUE
+
+
+@require_auth(permission="users")
+async def rial_set_valid_minutes_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    amount = _parse_amount(update.message.text)
+    if amount is None or amount <= 0:
+        await update.message.reply_text("عدد معتبر نیست.")
+        return RIAL_SET_VALID_MINUTES_VALUE
+    async with async_session() as session:
+        await SettingsService.set_rial_receipt_valid_minutes(session, amount)
+    await update.message.reply_text(f"اعتبار پرداخت روی **{amount} دقیقه** تنظیم شد.", parse_mode=constants.ParseMode.MARKDOWN)
+    await rial_settings_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="users")
+async def rial_set_receipt_bot_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("یوزرنیم بات دریافت رسید را با یا بدون @ وارد کنید:", reply_markup=_cancel_back_keyboard())
+    return RIAL_SET_RECEIPT_BOT_VALUE
+
+
+@require_auth(permission="users")
+async def rial_set_receipt_bot_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    username = (update.message.text or "").strip().lstrip("@")
+    if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", username):
+        await update.message.reply_text("یوزرنیم بات معتبر نیست.")
+        return RIAL_SET_RECEIPT_BOT_VALUE
+    async with async_session() as session:
+        await SettingsService.set_rial_receipt_bot_username(session, username)
+    await update.message.reply_text(f"بات دریافت رسید روی @{username} تنظیم شد.")
+    await rial_settings_menu(update, context)
+    return ConversationHandler.END
+
+
+@require_auth(permission="users")
+async def rial_set_receipt_admins_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("آیدی عددی ادمین‌های رسید را با کاما جدا کنید:", reply_markup=_cancel_back_keyboard())
+    return RIAL_SET_RECEIPT_ADMINS_VALUE
+
+
+@require_auth(permission="users")
+async def rial_set_receipt_admins_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    admin_ids = []
+    for part in re.split(r"[,،\\s]+", update.message.text or ""):
+        if not part:
+            continue
+        if not part.isdigit():
+            await update.message.reply_text("فقط آیدی عددی وارد کنید.")
+            return RIAL_SET_RECEIPT_ADMINS_VALUE
+        admin_ids.append(int(part))
+    if not admin_ids:
+        await update.message.reply_text("حداقل یک آیدی عددی لازم است.")
+        return RIAL_SET_RECEIPT_ADMINS_VALUE
+    async with async_session() as session:
+        await SettingsService.set_rial_receipt_admin_ids(session, admin_ids)
+    await update.message.reply_text("ادمین‌های دریافت رسید ذخیره شدند.")
     await rial_settings_menu(update, context)
     return ConversationHandler.END
 
@@ -3038,7 +6101,7 @@ async def shop_plan_value_back(update: Update, context: ContextTypes.DEFAULT_TYP
 async def shop_plan_add_title_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("shop_new_plan", None)
     await update.message.reply_text(
-        "حجم سرویس جدید را به گیگ ارسال کنید. مثال: `30`",
+        "حجم سرویس جدید را به گیگ ارسال کنید؛ برای حجم نامحدود، `نامحدود` بفرستید. مثال: `30`",
         reply_markup=_cancel_back_keyboard(),
         parse_mode=constants.ParseMode.MARKDOWN,
     )
@@ -3076,7 +6139,13 @@ async def admin_management_back(update: Update, context: ContextTypes.DEFAULT_TY
 add_config_conv = ConversationHandler(
     entry_points=[MessageHandler(_exact_filter(ADMIN_ADD_CONFIG), add_config_start)],
     states={
-        CHOOSE_VOLUME_ADD: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_config_volume)],
+        CHOOSE_VOLUME_ADD: [
+            CallbackQueryHandler(
+                add_config_plan_callback,
+                pattern=rf"^{ADD_CONFIG_CALLBACK_PREFIX}:",
+            ),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, add_config_volume),
+        ],
         COLLECT_LINKS: [
             MessageHandler(_exact_filter(DONE_ADDING_CONFIGS), done_collecting),
             MessageHandler(_exact_filter(CANCEL), cancel),
@@ -3113,7 +6182,10 @@ search_user_conv = ConversationHandler(
 )
 
 charge_wallet_conv = ConversationHandler(
-    entry_points=[MessageHandler(_exact_filter(ADMIN_CHARGE_WALLET), charge_wallet_start)],
+    entry_points=[
+        CommandHandler("chargeuser", charge_wallet_start),
+        MessageHandler(_exact_filter(ADMIN_CHARGE_WALLET), charge_wallet_start),
+    ],
     states={
         CHARGE_USER_ID: [
             MessageHandler(_exact_filter(CANCEL), cancel),
@@ -3365,7 +6437,7 @@ shop_messages_conv = ConversationHandler(
         SHOP_MESSAGE_TEXT: [
             MessageHandler(_exact_filter(CANCEL), cancel),
             MessageHandler(_exact_filter(ADMIN_BACK), shop_message_text_back),
-            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_message_save),
+            MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, shop_message_save),
         ],
     },
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
@@ -3395,9 +6467,14 @@ shop_buttons_conv = ConversationHandler(
             MessageHandler(_exact_filter(ADMIN_BACK), shop_button_value_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_value),
         ],
+        SHOP_BUTTON_ADD_KEY: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_button_list_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_add_key),
+        ],
         SHOP_BUTTON_ADD_TEXT: [
             MessageHandler(_exact_filter(CANCEL), cancel),
-            MessageHandler(_exact_filter(ADMIN_BACK), shop_button_options_back),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_button_list_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_button_add_text),
         ],
         SHOP_BUTTON_ADD_MESSAGE: [
@@ -3413,6 +6490,10 @@ shop_plans_conv = ConversationHandler(
     entry_points=[MessageHandler(_exact_filter(ADMIN_SHOP_PLANS), shop_plans_start)],
     states={
         SHOP_PLAN_SELECT: [
+            CallbackQueryHandler(
+                shop_plan_management_callback,
+                pattern=rf"^{SHOP_PLAN_CALLBACK_PREFIX}:",
+            ),
             MessageHandler(_exact_filter(CANCEL), cancel),
             MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_select),
@@ -3425,7 +6506,7 @@ shop_plans_conv = ConversationHandler(
         SHOP_PLAN_VALUE: [
             MessageHandler(_exact_filter(CANCEL), cancel),
             MessageHandler(_exact_filter(ADMIN_BACK), shop_plan_value_back),
-            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_value),
+            MessageHandler((filters.TEXT | filters.Sticker.ALL | filters.PHOTO) & ~filters.COMMAND, shop_plan_value),
         ],
         SHOP_PLAN_ADD_VOLUME: [
             MessageHandler(_exact_filter(CANCEL), cancel),
@@ -3446,6 +6527,32 @@ shop_plans_conv = ConversationHandler(
             MessageHandler(_exact_filter(CANCEL), cancel),
             MessageHandler(_exact_filter(ADMIN_BACK), shop_plan_add_price_back),
             MessageHandler(filters.TEXT & ~filters.COMMAND, shop_plan_add_price),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+provision_panels_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_PROVISION_PANELS), provision_panels_start)],
+    states={
+        PROVISION_PANEL_SELECT: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, provision_panel_select),
+        ],
+        PROVISION_PANEL_OPTION: [
+            CallbackQueryHandler(
+                provision_inbound_callback,
+                pattern=rf"^({PROVISION_INBOUND_CALLBACK_PREFIX}|{PROVISION_PROTOCOL_CALLBACK_PREFIX}):",
+            ),
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, provision_panel_option),
+        ],
+        PROVISION_PANEL_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), provision_panels_start),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, provision_panel_value),
         ],
     },
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
@@ -3523,6 +6630,259 @@ rial_set_support_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
 )
 
+rial_set_dest_card_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_RIAL_SET_DEST_CARD), rial_set_dest_card_start)],
+    states={
+        RIAL_SET_DEST_CARD_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, rial_set_dest_card_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+rial_set_dest_holder_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_RIAL_SET_DEST_HOLDER), rial_set_dest_holder_start)],
+    states={
+        RIAL_SET_DEST_HOLDER_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, rial_set_dest_holder_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+rial_set_valid_minutes_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_RIAL_SET_VALID_MINUTES), rial_set_valid_minutes_start)],
+    states={
+        RIAL_SET_VALID_MINUTES_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, rial_set_valid_minutes_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+rial_set_receipt_bot_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_RIAL_SET_RECEIPT_BOT), rial_set_receipt_bot_start)],
+    states={
+        RIAL_SET_RECEIPT_BOT_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, rial_set_receipt_bot_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+rial_set_receipt_admins_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_RIAL_SET_RECEIPT_ADMINS), rial_set_receipt_admins_start)],
+    states={
+        RIAL_SET_RECEIPT_ADMINS_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, rial_set_receipt_admins_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+trial_set_volume_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_TRIAL_SET_VOLUME), trial_set_volume_start)],
+    states={
+        TRIAL_SET_VOLUME_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, trial_set_volume_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+trial_set_duration_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_TRIAL_SET_DURATION), trial_set_duration_start)],
+    states={
+        TRIAL_SET_DURATION_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, trial_set_duration_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+trial_set_panel_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_TRIAL_SET_PANEL), trial_set_panel_start)],
+    states={
+        TRIAL_SET_PANEL_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, trial_set_panel_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+trial_set_time_mode_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_TRIAL_SET_TIME_MODE), trial_set_time_mode_start)],
+    states={
+        TRIAL_SET_TIME_MODE_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, trial_set_time_mode_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+service_reminder_volume_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_SERVICE_REMINDER_SET_VOLUME), service_reminder_volume_start)],
+    states={
+        SERVICE_REMINDER_VOLUME_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, service_reminder_volume_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+service_reminder_days_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_SERVICE_REMINDER_SET_DAYS), service_reminder_days_start)],
+    states={
+        SERVICE_REMINDER_DAYS_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, service_reminder_days_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+service_reminder_hours_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_SERVICE_REMINDER_SET_HOURS), service_reminder_hours_start)],
+    states={
+        SERVICE_REMINDER_HOURS_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, service_reminder_hours_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+shop_reset_defaults_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_SHOP_RESET_DEFAULTS), shop_reset_defaults)],
+    states={
+        SHOP_RESET_CONFIRM: [
+            MessageHandler(_exact_filter(ADMIN_RESET_CONFIRM), shop_reset_confirm),
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_reset_confirm),
+        ],
+        SHOP_RESET_PASSWORD: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), shop_settings_back),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, shop_reset_password),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+)
+
+referral_rewards_conv = ConversationHandler(
+    entry_points=[MessageHandler(_exact_filter(ADMIN_REFERRAL_REWARDS), referral_rewards_start)],
+    states={
+        REFERRAL_RULE_SELECT: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, referral_rule_select),
+        ],
+        REFERRAL_RULE_TITLE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), referral_rewards_start),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, referral_rule_title),
+        ],
+        REFERRAL_RULE_QUALIFICATION: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), referral_rewards_start),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, referral_rule_qualification),
+        ],
+        REFERRAL_RULE_COUNT: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), referral_rewards_start),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, referral_rule_count),
+        ],
+        REFERRAL_RULE_REPEAT: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), referral_rewards_start),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, referral_rule_repeat),
+        ],
+        REFERRAL_RULE_REWARD_TYPE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), referral_rewards_start),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, referral_rule_reward_type),
+        ],
+        REFERRAL_RULE_REWARD_VALUE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), referral_rewards_start),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, referral_rule_reward_value),
+        ],
+        REFERRAL_RULE_OPTION: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), referral_rewards_start),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, referral_rule_option),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+    allow_reentry=True,
+)
+
+start_links_conv = ConversationHandler(
+    entry_points=[
+        MessageHandler(_exact_filter(ADMIN_START_LINKS), start_links_menu),
+        MessageHandler(_exact_filter(ADMIN_START_LINK_CREATE), start_link_create_start),
+        MessageHandler(_exact_filter(ADMIN_START_LINK_LIST), start_link_list),
+    ],
+    states={
+        START_LINK_SELECT: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, start_link_select),
+        ],
+        START_LINK_NAME: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), start_links_menu),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, start_link_create_save),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+    allow_reentry=True,
+)
+
+broadcast_conv = ConversationHandler(
+    entry_points=[
+        MessageHandler(_exact_filter(ADMIN_BROADCAST), broadcast_start),
+        CommandHandler("broadcast", broadcast_start),
+    ],
+    states={
+        BROADCAST_MESSAGE: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, broadcast_preview),
+        ],
+        BROADCAST_CONFIRM: [
+            MessageHandler(_exact_filter(CANCEL), cancel),
+            MessageHandler(_exact_filter(ADMIN_BACK), cancel),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, broadcast_confirm),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel), MessageHandler(_exact_filter(CANCEL), cancel)],
+    allow_reentry=True,
+)
+
 admin_handlers = [
     CommandHandler("start", admin_start),
     CommandHandler("admins", list_admins),
@@ -3546,12 +6906,37 @@ admin_handlers = [
     shop_messages_conv,
     shop_buttons_conv,
     shop_plans_conv,
+    provision_panels_conv,
     crypto_search_conv,
     crypto_set_margin_conv,
     crypto_set_usdt_conv,
     crypto_set_ton_conv,
     rial_set_min_conv,
     rial_set_support_conv,
+    rial_set_dest_card_conv,
+    rial_set_dest_holder_conv,
+    rial_set_valid_minutes_conv,
+    rial_set_receipt_bot_conv,
+    rial_set_receipt_admins_conv,
+    trial_set_volume_conv,
+    trial_set_duration_conv,
+    trial_set_panel_conv,
+    trial_set_time_mode_conv,
+    service_reminder_volume_conv,
+    service_reminder_days_conv,
+    service_reminder_hours_conv,
+    shop_reset_defaults_conv,
+    referral_rewards_conv,
+    start_links_conv,
+    broadcast_conv,
+    CallbackQueryHandler(
+        rial_request_decision_callback,
+        pattern=rf"^{RIAL_REQUEST_CALLBACK_PREFIX}:",
+    ),
+    CallbackQueryHandler(
+        start_link_action_callback,
+        pattern=rf"^{START_LINK_CALLBACK_PREFIX}:",
+    ),
     MessageHandler(_exact_filter(ADMIN_CRYPTO), crypto_menu),
     MessageHandler(_exact_filter(ADMIN_CRYPTO_HISTORY), crypto_history),
     MessageHandler(_exact_filter(ADMIN_CRYPTO_RATES), crypto_rates_menu),
@@ -3559,12 +6944,18 @@ admin_handlers = [
     MessageHandler(_exact_filter(ADMIN_RIAL_HISTORY), rial_history),
     MessageHandler(_exact_filter(ADMIN_RIAL_SETTINGS), rial_settings_menu),
     MessageHandler(_exact_filter(ADMIN_RIAL_TOGGLE_PHONE), rial_toggle_phone),
+    MessageHandler(_exact_filter(ADMIN_RIAL_TOGGLE_SOURCE_CARD), rial_toggle_source_card),
+    MessageHandler(_exact_filter(ADMIN_RIAL_TOGGLE_MODE), rial_toggle_mode),
     MessageHandler(_exact_filter(ADMIN_LOGOUT), admin_logout),
     MessageHandler(_exact_filter(ADMIN_ADMINS), admin_management_menu),
     MessageHandler(_exact_filter(ADMIN_REFRESH_ADMINS), list_admins),
     MessageHandler(_exact_filter(ADMIN_SHOP_SETTINGS), shop_settings_menu),
+    MessageHandler(_exact_filter(ADMIN_PROVISION_PANELS), provision_panels_start),
+    MessageHandler(_exact_filter(ADMIN_TRIAL_SETTINGS), trial_settings_menu),
+    MessageHandler(_exact_filter(ADMIN_TRIAL_TOGGLE), trial_toggle),
+    MessageHandler(_exact_filter(ADMIN_SERVICE_REMINDERS), service_reminders_menu),
+    MessageHandler(_exact_filter(ADMIN_SERVICE_REMINDER_TOGGLE), service_reminders_toggle),
     MessageHandler(_exact_filter(ADMIN_TOGGLE_BRANDED_LINKS), toggle_branded_subscription_links),
-    MessageHandler(_exact_filter(ADMIN_SHOP_RESET_DEFAULTS), shop_reset_defaults),
     MessageHandler(
         filters.Regex(
             f"^({re.escape(ADMIN_BACK)}|{re.escape(ADMIN_INVENTORY)}|{re.escape(ADMIN_PRICES)}|"
@@ -3577,7 +6968,10 @@ admin_handlers = [
     MessageHandler(_exact_filter(ADMIN_VIEW_PRICES), view_prices),
     MessageHandler(_exact_filter(ADMIN_VIEW_COUPONS), list_coupons),
     MessageHandler(
-        filters.Regex(f"^({re.escape(REPORT_TODAY)}|{re.escape(REPORT_WEEK)}|{re.escape(REPORT_MONTH)})$"),
+        filters.Regex(
+            f"^({re.escape(REPORT_TODAY)}|{re.escape(REPORT_WEEK)}|{re.escape(REPORT_MONTH)}|"
+            f"{re.escape(REPORT_45_DAYS)}|{re.escape(REPORT_90_DAYS)})$"
+        ),
         sales_report,
     ),
     MessageHandler(_exact_filter(ADMIN_USER_STATS), user_stats),

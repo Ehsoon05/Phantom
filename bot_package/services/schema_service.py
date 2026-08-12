@@ -19,6 +19,10 @@ class SchemaService:
                         "referred_by_user_id": "BIGINT",
                         "referred_at": "DATETIME",
                         "accepted_rules_at": "DATETIME",
+                        "trial_claimed_at": "DATETIME",
+                        "trial_panel_username": "VARCHAR",
+                        "verified_phone_number": "VARCHAR",
+                        "phone_verified_at": "DATETIME",
                     },
                 )
             if "configs" in tables:
@@ -26,8 +30,18 @@ class SchemaService:
                     conn,
                     "configs",
                     {
+                        "shop_plan_id": "INTEGER",
                         "category_key": "VARCHAR DEFAULT 'default' NOT NULL",
                         "public_sub_token": "VARCHAR",
+                        "subscription_device_limit": "INTEGER",
+                        "panel_key": "VARCHAR",
+                        "panel_username": "VARCHAR",
+                        "usage_offset_bytes": "BIGINT DEFAULT 0 NOT NULL",
+                        "display_total_bytes": "BIGINT",
+                        "provision_source": "VARCHAR DEFAULT 'inventory' NOT NULL",
+                        "expired_detected_at": "DATETIME",
+                        "deletion_due_at": "DATETIME",
+                        "panel_deleted_at": "DATETIME",
                     },
                 )
             if "purchases" in tables:
@@ -41,6 +55,19 @@ class SchemaService:
                         "coupon_id": "INTEGER",
                         "coupon_code": "VARCHAR",
                         "service_name": "VARCHAR",
+                        "kind": "VARCHAR DEFAULT 'purchase' NOT NULL",
+                        "provision_source": "VARCHAR DEFAULT 'inventory' NOT NULL",
+                        "renewed_at": "DATETIME",
+                        "renews_purchase_id": "INTEGER",
+                    },
+                )
+            if "service_reminder_logs" in tables:
+                await SchemaService._add_missing_columns(
+                    conn,
+                    "service_reminder_logs",
+                    {
+                        "remaining_percent": "INTEGER",
+                        "remaining_seconds": "INTEGER",
                     },
                 )
             if "shop_messages" in tables:
@@ -48,11 +75,15 @@ class SchemaService:
                     conn,
                     "shop_messages",
                     {
+                        "photo_file_id": "VARCHAR",
                         "premium_emoji_id": "VARCHAR",
                         "premium_emoji_position": "VARCHAR DEFAULT 'none' NOT NULL",
                         "response_button_type": "VARCHAR DEFAULT 'text' NOT NULL",
                         "response_button_text": "VARCHAR",
                         "response_button_url": "VARCHAR",
+                        "response_button_style": "VARCHAR",
+                        "response_button_premium_emoji_id": "VARCHAR",
+                        "response_button_source_id": "INTEGER",
                     },
                 )
             if "shop_buttons" in tables:
@@ -73,9 +104,56 @@ class SchemaService:
                         "price": "INTEGER",
                         "emoji_position": "VARCHAR DEFAULT 'left' NOT NULL",
                         "premium_emoji_position": "VARCHAR DEFAULT 'left' NOT NULL",
+                        "duration_days": "INTEGER DEFAULT 30 NOT NULL",
+                        "provision_volume_gb": "INTEGER",
+                        "provision_duration_days": "INTEGER",
+                        "provision_time_mode": "VARCHAR DEFAULT 'on_hold' NOT NULL",
+                        "subscription_device_limit": "INTEGER DEFAULT 0 NOT NULL",
+                        "show_subscription_configs": "BOOLEAN DEFAULT 1 NOT NULL",
+                        "name_prefix": "VARCHAR",
+                        "provision_mode": "VARCHAR DEFAULT 'inventory' NOT NULL",
+                        "provision_panel_key": "VARCHAR",
+                        "provision_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
+                        "renew_enabled": "BOOLEAN DEFAULT 1 NOT NULL",
                     },
                 )
                 await SchemaService._drop_sqlite_shop_plan_volume_unique(conn)
+            if "shop_plan_categories" in tables:
+                await SchemaService._add_missing_columns(
+                    conn,
+                    "shop_plan_categories",
+                    {
+                        "provision_panel_key": "VARCHAR",
+                        "provision_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
+                    },
+                )
+            if "provision_panels" in tables:
+                await SchemaService._add_missing_columns(
+                    conn,
+                    "provision_panels",
+                    {
+                        "hwid_limit": "INTEGER",
+                    },
+                )
+            if "panel_bridge_assignments" in tables:
+                await SchemaService._add_missing_columns(
+                    conn,
+                    "panel_bridge_assignments",
+                    {
+                        "target_panel_key": "VARCHAR DEFAULT '' NOT NULL",
+                    },
+                )
+            if "configs" in tables and "shop_plans" in tables:
+                await conn.execute(text("""
+                    UPDATE configs
+                    SET shop_plan_id = (
+                        SELECT MIN(shop_plans.id)
+                        FROM shop_plans
+                        WHERE shop_plans.volume_gb = configs.volume_gb
+                          AND shop_plans.category_key = configs.category_key
+                    )
+                    WHERE shop_plan_id IS NULL
+                """))
             if "rial_payment_requests" in tables:
                 await SchemaService._add_missing_columns(
                     conn,
@@ -85,7 +163,43 @@ class SchemaService:
                         "support_handle": "VARCHAR DEFAULT '@PhantomHubsSupport' NOT NULL",
                         "request_text": "TEXT DEFAULT '' NOT NULL",
                         "status": "VARCHAR DEFAULT 'pending' NOT NULL",
+                        "payment_mode": "VARCHAR DEFAULT 'receipt_bot' NOT NULL",
+                        "destination_card_number": "VARCHAR",
+                        "destination_card_holder": "VARCHAR",
+                        "expires_at": "DATETIME",
+                        "receipt_status": "VARCHAR DEFAULT 'awaiting' NOT NULL",
+                        "receipt_text": "TEXT",
+                        "receipt_chat_id": "BIGINT",
+                        "receipt_message_id": "INTEGER",
+                        "card_message_chat_id": "BIGINT",
+                        "card_message_id": "INTEGER",
+                        "admin_message_ids_json": "TEXT",
+                        "rejection_reason": "TEXT",
+                        "decided_by": "BIGINT",
                         "updated_at": "DATETIME",
+                    },
+                )
+            if "hooshpay_invoices" in tables:
+                await SchemaService._add_missing_columns(
+                    conn,
+                    "hooshpay_invoices",
+                    {
+                        "uid": "VARCHAR",
+                        "payable_amount": "INTEGER",
+                        "merchant_credit": "INTEGER",
+                        "fee_amount": "INTEGER",
+                        "fee_percent": "INTEGER",
+                        "fee_mode": "VARCHAR DEFAULT 'split' NOT NULL",
+                        "payment_url": "TEXT",
+                        "card_number": "VARCHAR",
+                        "card_holder": "VARCHAR",
+                        "bank_name": "VARCHAR",
+                        "tracking_code": "VARCHAR",
+                        "paid_at": "DATETIME",
+                        "raw_payload": "TEXT",
+                        "updated_at": "DATETIME",
+                        "expires_at": "DATETIME",
+                        "credited_at": "DATETIME",
                     },
                 )
 

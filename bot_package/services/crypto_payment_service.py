@@ -24,8 +24,8 @@ logger = logging.getLogger(__name__)
 # USDC is priced off the USDT market (both peg ~$1), so it needs no separate rate.
 SUPPORTED_COINS: dict[str, dict] = {
     "USDT_TRC20": {"coin": "USDT", "network": "TRC20", "rate_coin": "USDT", "label": "USDT (TRON · TRC20)"},
-    "TON": {"coin": "TON", "network": "TON", "rate_coin": "TON", "label": "TON"},
-    "USDT_TON": {"coin": "USDT", "network": "TON", "rate_coin": "USDT", "label": "USDT (TON)"},
+    "TON": {"coin": "TON", "network": "TON", "rate_coin": "TON", "label": "گرام(تون)"},
+    "USDT_TON": {"coin": "USDT", "network": "TON", "rate_coin": "USDT", "label": "USDT (گرام(تون))"},
     "USDC_BEP20": {"coin": "USDC", "network": "BEP20", "rate_coin": "USDT", "label": "USDC (BNB Smart Chain · BEP20)"},
 }
 
@@ -97,11 +97,20 @@ class CryptoPaymentService:
             )
         ).scalars().all()
         active = 0
+        same_coin_pending = False
         for old in existing:
             if old.expires_at and _as_aware(old.expires_at) < now:
                 old.status = "expired"
             else:
                 active += 1
+                if old.coin == spec["coin"]:
+                    same_coin_pending = True
+        if same_coin_pending:
+            await session.commit()  # persist the expirations we just made
+            raise CryptoPaymentError(
+                f"You already have a pending {spec['coin']} payment. "
+                "Cancel it before starting a new one."
+            )
         if active >= MAX_PENDING_PER_USER:
             await session.commit()  # persist the expirations we just made
             raise CryptoPaymentError("Too many open invoices.")
@@ -201,17 +210,22 @@ class CryptoPaymentService:
         invoice.status = "credited" if received >= threshold else "underpaid"
 
         user.wallet_balance = (user.wallet_balance or 0) + credited_toman
-        session.add(
-            Transaction(
-                user_id=invoice.user_id,
-                amount=credited_toman,
-                type="crypto_charge",
-                description=(
-                    f"شارژ کریپتو {invoice.coin}/{invoice.network} "
-                    f"({received} {invoice.coin}) tx:{invoice.tx_hash}"
-                ),
-            )
+        topup_transaction = Transaction(
+            user_id=invoice.user_id,
+            amount=credited_toman,
+            type="crypto_charge",
+            description=(
+                f"شارژ کریپتو {invoice.coin}/{invoice.network} "
+                f"({received} {invoice.coin}) tx:{invoice.tx_hash}"
+            ),
         )
+        session.add(topup_transaction)
+        await session.flush()
+        from .referral_service import ReferralService
+        from .subscription_link_service import SubscriptionLinkService
+
+        rewards = await ReferralService.evaluate_referred_user(session, invoice.user_id)
+        commission = await ReferralService.grant_topup_commission(session, topup_transaction)
         try:
             await session.commit()
         except IntegrityError:
@@ -219,6 +233,10 @@ class CryptoPaymentService:
             await session.rollback()
             logger.info("Crypto credit skipped (duplicate tx) for invoice %s", invoice.id)
             return 0
+        for reward in rewards:
+            if reward["config"] is not None:
+                await SubscriptionLinkService.sync_to_panel(reward["config"], reward["service_name"])
+        await ReferralService.notify_commission(commission)
         return credited_toman
 
     @staticmethod
@@ -253,8 +271,18 @@ class CryptoPaymentService:
                     continue
                 amount = await CryptoPaymentService.credit_from_payment(session, invoice, payment)
                 if amount > 0:
+                    wallet_balance = (
+                        await session.execute(
+                            select(User.wallet_balance).where(User.telegram_id == invoice.user_id)
+                        )
+                    ).scalar_one()
                     credited.append(
-                        {"user_id": invoice.user_id, "invoice_id": invoice.id, "credited_toman": amount}
+                        {
+                            "user_id": invoice.user_id,
+                            "invoice_id": invoice.id,
+                            "credited_toman": amount,
+                            "wallet_balance": int(wallet_balance or 0),
+                        }
                     )
                     matched = True
                     break

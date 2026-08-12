@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, relationship
 from datetime import datetime, timezone
 
@@ -17,6 +17,10 @@ class User(Base):
     referred_by_user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=True)
     referred_at = Column(DateTime, nullable=True)
     accepted_rules_at = Column(DateTime, nullable=True)
+    trial_claimed_at = Column(DateTime, nullable=True)
+    trial_panel_username = Column(String, nullable=True)
+    verified_phone_number = Column(String, nullable=True)
+    phone_verified_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     purchases = relationship("Purchase", back_populates="user")
     referrals = relationship(
@@ -28,13 +32,23 @@ class User(Base):
 class Config(Base):
     __tablename__ = "configs"
     id = Column(Integer, primary_key=True)
+    shop_plan_id = Column(Integer, ForeignKey("shop_plans.id"), nullable=True, index=True)
     volume_gb = Column(Integer, nullable=False)
     category_key = Column(String, nullable=False, default="default")
     sub_link = Column(String, nullable=False, unique=True)
     public_sub_token = Column(String, nullable=True, unique=True)
+    subscription_device_limit = Column(Integer, nullable=True)
+    panel_key = Column(String, nullable=True)
+    panel_username = Column(String, nullable=True)
+    usage_offset_bytes = Column(BigInteger, nullable=False, default=0)
+    display_total_bytes = Column(BigInteger, nullable=True)
+    provision_source = Column(String, nullable=False, default="inventory")
     is_sold = Column(Boolean, default=False)
     sold_to_user_id = Column(BigInteger, nullable=True)
     sold_at = Column(DateTime, nullable=True)
+    expired_detected_at = Column(DateTime, nullable=True)
+    deletion_due_at = Column(DateTime, nullable=True)
+    panel_deleted_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     purchases = relationship("Purchase", back_populates="config")
 
@@ -51,10 +65,32 @@ class Purchase(Base):
     coupon_id = Column(Integer, ForeignKey("coupons.id"), nullable=True)
     coupon_code = Column(String, nullable=True)
     service_name = Column(String, nullable=True)
+    kind = Column(String, nullable=False, default="purchase")
+    provision_source = Column(String, nullable=False, default="inventory")
+    renewed_at = Column(DateTime, nullable=True)
+    renews_purchase_id = Column(Integer, ForeignKey("purchases.id"), nullable=True)
     purchased_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     user = relationship("User", back_populates="purchases")
     config = relationship("Config", back_populates="purchases")
     coupon = relationship("Coupon", back_populates="purchases")
+
+
+class ServiceReminderLog(Base):
+    __tablename__ = "service_reminder_logs"
+    __table_args__ = (
+        UniqueConstraint("purchase_id", "rule_key", name="uq_service_reminder_purchase_rule"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    purchase_id = Column(Integer, ForeignKey("purchases.id"), nullable=False)
+    config_id = Column(Integer, ForeignKey("configs.id"), nullable=False)
+    user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
+    rule_key = Column(String, nullable=False)
+    remaining_percent = Column(Integer, nullable=True)
+    remaining_seconds = Column(Integer, nullable=True)
+    sent_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    purchase = relationship("Purchase")
 
 class Transaction(Base):
     __tablename__ = "transactions"
@@ -64,6 +100,77 @@ class Transaction(Base):
     type = Column(String, nullable=False)
     description = Column(String, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ReferralRewardRule(Base):
+    __tablename__ = "referral_reward_rules"
+
+    id = Column(Integer, primary_key=True)
+    title = Column(String, nullable=False)
+    qualification_type = Column(String, nullable=False)
+    required_count = Column(Integer, nullable=False, default=1)
+    is_repeatable = Column(Boolean, nullable=False, default=False)
+    reward_type = Column(String, nullable=False)
+    wallet_amount = Column(Integer, nullable=True)
+    shop_plan_id = Column(Integer, ForeignKey("shop_plans.id"), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_by = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    shop_plan = relationship("ShopPlan")
+    grants = relationship("ReferralRewardGrant", back_populates="rule", cascade="all, delete-orphan")
+
+
+class ReferralRewardGrant(Base):
+    __tablename__ = "referral_reward_grants"
+    __table_args__ = (
+        UniqueConstraint("rule_id", "referrer_user_id", "milestone_count", name="uq_referral_reward_grant"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    rule_id = Column(Integer, ForeignKey("referral_reward_rules.id"), nullable=False)
+    referrer_user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
+    milestone_count = Column(Integer, nullable=False)
+    qualified_count = Column(Integer, nullable=False)
+    reward_type = Column(String, nullable=False)
+    wallet_amount = Column(Integer, nullable=True)
+    config_id = Column(Integer, ForeignKey("configs.id"), nullable=True)
+    purchase_id = Column(Integer, ForeignKey("purchases.id"), nullable=True)
+    granted_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    rule = relationship("ReferralRewardRule", back_populates="grants")
+
+
+class StartLink(Base):
+    __tablename__ = "start_links"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    code = Column(String, unique=True, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_by = Column(BigInteger, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    visits = relationship("StartLinkVisit", back_populates="link", cascade="all, delete-orphan")
+
+
+class StartLinkVisit(Base):
+    __tablename__ = "start_link_visits"
+    __table_args__ = (
+        UniqueConstraint("start_link_id", "user_id", name="uq_start_link_visit_user"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    start_link_id = Column(Integer, ForeignKey("start_links.id"), nullable=False)
+    user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
+    first_seen_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_seen_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    hit_count = Column(Integer, nullable=False, default=1)
+
+    link = relationship("StartLink", back_populates="visits")
+    user = relationship("User")
 
 class Price(Base):
     __tablename__ = "prices"
@@ -137,12 +244,32 @@ class ShopMessage(Base):
     key = Column(String, unique=True, nullable=False)
     text = Column(Text, nullable=False)
     parse_mode = Column(String, nullable=True, default="Markdown")
+    photo_file_id = Column(String, nullable=True)
     premium_emoji_id = Column(String, nullable=True)
     premium_emoji_position = Column(String, nullable=False, default="none")
     response_button_type = Column(String, nullable=False, default="text")
     response_button_text = Column(String, nullable=True)
     response_button_url = Column(String, nullable=True)
+    response_button_style = Column(String, nullable=True)
+    response_button_premium_emoji_id = Column(String, nullable=True)
+    response_button_source_id = Column(Integer, nullable=True)
     is_active = Column(Boolean, default=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ShopMessageButton(Base):
+    __tablename__ = "shop_message_buttons"
+    id = Column(Integer, primary_key=True)
+    message_key = Column(String, nullable=False, index=True)
+    button_type = Column(String, nullable=False, default="inline_url")
+    text = Column(String, nullable=False)
+    payload = Column(String, nullable=True)
+    style = Column(String, nullable=True)
+    premium_emoji_id = Column(String, nullable=True)
+    source_button_id = Column(Integer, nullable=True)
+    row = Column(Integer, nullable=False, default=0)
+    col = Column(Integer, nullable=False, default=0)
+    is_enabled = Column(Boolean, default=True)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -176,6 +303,17 @@ class ShopPlan(Base):
     emoji_position = Column(String, nullable=False, default="left")
     style = Column(String, nullable=True, default="success")
     display_order = Column(Integer, nullable=False, default=0)
+    duration_days = Column(Integer, nullable=False, default=30)
+    provision_volume_gb = Column(Integer, nullable=True)
+    provision_duration_days = Column(Integer, nullable=True)
+    provision_time_mode = Column(String, nullable=False, default="on_hold")
+    subscription_device_limit = Column(Integer, nullable=False, default=0)
+    show_subscription_configs = Column(Boolean, nullable=False, default=True)
+    name_prefix = Column(String, nullable=True)
+    provision_mode = Column(String, nullable=False, default="inventory")
+    provision_panel_key = Column(String, nullable=True)
+    provision_enabled = Column(Boolean, nullable=False, default=False)
+    renew_enabled = Column(Boolean, nullable=False, default=True)
     is_active = Column(Boolean, default=True)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -189,6 +327,8 @@ class ShopPlanCategory(Base):
     premium_emoji_id = Column(String, nullable=True)
     emoji_position = Column(String, nullable=False, default="left")
     style = Column(String, nullable=True, default="primary")
+    provision_panel_key = Column(String, nullable=True)
+    provision_enabled = Column(Boolean, nullable=False, default=False)
     display_order = Column(Integer, nullable=False, default=0)
     is_active = Column(Boolean, default=True)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -200,6 +340,67 @@ class BotSetting(Base):
     id = Column(Integer, primary_key=True)
     key = Column(String, unique=True, nullable=False)
     value = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ProvisionPanel(Base):
+    __tablename__ = "provision_panels"
+
+    id = Column(Integer, primary_key=True)
+    key = Column(String, unique=True, nullable=False)
+    title = Column(String, nullable=False)
+    panel_type = Column(String, nullable=False, default="marzban")
+    base_url = Column(String, nullable=False)
+    username = Column(String, nullable=False)
+    password = Column(String, nullable=False)
+    group_ids = Column(Text, nullable=True)
+    inbounds_json = Column(Text, nullable=True)
+    protocols_json = Column(Text, nullable=True)
+    hwid_limit = Column(Integer, nullable=True)
+    is_enabled = Column(Boolean, nullable=False, default=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class PanelBridgeRule(Base):
+    __tablename__ = "panel_bridge_rules"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    source_panel_keys_json = Column(Text, nullable=False, default="[]")
+    source_category_keys_json = Column(Text, nullable=False, default="[]")
+    source_plan_ids_json = Column(Text, nullable=False, default="[]")
+    target_panel_key = Column(String, nullable=False)
+    target_inbounds_json = Column(Text, nullable=False, default="{}")
+    target_ports_json = Column(Text, nullable=False, default="[]")
+    is_enabled = Column(Boolean, nullable=False, default=True)
+    cleanup_on_delete = Column(Boolean, nullable=False, default=True)
+    sync_status = Column(String, nullable=False, default="idle")
+    total_matches = Column(Integer, nullable=False, default=0)
+    synced_count = Column(Integer, nullable=False, default=0)
+    skipped_count = Column(Integer, nullable=False, default=0)
+    failed_count = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text, nullable=True)
+    last_synced_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class PanelBridgeAssignment(Base):
+    __tablename__ = "panel_bridge_assignments"
+    __table_args__ = (
+        UniqueConstraint("rule_id", "config_id", name="uq_panel_bridge_rule_config"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    rule_id = Column(Integer, ForeignKey("panel_bridge_rules.id"), nullable=False, index=True)
+    config_id = Column(Integer, ForeignKey("configs.id"), nullable=False, index=True)
+    target_panel_key = Column(String, nullable=False)
+    target_username = Column(String, nullable=False)
+    target_sub_link = Column(Text, nullable=False)
+    target_created = Column(Boolean, nullable=False, default=True)
+    status = Column(String, nullable=False, default="active")
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -215,8 +416,50 @@ class RialPaymentRequest(Base):
     support_handle = Column(String, nullable=False)
     request_text = Column(Text, nullable=False)
     status = Column(String, nullable=False, default="pending")
+    payment_mode = Column(String, nullable=False, default="receipt_bot")
+    destination_card_number = Column(String, nullable=True)
+    destination_card_holder = Column(String, nullable=True)
+    expires_at = Column(DateTime, nullable=True)
+    receipt_status = Column(String, nullable=False, default="awaiting")
+    receipt_text = Column(Text, nullable=True)
+    receipt_chat_id = Column(BigInteger, nullable=True)
+    receipt_message_id = Column(Integer, nullable=True)
+    card_message_chat_id = Column(BigInteger, nullable=True)
+    card_message_id = Column(Integer, nullable=True)
+    admin_message_ids_json = Column(Text, nullable=True)
+    rejection_reason = Column(Text, nullable=True)
+    decided_by = Column(BigInteger, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User")
+
+
+class HooshPayInvoice(Base):
+    __tablename__ = "hooshpay_invoices"
+
+    id = Column(Integer, primary_key=True)
+    uid = Column(String, unique=True, nullable=True)
+    order_id = Column(String, unique=True, nullable=False)
+    user_id = Column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
+    amount_toman = Column(Integer, nullable=False)
+    payable_amount = Column(Integer, nullable=True)
+    merchant_credit = Column(Integer, nullable=True)
+    fee_amount = Column(Integer, nullable=True)
+    fee_percent = Column(Integer, nullable=True)
+    fee_mode = Column(String, nullable=False, default="split")
+    payment_url = Column(Text, nullable=True)
+    card_number = Column(String, nullable=True)
+    card_holder = Column(String, nullable=True)
+    bank_name = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="pending")
+    tracking_code = Column(String, nullable=True)
+    paid_at = Column(DateTime, nullable=True)
+    raw_payload = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime, nullable=True)
+    credited_at = Column(DateTime, nullable=True)
 
     user = relationship("User")
 

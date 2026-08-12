@@ -13,6 +13,7 @@ from ..config_loader import BotConfig
 from ..database import async_session
 from .crypto_payment_service import CryptoPaymentService
 from .rate_service import RateService
+from .shop_customization_service import ShopCustomizationService
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +38,19 @@ async def poll_payments_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     for invoice in credited_invoices:
         try:
             toman = invoice["credited_toman"]
+            async with async_session() as session:
+                message = await ShopCustomizationService.get_message(
+                    session,
+                    "wallet_charge_notification",
+                    amount=f"{toman:,}",
+                    wallet_balance=f"{invoice['wallet_balance']:,}",
+                )
+                keyboard = await ShopCustomizationService.main_menu_keyboard(session)
             await context.bot.send_message(
                 chat_id=invoice["user_id"],
-                text=(
-                    "✅ پرداخت شما دریافت شد!\n"
-                    f"مبلغ {toman:,} تومان به کیف پول شما اضافه شد."
-                ),
+                text=message,
+                parse_mode=getattr(message, "parse_mode", None),
+                reply_markup=keyboard,
             )
         except Exception as exc:  # noqa: BLE001
             logger.info("Could not notify user %s: %s", invoice.get("user_id"), exc)

@@ -1,0 +1,4 @@
+-r ../bot_package/requirements.txt
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.32,<1.0
+PyJWT>=2.9,<3.0
