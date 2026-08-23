@@ -23,6 +23,13 @@ class ProvisioningError(RuntimeError):
 
 MEXICO_PANEL_KEYS = {"mexico_hajmi", "mexico_namahdod"}
 MEXICO_UNLIMITED_DATA_LIMIT_BYTES = 300 * 1024**3
+UPSTREAM_HOST_ALIASES = {
+    "my.litegames.ir:8000": "my.mexicosenter.ir:8000",
+    "my.litegames.ir": "my.mexicosenter.ir:8000",
+    "panel.mexicosenter.ir:8000": "my.mexicosenter.ir:8000",
+    "panel.mexicosenter.ir": "my.mexicosenter.ir:8000",
+    "my.mexicosenter.ir": "my.mexicosenter.ir:8000",
+}
 
 
 @dataclass(frozen=True)
@@ -161,13 +168,21 @@ def _subscription_url(base_url: str, payload: dict[str, Any]) -> str:
         raise ProvisioningError("پنل لینک اشتراک برنگرداند.")
     parsed = urlparse(subscription_url)
     if parsed.scheme and parsed.netloc:
+        replacement_host = UPSTREAM_HOST_ALIASES.get(parsed.netloc.lower())
+        if replacement_host:
+            return parsed._replace(scheme=parsed.scheme or "https", netloc=replacement_host).geturl()
         hostname = (parsed.hostname or "").lower()
         if hostname not in {"localhost", "127.0.0.1", "0.0.0.0"}:
             return subscription_url
         subscription_url = urlunparse(
             ("", "", parsed.path, parsed.params, parsed.query, parsed.fragment)
         )
-    return urljoin(f"{base_url.rstrip('/')}/", subscription_url)
+    joined = urljoin(f"{base_url.rstrip('/')}/", subscription_url)
+    parsed = urlparse(joined)
+    replacement_host = UPSTREAM_HOST_ALIASES.get(parsed.netloc.lower())
+    if replacement_host:
+        return parsed._replace(scheme=parsed.scheme or "https", netloc=replacement_host).geturl()
+    return joined
 
 
 def username_from_subscription_url(url: str) -> str | None:
@@ -496,7 +511,7 @@ class ProvisioningService:
                     for item in items
                     if isinstance(item, dict) and item.get("tag")
                 ]
-                if tags:
+                if tags or isinstance(items, list):
                     inbounds[protocol] = tags
         elif isinstance(payload, list):
             tags = [str(item).strip() for item in payload if str(item).strip()]
