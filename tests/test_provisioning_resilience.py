@@ -96,14 +96,14 @@ class ProvisioningResilienceTests(unittest.IsolatedAsyncioTestCase):
     def test_subscription_url_rewrites_legacy_mexico_hosts(self) -> None:
         self.assertEqual(
             _subscription_url(
-                "https://my.mexicosenter.ir:8000",
+                "https://my.litegames.ir:8000",
                 {
                     "subscription_url": (
-                        "https://my.litegames.ir:8000/sub/djMsNjQ5MjgsMTc4NzQ5NjQ2Ng.example"
+                        "https://my.mexicosenter.ir:8000/sub/djMsNjQ5MjgsMTc4NzQ5NjQ2Ng.example"
                     )
                 },
             ),
-            "https://my.mexicosenter.ir:8000/sub/djMsNjQ5MjgsMTc4NzQ5NjQ2Ng.example",
+            "https://my.litegames.ir:8000/sub/djMsNjQ5MjgsMTc4NzQ5NjQ2Ng.example",
         )
 
 

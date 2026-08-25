@@ -24,11 +24,12 @@ class ProvisioningError(RuntimeError):
 MEXICO_PANEL_KEYS = {"mexico_hajmi", "mexico_namahdod"}
 MEXICO_UNLIMITED_DATA_LIMIT_BYTES = 300 * 1024**3
 UPSTREAM_HOST_ALIASES = {
-    "my.litegames.ir:8000": "my.mexicosenter.ir:8000",
-    "my.litegames.ir": "my.mexicosenter.ir:8000",
-    "panel.mexicosenter.ir:8000": "my.mexicosenter.ir:8000",
-    "panel.mexicosenter.ir": "my.mexicosenter.ir:8000",
-    "my.mexicosenter.ir": "my.mexicosenter.ir:8000",
+    "my.litegames.ir:8000": "my.litegames.ir:8000",
+    "my.litegames.ir": "my.litegames.ir:8000",
+    "panel.mexicosenter.ir:8000": "my.litegames.ir:8000",
+    "panel.mexicosenter.ir": "my.litegames.ir:8000",
+    "my.mexicosenter.ir:8000": "my.litegames.ir:8000",
+    "my.mexicosenter.ir": "my.litegames.ir:8000",
 }
 
 
