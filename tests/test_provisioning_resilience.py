@@ -105,6 +105,17 @@ class ProvisioningResilienceTests(unittest.IsolatedAsyncioTestCase):
             ),
             "https://my.litegames.ir:8000/sub/djMsNjQ5MjgsMTc4NzQ5NjQ2Ng.example",
         )
+        self.assertEqual(
+            _subscription_url(
+                "https://my.litegames.ir:8000",
+                {
+                    "subscription_url": (
+                        "https://my.api.novexgroup.ir:8000/sub/djMsNjQ5MjgsMTc4NzQ5NjQ2Ng.example"
+                    )
+                },
+            ),
+            "https://my.litegames.ir:8000/sub/djMsNjQ5MjgsMTc4NzQ5NjQ2Ng.example",
+        )
 
 
 if __name__ == "__main__":
