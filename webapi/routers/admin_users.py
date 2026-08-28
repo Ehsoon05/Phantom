@@ -24,6 +24,8 @@ def _user_out(user: User) -> AdminUserOut:
         wallet_balance=user.wallet_balance or 0,
         is_blocked=user.is_blocked,
         referral_code=user.referral_code,
+        trial_claimed=bool(user.trial_claimed_at or user.trial_panel_username),
+        trial_panel_username=user.trial_panel_username,
         created_at=user.created_at,
     )
 
@@ -332,4 +334,22 @@ async def toggle_block(
         raise HTTPException(status_code=404, detail="User not found")
     user.is_blocked = not user.is_blocked
     await session.commit()
+    return _user_out(user)
+
+
+@router.post("/{telegram_id}/trial/reset", response_model=AdminUserOut)
+async def reset_trial_access(
+    telegram_id: int,
+    session: AsyncSession = Depends(get_session),
+    _admin: Admin = Depends(require_permission("users")),
+):
+    user = (
+        await session.execute(select(User).where(User.telegram_id == telegram_id))
+    ).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.trial_claimed_at = None
+    user.trial_panel_username = None
+    await session.commit()
+    await session.refresh(user)
     return _user_out(user)

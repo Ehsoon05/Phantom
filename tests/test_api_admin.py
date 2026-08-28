@@ -2,6 +2,7 @@
 
 import pytest
 import pytest_asyncio
+from datetime import datetime, timezone
 
 from tests import _api_test_env  # noqa: F401  (must precede api/bot imports)
 
@@ -143,6 +144,38 @@ async def test_panel_wallet_charge_notifies_user(client, monkeypatch):
             "wallet_balance": 35_000,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_admin_can_reset_user_trial_access(client, monkeypatch):
+    monkeypatch.setattr(BotConfig, "ADMIN_PASSWORD", "testpass", raising=False)
+    async with async_session() as session:
+        session.add(
+            User(
+                telegram_id=99002,
+                first_name="Trial",
+                wallet_balance=0,
+                trial_claimed_at=datetime.now(timezone.utc),
+                trial_panel_username="PhantomHubs_test_99002",
+            )
+        )
+        await session.commit()
+
+    res = await _login(client, 9001)
+    headers = {"Authorization": f"Bearer {res.json()['access_token']}"}
+    reset = await client.post("/api/v1/admin/users/99002/trial/reset", headers=headers)
+
+    assert reset.status_code == 200
+    payload = reset.json()
+    assert payload["trial_claimed"] is False
+    assert payload["trial_panel_username"] is None
+
+    async with async_session() as session:
+        user = (
+            await session.execute(select(User).where(User.telegram_id == 99002))
+        ).scalar_one()
+        assert user.trial_claimed_at is None
+        assert user.trial_panel_username is None
 
 
 @pytest.mark.asyncio

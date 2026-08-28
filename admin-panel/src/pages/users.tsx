@@ -11,6 +11,7 @@ import {
   chargeUser,
   formatToman,
   getUsers,
+  resetUserTrialAccess,
   setUserBalance,
   toggleBlockUser,
   type AdminUser,
@@ -184,6 +185,7 @@ function UserRow({ user }: { user: AdminUser }) {
   const charge = useMutation({ mutationFn: (a: number) => chargeUser(user.telegram_id, a), onSuccess: invalidate });
   const setBal = useMutation({ mutationFn: (b: number) => setUserBalance(user.telegram_id, b), onSuccess: invalidate });
   const block = useMutation({ mutationFn: () => toggleBlockUser(user.telegram_id), onSuccess: invalidate });
+  const resetTrial = useMutation({ mutationFn: () => resetUserTrialAccess(user.telegram_id), onSuccess: invalidate });
 
   return (
     <Card>
@@ -211,8 +213,16 @@ function UserRow({ user }: { user: AdminUser }) {
                 </span>
               )}
               {user.is_blocked && <Badge variant="destructive">مسدود</Badge>}
+              <Badge variant={user.trial_claimed ? "secondary" : "outline"}>
+                {user.trial_claimed ? "تست گرفته" : "تست آزاد"}
+              </Badge>
             </div>
             <p className="text-xs text-muted-foreground" dir="ltr">ID: {user.telegram_id}</p>
+            {user.trial_panel_username && (
+              <p className="text-xs text-muted-foreground" dir="ltr">
+                Trial: {user.trial_panel_username}
+              </p>
+            )}
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <CalendarClock className="size-3.5" />
               شروع ربات: <span dir="ltr">{formatStartDate(user.created_at)}</span>
@@ -223,6 +233,16 @@ function UserRow({ user }: { user: AdminUser }) {
             <Button size="sm" variant="outline" onClick={() => { const v = prompt("مبلغ تغییر موجودی (مثبت=شارژ، منفی=کسر):"); const a = parseInt((v ?? "").replace(/,/g, ""), 10); if (!Number.isNaN(a) && a !== 0) charge.mutate(a); }}>افزایش/کسر</Button>
             <Button size="sm" variant="outline" onClick={() => { const v = prompt("موجودی جدید:", String(user.wallet_balance)); const b = parseInt(v ?? "", 10); if (!Number.isNaN(b) && b >= 0) setBal.mutate(b); }}>تنظیم</Button>
             <Button size="sm" variant={user.is_blocked ? "secondary" : "destructive"} onClick={() => { if (confirm(user.is_blocked ? "رفع مسدودیت؟" : "مسدود کردن؟")) block.mutate(); }}>{user.is_blocked ? "رفع مسدودی" : "مسدود"}</Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={resetTrial.isPending}
+              onClick={() => {
+                if (confirm("دسترسی تست رایگان این کاربر ریست شود؟ بعد از این کار کاربر می‌تواند دوباره تست بگیرد.")) resetTrial.mutate();
+              }}
+            >
+              ریست تست رایگان
+            </Button>
             <Button size="sm" variant="ghost" onClick={() => setOpen((o) => !o)}>{open ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />} خریدها</Button>
           </div>
         </div>

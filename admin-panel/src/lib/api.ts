@@ -151,6 +151,8 @@ export interface AdminUser {
   wallet_balance: number;
   is_blocked: boolean;
   referral_code: string | null;
+  trial_claimed: boolean;
+  trial_panel_username: string | null;
   created_at: string | null;
 }
 
@@ -234,6 +236,8 @@ export const setUserBalance = (telegramId: number, balance: number) =>
   });
 export const toggleBlockUser = (telegramId: number) =>
   api<AdminUser>(`/admin/users/${telegramId}/block`, { method: "POST" });
+export const resetUserTrialAccess = (telegramId: number) =>
+  api<AdminUser>(`/admin/users/${telegramId}/trial/reset`, { method: "POST" });
 export const getRialRequests = (status = "pending") =>
   api<RialRequest[]>(`/admin/payments/rial?status=${status}`);
 export const decideRial = (id: number, approve: boolean, rejectionReason?: string) =>

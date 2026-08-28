@@ -204,6 +204,8 @@ class AdminUserOut(BaseModel):
     wallet_balance: int
     is_blocked: bool
     referral_code: str | None
+    trial_claimed: bool
+    trial_panel_username: str | None
     created_at: datetime | None
 
 
