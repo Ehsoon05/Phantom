@@ -586,6 +586,19 @@ class ProvisioningService:
                             "tls": str(item.get("tls") or ""),
                         }
                     )
+        elif isinstance(payload, list):
+            for tag in payload:
+                tag = str(tag).strip()
+                if tag:
+                    options.append(
+                        {
+                            "protocol": "vless",
+                            "tag": tag,
+                            "port": 0,
+                            "network": "",
+                            "tls": "",
+                        }
+                    )
         return options
 
     @staticmethod

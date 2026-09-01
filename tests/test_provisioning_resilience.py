@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+from contextlib import asynccontextmanager
+from unittest.mock import patch
 
 import httpx
 
@@ -22,6 +24,12 @@ class _StaticClient:
 
     async def post(self, *_args, **_kwargs) -> httpx.Response:
         return self.response
+
+
+class _InboundListClient:
+    async def get(self, *_args, **_kwargs) -> httpx.Response:
+        request = httpx.Request("GET", "https://public-panel.example/api/inbounds")
+        return httpx.Response(200, request=request, json=["FASTLY WS", "Reality"])
 
 
 def _panel() -> ProvisionPanel:
@@ -79,6 +87,22 @@ class ProvisioningResilienceTests(unittest.IsolatedAsyncioTestCase):
         headers = _panel_http_headers(_panel())
         self.assertIn("Mozilla/5.0", headers["User-Agent"])
         self.assertIn("application/json", headers["Accept"])
+
+    async def test_fetch_inbound_options_accepts_legacy_list_shape(self) -> None:
+        @asynccontextmanager
+        async def client_context(_panel):
+            yield _InboundListClient(), "token"
+
+        with patch.object(ProvisioningService, "_api_client", client_context):
+            options = await ProvisioningService.fetch_inbound_options(_panel())
+
+        self.assertEqual(
+            options,
+            [
+                {"protocol": "vless", "tag": "FASTLY WS", "port": 0, "network": "", "tls": ""},
+                {"protocol": "vless", "tag": "Reality", "port": 0, "network": "", "tls": ""},
+            ],
+        )
 
     def test_subscription_url_always_uses_public_panel_base(self) -> None:
         self.assertEqual(
