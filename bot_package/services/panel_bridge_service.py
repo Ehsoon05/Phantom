@@ -825,6 +825,8 @@ class PanelBridgeService:
                 rule = await session.get(PanelBridgeRule, rule_id)
                 if not rule:
                     continue
+                if rule.sync_status in {"queued", "running", "cleaning"}:
+                    continue
                 # Immediate reconciliation can fail transiently after a purchase
                 # or an inventory assignment. Retry every unassigned sold config,
                 # regardless of how it entered the system.
@@ -937,7 +939,10 @@ class PanelBridgeService:
                 return
             rules = (
                 await session.execute(
-                    select(PanelBridgeRule).where(PanelBridgeRule.is_enabled.is_(True))
+                    select(PanelBridgeRule).where(
+                        PanelBridgeRule.is_enabled.is_(True),
+                        PanelBridgeRule.sync_status.not_in({"queued", "running", "cleaning"}),
+                    )
                 )
             ).scalars().all()
             rule_ids = [rule.id for rule in rules if _rule_matches(rule, config)]
