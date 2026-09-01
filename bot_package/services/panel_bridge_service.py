@@ -609,7 +609,11 @@ class PanelBridgeService:
             }
             for assignment, rule in rows
         ]
-        if not await SubscriptionLinkService.sync_supplements(token, supplements):
+        if not await SubscriptionLinkService.sync_supplements(
+            token,
+            supplements,
+            info_proxies_enabled=True if supplements else None,
+        ):
             raise ProvisioningError("افزودن منبع کمکی به پنل ساب انجام نشد.")
 
     @staticmethod

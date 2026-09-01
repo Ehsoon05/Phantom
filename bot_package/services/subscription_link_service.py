@@ -216,15 +216,23 @@ class SubscriptionLinkService:
             logger.warning("Failed to sync subscription panel settings", exc_info=True)
 
     @staticmethod
-    async def sync_supplements(token: str, supplements: list[dict]) -> bool:
+    async def sync_supplements(
+        token: str,
+        supplements: list[dict],
+        *,
+        info_proxies_enabled: bool | None = None,
+    ) -> bool:
         url = SubscriptionLinkService._internal_config_url(token, "supplements")
         if not url:
             return False
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
+                payload = {"supplements": supplements}
+                if info_proxies_enabled is not None:
+                    payload["info_proxies_enabled"] = bool(info_proxies_enabled)
                 response = await client.put(
                     url,
-                    json={"supplements": supplements},
+                    json=payload,
                     headers={"Authorization": f"Bearer {BotConfig.SUBSCRIPTION_PANEL_SYNC_TOKEN}"},
                 )
                 response.raise_for_status()
