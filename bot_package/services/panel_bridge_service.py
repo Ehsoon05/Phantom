@@ -783,7 +783,9 @@ class PanelBridgeService:
         for config_id in stale_ids:
             await PanelBridgeService.remove_assignment(rule_id, config_id)
 
-        semaphore = asyncio.Semaphore(4)
+        # The production deployment uses SQLite, so bridge writes must stay
+        # serialized to avoid "database is locked" during bulk syncs.
+        semaphore = asyncio.Semaphore(1)
 
         async def reconcile(config_id: int) -> tuple[str, str | None]:
             async with semaphore:
