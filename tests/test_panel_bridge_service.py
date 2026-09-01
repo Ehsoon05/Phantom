@@ -18,6 +18,8 @@ from bot_package.services.panel_bridge_service import (
     _remaining_data_limit,
     _rule_matches,
     _external_panel_key_for_rule,
+    _shared_quota_total,
+    _used_traffic_bytes,
     _target_timing,
 )
 from bot_package.models import Base, BotSetting, PanelBridgeRule
@@ -259,6 +261,24 @@ def test_remaining_limit_carries_only_unused_source_volume():
     assert _remaining_data_limit({"data_limit": 10_000, "used_traffic": 3_000}) == 7_000
     assert _remaining_data_limit({"data_limit": 0, "used_traffic": 123}) == 0
     assert _remaining_data_limit({"data_limit": 10_000, "used_traffic": 10_000}) == 0
+
+
+def test_shared_quota_prefers_purchased_display_total():
+    config = SimpleNamespace(display_total_bytes=50_000, volume_gb=10)
+
+    assert _shared_quota_total(config, {"data_limit": 7_000}) == 50_000
+
+
+def test_shared_quota_falls_back_to_plan_volume():
+    config = SimpleNamespace(display_total_bytes=None, volume_gb=25)
+
+    assert _shared_quota_total(config, {"data_limit": 7_000}) == 25 * 1024**3
+
+
+def test_used_traffic_is_normalized_for_shared_quota_math():
+    assert _used_traffic_bytes({"used_traffic": "-5"}) == 0
+    assert _used_traffic_bytes({"used_traffic": 123}) == 123
+    assert _used_traffic_bytes(None) == 0
 
 
 def test_target_expiry_is_exactly_the_source_expiry():

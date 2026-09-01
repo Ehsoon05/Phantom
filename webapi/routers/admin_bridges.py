@@ -89,8 +89,8 @@ async def _validated_rule_values(session: AsyncSession, body: BridgeRuleBody) ->
                 ports.add(int(option["port"]))
         if selected:
             normalized[protocol] = selected
-    if not normalized or not ports:
-        raise HTTPException(status_code=422, detail="حداقل یک اینباند دارای پورت انتخاب کنید.")
+    if not normalized:
+        raise HTTPException(status_code=422, detail="حداقل یک اینباند انتخاب کنید.")
     return normalized, sorted(ports)
 
 

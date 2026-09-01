@@ -105,6 +105,20 @@ def _remaining_data_limit(source: dict[str, Any]) -> int:
     return max(0, remaining)
 
 
+def _used_traffic_bytes(payload: dict[str, Any] | None) -> int:
+    if not payload:
+        return 0
+    return max(0, int(payload.get("used_traffic") or 0))
+
+
+def _shared_quota_total(config: Config, source: dict[str, Any]) -> int:
+    if config.display_total_bytes is not None and int(config.display_total_bytes or 0) > 0:
+        return int(config.display_total_bytes)
+    if int(config.volume_gb or 0) > 0:
+        return int(config.volume_gb) * 1024**3
+    return max(0, int(source.get("data_limit") or 0))
+
+
 def _bridge_fallback_username(username: str, rule_id: int, config_id: int) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9_]+", "_", username).strip("_") or "user"
     suffix = f"_b{rule_id}_{config_id}"
@@ -425,8 +439,6 @@ class PanelBridgeService:
                 key = (str(protocol), str(tag))
                 if available[key] > 0:
                     ports.add(available[key])
-        if not ports:
-            raise ProvisioningError("اینباند انتخاب‌شده پورت قابل استفاده ندارد.")
         rule.target_ports_json = json.dumps(sorted(ports))
         await session.flush()
 
@@ -466,7 +478,8 @@ class PanelBridgeService:
         *,
         may_update: bool,
         reset_traffic: bool = False,
-    ) -> tuple[str, bool]:
+        shared_total_bytes: int = 0,
+    ) -> tuple[str, bool, dict[str, Any] | None]:
         access = {
             "proxies": {protocol: {} for protocol in inbounds},
             "inbounds": inbounds,
@@ -478,18 +491,32 @@ class PanelBridgeService:
             **_target_timing(source),
             **access,
         }
-        if int(source.get("data_limit") or 0) > 0 and body["data_limit"] <= 0:
-            body["status"] = "disabled"
         async with ProvisioningService._api_client(target) as (client, token):
             headers = {"Authorization": f"Bearer {token}"}
             existing = await client.get(f"/api/user/{username}", headers=headers)
+            existing_payload: dict[str, Any] | None = None
+            if existing.status_code != 404 and not existing.is_error:
+                payload = existing.json()
+                existing_payload = payload if isinstance(payload, dict) else {}
+            target_used = 0 if reset_traffic else _used_traffic_bytes(existing_payload)
+            source_used = _used_traffic_bytes(source)
+            if shared_total_bytes > 0:
+                body["data_limit"] = max(shared_total_bytes - source_used, 0)
+            if (
+                (int(source.get("data_limit") or 0) > 0 and body["data_limit"] <= 0)
+                or (shared_total_bytes > 0 and source_used + target_used >= shared_total_bytes)
+            ):
+                body["status"] = "disabled"
             if existing.status_code == 404:
                 create_body = dict(body)
                 needs_post_create_disable = body["status"] not in {"active", "on_hold"}
                 if needs_post_create_disable:
                     create_body["status"] = "active"
                     create_body["expire"] = 0
-                    if int(source.get("data_limit") or 0) > 0 and body["data_limit"] <= 0:
+                    if (
+                        (int(source.get("data_limit") or 0) > 0 or shared_total_bytes > 0)
+                        and body["data_limit"] <= 0
+                    ):
                         create_body["data_limit"] = 1
                 response = await client.post("/api/user", headers=headers, json=create_body)
                 created = True
@@ -514,7 +541,37 @@ class PanelBridgeService:
                 reset = await client.post(f"/api/user/{username}/reset", headers=headers)
                 if reset.status_code not in {200, 204, 404, 405}:
                     raise _panel_error(reset, "ریست حجم سرویس کمکی پس از تمدید")
-        return _subscription_url(target.base_url, payload), created
+        return _subscription_url(target.base_url, payload), created, existing_payload
+
+    @staticmethod
+    async def _sync_source_shared_quota(
+        source: ProvisionPanel,
+        username: str,
+        source_payload: dict[str, Any],
+        target_payload: dict[str, Any] | None,
+        shared_total_bytes: int,
+        *,
+        reset_target_traffic: bool = False,
+    ) -> None:
+        if shared_total_bytes <= 0:
+            return
+        target_used = 0 if reset_target_traffic else _used_traffic_bytes(target_payload)
+        source_used = _used_traffic_bytes(source_payload)
+        body = {
+            "data_limit": max(shared_total_bytes - target_used, 0),
+            "data_limit_reset_strategy": "no_reset",
+            **_target_timing(source_payload),
+        }
+        if source_used + target_used >= shared_total_bytes:
+            body["status"] = "disabled"
+        async with ProvisioningService._api_client(source) as (client, token):
+            response = await client.put(
+                f"/api/user/{username}",
+                headers={"Authorization": f"Bearer {token}"},
+                json=body,
+            )
+            if response.is_error:
+                raise _panel_error(response, "همگام‌سازی سهمیه مشترک پنل مبدا")
 
     @staticmethod
     async def _sync_config_links(session, config: Config) -> None:
@@ -613,14 +670,16 @@ class PanelBridgeService:
                     source_payload = _metadata_source_payload(metadata)
             target_username = assignment.target_username if assignment else username
             used_fallback = target_username == fallback_username
+            shared_total = _shared_quota_total(config, source_payload)
             try:
-                target_sub_link, created = await PanelBridgeService._upsert_target_user(
+                target_sub_link, created, target_payload = await PanelBridgeService._upsert_target_user(
                     target,
                     target_username,
                     source_payload,
                     _json_dict(rule.target_inbounds_json),
                     may_update=assignment is not None,
                     reset_traffic=reset_target_traffic,
+                    shared_total_bytes=shared_total,
                 )
             except ProvisioningError as exc:
                 collision = (
@@ -632,14 +691,23 @@ class PanelBridgeService:
                     raise
                 target_username = fallback_username
                 used_fallback = True
-                target_sub_link, created = await PanelBridgeService._upsert_target_user(
+                target_sub_link, created, target_payload = await PanelBridgeService._upsert_target_user(
                     target,
                     target_username,
                     source_payload,
                     _json_dict(rule.target_inbounds_json),
                     may_update=True,
                     reset_traffic=reset_target_traffic,
+                    shared_total_bytes=shared_total,
                 )
+            await PanelBridgeService._sync_source_shared_quota(
+                source,
+                username,
+                source_payload,
+                target_payload,
+                shared_total,
+                reset_target_traffic=reset_target_traffic,
+            )
             if assignment is None:
                 assignment = PanelBridgeAssignment(
                     rule_id=rule.id,
@@ -786,7 +854,17 @@ class PanelBridgeService:
                         and _rule_matches(rule, config)
                     )
                 ]
-            reconcile_ids = sorted(set(imported_ids + pending_ids))
+                active_ids = list(
+                    (
+                        await session.execute(
+                            select(PanelBridgeAssignment.config_id).where(
+                                PanelBridgeAssignment.rule_id == rule_id,
+                                PanelBridgeAssignment.status == "active",
+                            )
+                        )
+                    ).scalars().all()
+                )
+            reconcile_ids = sorted(set(imported_ids + pending_ids + active_ids))
             failures: list[str] = []
             for config_id in reconcile_ids:
                 try:
