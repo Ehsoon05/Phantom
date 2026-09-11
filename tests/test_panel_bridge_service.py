@@ -1,5 +1,6 @@
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -21,6 +22,7 @@ from bot_package.services.panel_bridge_service import (
     _shared_quota_total,
     _used_traffic_bytes,
     _target_timing,
+    _volume_gb_to_bytes,
 )
 from bot_package.models import Base, BotSetting, PanelBridgeRule
 from sqlalchemy import select
@@ -275,10 +277,122 @@ def test_shared_quota_falls_back_to_plan_volume():
     assert _shared_quota_total(config, {"data_limit": 7_000}) == 25 * 1024**3
 
 
+def test_shared_quota_preserves_fractional_gigabyte_volume():
+    config = SimpleNamespace(display_total_bytes=None, volume_gb=2.45)
+
+    assert _shared_quota_total(config, {"data_limit": 7_000}) == round(2.45 * 1024**3)
+    assert _volume_gb_to_bytes("0.5") == round(0.5 * 1024**3)
+
+
 def test_used_traffic_is_normalized_for_shared_quota_math():
     assert _used_traffic_bytes({"used_traffic": "-5"}) == 0
     assert _used_traffic_bytes({"used_traffic": 123}) == 123
     assert _used_traffic_bytes(None) == 0
+
+
+def test_bridge_target_keeps_fixed_quota_instead_of_remaining_source_quota():
+    calls = []
+
+    class Response:
+        def __init__(self, status_code=200, payload=None):
+            self.status_code = status_code
+            self._payload = payload or {}
+            self.is_error = status_code >= 400
+
+        def json(self):
+            return self._payload
+
+    class Client:
+        async def get(self, path, headers=None):
+            calls.append(("get", path, None))
+            return Response(
+                200,
+                {
+                    "username": "ali",
+                    "used_traffic": 3_000,
+                    "subscription_url": "/sub/ali",
+                },
+            )
+
+        async def put(self, path, headers=None, json=None):
+            calls.append(("put", path, json))
+            return Response(200, {"username": "ali", "subscription_url": "/sub/ali"})
+
+    @asynccontextmanager
+    async def api_client(panel):
+        yield Client(), "token"
+
+    panel = SimpleNamespace(base_url="https://target.example")
+    source = {
+        "status": "active",
+        "data_limit": 10_000,
+        "used_traffic": 2_000,
+        "expire": 1_900_000_000,
+    }
+
+    with patch("bot_package.services.panel_bridge_service.ProvisioningService._api_client", api_client):
+        asyncio.run(
+            PanelBridgeService._upsert_target_user(
+                panel,
+                "ali",
+                source,
+                {"vless": ["main"]},
+                may_update=True,
+                shared_total_bytes=10_000,
+            )
+        )
+
+    update = next(body for method, _, body in calls if method == "put")
+    assert update["data_limit"] == 10_000
+    assert update["status"] == "active"
+
+
+def test_bridge_target_disables_when_combined_usage_reaches_fixed_quota():
+    calls = []
+
+    class Response:
+        def __init__(self, status_code=200, payload=None):
+            self.status_code = status_code
+            self._payload = payload or {}
+            self.is_error = status_code >= 400
+
+        def json(self):
+            return self._payload
+
+    class Client:
+        async def get(self, path, headers=None):
+            return Response(200, {"username": "ali", "used_traffic": 6_000})
+
+        async def put(self, path, headers=None, json=None):
+            calls.append(json)
+            return Response(200, {"username": "ali", "subscription_url": "/sub/ali"})
+
+    @asynccontextmanager
+    async def api_client(panel):
+        yield Client(), "token"
+
+    panel = SimpleNamespace(base_url="https://target.example")
+    source = {
+        "status": "active",
+        "data_limit": 10_000,
+        "used_traffic": 4_000,
+        "expire": 1_900_000_000,
+    }
+
+    with patch("bot_package.services.panel_bridge_service.ProvisioningService._api_client", api_client):
+        asyncio.run(
+            PanelBridgeService._upsert_target_user(
+                panel,
+                "ali",
+                source,
+                {"vless": ["main"]},
+                may_update=True,
+                shared_total_bytes=10_000,
+            )
+        )
+
+    assert calls[-1]["data_limit"] == 10_000
+    assert calls[-1]["status"] == "disabled"
 
 
 def test_target_expiry_is_exactly_the_source_expiry():

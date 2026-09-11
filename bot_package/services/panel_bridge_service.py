@@ -105,6 +105,16 @@ def _remaining_data_limit(source: dict[str, Any]) -> int:
     return max(0, remaining)
 
 
+def _volume_gb_to_bytes(value: Any) -> int:
+    try:
+        volume = float(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    if volume <= 0:
+        return 0
+    return max(0, round(volume * 1024**3))
+
+
 def _used_traffic_bytes(payload: dict[str, Any] | None) -> int:
     if not payload:
         return 0
@@ -114,8 +124,9 @@ def _used_traffic_bytes(payload: dict[str, Any] | None) -> int:
 def _shared_quota_total(config: Config, source: dict[str, Any]) -> int:
     if config.display_total_bytes is not None and int(config.display_total_bytes or 0) > 0:
         return int(config.display_total_bytes)
-    if int(config.volume_gb or 0) > 0:
-        return int(config.volume_gb) * 1024**3
+    volume_total = _volume_gb_to_bytes(config.volume_gb)
+    if volume_total > 0:
+        return volume_total
     return max(0, int(source.get("data_limit") or 0))
 
 
@@ -501,7 +512,7 @@ class PanelBridgeService:
             target_used = 0 if reset_traffic else _used_traffic_bytes(existing_payload)
             source_used = _used_traffic_bytes(source)
             if shared_total_bytes > 0:
-                body["data_limit"] = max(shared_total_bytes - source_used, 0)
+                body["data_limit"] = shared_total_bytes
             if (
                 (int(source.get("data_limit") or 0) > 0 and body["data_limit"] <= 0)
                 or (shared_total_bytes > 0 and source_used + target_used >= shared_total_bytes)
@@ -558,7 +569,7 @@ class PanelBridgeService:
         target_used = 0 if reset_target_traffic else _used_traffic_bytes(target_payload)
         source_used = _used_traffic_bytes(source_payload)
         body = {
-            "data_limit": max(shared_total_bytes - target_used, 0),
+            "data_limit": shared_total_bytes,
             "data_limit_reset_strategy": "no_reset",
             **_target_timing(source_payload),
         }
