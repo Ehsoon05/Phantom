@@ -142,6 +142,26 @@ def _panel_error(response: httpx.Response, action: str) -> ProvisioningError:
     return ProvisioningError(f"{action} انجام نشد: HTTP {response.status_code} - {detail}")
 
 
+def _is_username_conflict(response: httpx.Response) -> bool:
+    if response.status_code == 409:
+        return True
+    if response.status_code not in {403, 422}:
+        return False
+    detail = response.text.lower()
+    return any(
+        marker in detail
+        for marker in (
+            "already exists",
+            "user exists",
+            "username exists",
+            "username already",
+            "duplicate",
+            "وجود دارد",
+            "تکراری",
+        )
+    )
+
+
 def _panel_api_base_url(panel: ProvisionPanel) -> str:
     return _panel_api_base_urls(panel)[0]
 
@@ -611,7 +631,6 @@ class ProvisioningService:
         panel = await ProvisioningService.panel_for_plan(session, plan)
         if panel is None:
             raise ProvisioningError("برای این دسته/پلن پنل فعال تنظیم نشده است.")
-        username = await ProvisioningService.next_username(session, plan)
         volume_gb = effective_volume_gb(plan)
         data_limit = volume_gb * 1024**3 if volume_gb > 0 else 0
         if panel.key == "mexico_namahdod":
@@ -622,20 +641,31 @@ class ProvisioningService:
             device_limit = max(0, int(plan.subscription_device_limit or 0))
             if panel.key in MEXICO_PANEL_KEYS and device_limit > 0:
                 access_fields["hwid_limit"] = device_limit
-            response = await client.post(
-                "/api/user",
-                headers=headers,
-                json={
-                    "username": username,
-                    "data_limit": data_limit,
-                    "data_limit_reset_strategy": "no_reset",
-                    **_create_timing_payload(plan),
-                    **access_fields,
-                },
-            )
-            if response.is_error:
-                raise _panel_error(response, "ساخت سرویس از پنل")
-            payload = response.json()
+            payload = None
+            username = ""
+            for _ in range(50):
+                username = await ProvisioningService.next_username(session, plan)
+                response = await client.post(
+                    "/api/user",
+                    headers=headers,
+                    json={
+                        "username": username,
+                        "data_limit": data_limit,
+                        "data_limit_reset_strategy": "no_reset",
+                        **_create_timing_payload(plan),
+                        **access_fields,
+                    },
+                )
+                if _is_username_conflict(response):
+                    continue
+                if response.is_error:
+                    raise _panel_error(response, "ساخت سرویس از پنل")
+                payload = response.json()
+                break
+            if payload is None:
+                raise ProvisioningError(
+                    "ساخت سرویس انجام نشد؛ ۵۰ نام کاربری بعدی از قبل در پنل وجود دارند."
+                )
         return ProvisionedSubscription(
             panel_key=panel.key,
             username=str(payload.get("username") or username),

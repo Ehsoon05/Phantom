@@ -416,6 +416,17 @@ def test_provision_username_increments_trailing_number_without_separator():
     assert f"{base}{start + 1}" == "PhantomHubs-Vpn-2"
 
 
+def test_provision_username_conflict_detection_is_scoped_to_duplicates():
+    import httpx
+
+    from bot_package.services.provisioning_service import _is_username_conflict
+
+    assert _is_username_conflict(httpx.Response(409, text='{"detail":"User already exists"}'))
+    assert _is_username_conflict(httpx.Response(403, text='{"detail":"Username already exists"}'))
+    assert not _is_username_conflict(httpx.Response(403, text='{"detail":"Permission denied"}'))
+    assert not _is_username_conflict(httpx.Response(422, text='{"detail":"Invalid group_ids"}'))
+
+
 def test_provision_timing_payloads_respect_plan_settings():
     from bot_package.models import ShopPlan
     from bot_package.services.provisioning_service import _create_timing_payload, _renew_timing_payload
