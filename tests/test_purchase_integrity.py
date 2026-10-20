@@ -427,6 +427,67 @@ def test_provision_username_conflict_detection_is_scoped_to_duplicates():
     assert not _is_username_conflict(httpx.Response(422, text='{"detail":"Invalid group_ids"}'))
 
 
+@pytest.mark.asyncio
+async def test_panel_provisioning_retries_with_next_username_on_conflict():
+    from contextlib import asynccontextmanager
+    from unittest.mock import AsyncMock, patch
+
+    import httpx
+
+    from bot_package.models import ProvisionPanel, ShopPlan
+    from bot_package.services.provisioning_service import ProvisioningService
+
+    plan = ShopPlan(
+        id=16,
+        volume_gb=10,
+        duration_days=0,
+        title="NoLimit 10GB",
+        category_key="nolimits",
+        provision_time_mode="date",
+    )
+    panel = ProvisionPanel(
+        key="easy",
+        title="Easy",
+        panel_type="easy",
+        base_url="https://example.com",
+        username="admin",
+        password="secret",
+    )
+    client = AsyncMock()
+    client.post.side_effect = [
+        httpx.Response(409, text='{"detail":"User already exists"}'),
+        httpx.Response(
+            201,
+            json={
+                "username": "PhantomNoLimits10GB-115",
+                "subscription_url": "/sub/new-token",
+            },
+        ),
+    ]
+
+    @asynccontextmanager
+    async def api_client(_panel):
+        yield client, "access-token"
+
+    with (
+        patch.object(ProvisioningService, "panel_for_plan", new=AsyncMock(return_value=panel)),
+        patch.object(
+            ProvisioningService,
+            "next_username",
+            new=AsyncMock(
+                side_effect=["PhantomNoLimits10GB-114", "PhantomNoLimits10GB-115"]
+            ),
+        ),
+        patch.object(ProvisioningService, "_access_fields", new=AsyncMock(return_value={})),
+        patch.object(ProvisioningService, "_api_client", new=api_client),
+    ):
+        result = await ProvisioningService.create_for_plan(AsyncMock(), plan)
+
+    assert client.post.await_count == 2
+    assert result.username == "PhantomNoLimits10GB-115"
+    assert result.subscription_url == "https://example.com/sub/new-token"
+
+
 def test_provision_timing_payloads_respect_plan_settings():
     from bot_package.models import ShopPlan
     from bot_package.services.provisioning_service import _create_timing_payload, _renew_timing_payload
