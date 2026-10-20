@@ -97,6 +97,19 @@ def test_admin_shop_settings_keyboard_contains_service_reminders():
     assert ADMIN_SERVICE_REMINDERS in labels
 
 
+def test_stale_upstream_metadata_never_finishes_a_service():
+    from bot_package.services.service_reminder_service import ServiceReminderService
+
+    assert not ServiceReminderService._metadata_finished(
+        {
+            "total": 10,
+            "remaining": 0,
+            "expire": 1,
+            "upstream_stale": True,
+        }
+    )
+
+
 @pytest.mark.asyncio
 async def test_service_reminder_uses_hour_thresholds_without_renew_for_trial(db):
     from bot_package.models import Config, Purchase, User

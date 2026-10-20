@@ -95,6 +95,8 @@ class ServiceReminderService:
         metadata = await SubscriptionLinkService.fetch_metadata(config.public_sub_token)
         if not metadata:
             return False
+        if metadata.get("upstream_stale"):
+            return False
 
         finished = ServiceReminderService._metadata_finished(metadata)
         trial = ServiceReminderService._is_trial(purchase, config)
@@ -403,6 +405,8 @@ class ServiceReminderService:
 
     @staticmethod
     def _metadata_finished(metadata: dict) -> bool:
+        if metadata.get("upstream_stale"):
+            return False
         total = _to_int(metadata.get("total"))
         remaining = _to_int(metadata.get("remaining"))
         if total and total > 0 and remaining is not None and remaining <= 0:
