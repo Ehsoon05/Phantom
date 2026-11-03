@@ -61,8 +61,8 @@ async def main() -> None:
             if not config or not assignment or not assignment.target_sub_link:
                 skipped.append((config_id, 'no SVN assignment'))
                 continue
-            if assignment.target_username != config.panel_username:
-                skipped.append((config_id, 'username mismatch'))
+            if assignment.target_username != config.panel_username and not assignment.target_created:
+                skipped.append((config_id, 'unowned target username'))
                 continue
             old_usage = cached_mmd_usage(config.sub_link)
             if old_usage is None:
@@ -78,6 +78,7 @@ async def main() -> None:
             plan = await session.get(ShopPlan, config.shop_plan_id) if config.shop_plan_id else None
             config.sub_link = assignment.target_sub_link
             config.panel_key = 'svn'
+            config.panel_username = assignment.target_username
             config.usage_offset_bytes = old_usage
             config.display_total_bytes = config.display_total_bytes or config.volume_gb * 1024**3
             if not await SubscriptionLinkService.sync_to_panel(
