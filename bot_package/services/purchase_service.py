@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import logging
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +37,9 @@ class InsufficientBalance(PurchaseError):
 
 class UserBlocked(PurchaseError):
     status_code = 403
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -87,7 +91,8 @@ async def _create_panel_config(
             service_name=service_name,
         )
     except ProvisioningError as exc:
-        raise PlanUnavailable(str(exc)) from exc
+        logger.warning("Panel provisioning failed for plan %s: %s", plan.id, exc)
+        raise PlanUnavailable("ارتباط با پنل ساخت این سرویس برقرار نیست؛ مبلغی از کیف پول کسر نشد.") from exc
 
     config = Config(
         shop_plan_id=plan.id,
@@ -260,7 +265,8 @@ async def renew_purchase(
     try:
         await ProvisioningService.renew_config(session, purchase.config, plan)
     except ProvisioningError as exc:
-        raise PlanUnavailable(str(exc)) from exc
+        logger.warning("Panel renewal failed for purchase %s: %s", purchase.id, exc)
+        raise PlanUnavailable("ارتباط با پنل تمدید این سرویس برقرار نیست؛ مبلغی از کیف پول کسر نشد.") from exc
 
     user.wallet_balance -= original_price
     now = datetime.now(timezone.utc)

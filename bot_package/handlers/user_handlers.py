@@ -542,8 +542,8 @@ async def process_purchase(
             keyboard = await _message_markup(session, "inactive_plan", fallback_keyboard, copy_text=text)
             await _reply_shop_message(update.message, text, reply_markup=keyboard)
             return
-        except PlanUnavailable:
-            text = await ShopCustomizationService.get_message(session, "plan_unavailable", volume=0)
+        except PlanUnavailable as exc:
+            text = str(exc) if "ارتباط با پنل ساخت" in str(exc) else await ShopCustomizationService.get_message(session, "plan_unavailable", volume=0)
             fallback_keyboard = await ShopCustomizationService.main_menu_keyboard(session)
             keyboard = await _message_markup(session, "plan_unavailable", fallback_keyboard, copy_text=text)
             await _reply_shop_message(update.message, text, reply_markup=keyboard)
