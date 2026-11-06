@@ -353,6 +353,7 @@ class ProvisionPanel(Base):
     base_url = Column(String, nullable=False)
     username = Column(String, nullable=False)
     password = Column(String, nullable=False)
+    api_key = Column(String, nullable=True)
     group_ids = Column(Text, nullable=True)
     inbounds_json = Column(Text, nullable=True)
     protocols_json = Column(Text, nullable=True)

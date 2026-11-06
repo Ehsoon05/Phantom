@@ -685,6 +685,7 @@ def _panel_type_label(panel_type: str | None) -> str:
         "easy": "Easy",
         "pasarguard": "Pasarguard",
         "marzban": "Marzban",
+        "hyper": "Hyper",
     }.get(panel_type or "", panel_type or "-")
 
 
@@ -5075,9 +5076,9 @@ async def _show_provision_panel_options(update: Update, context: ContextTypes.DE
     group_ids = json.loads(panel.group_ids or "[]")
     inbounds = json.loads(panel.inbounds_json or "{}")
     protocols = json.loads(panel.protocols_json or "[]")
-    if panel.panel_type in {"easy", "pasarguard"}:
+    if panel.panel_type in {"easy", "pasarguard", "hyper"}:
         panel_specific = (
-            f"گروه‌های پنل: `{group_ids or '-'}`\n"
+            f"{'سرویس‌های Hyper' if panel.panel_type == 'hyper' else 'گروه‌های پنل'}: `{group_ids or '-'}`\n"
             f"محدودیت HWID: `{panel.hwid_limit if panel.hwid_limit is not None else '-'}`"
         )
         if panel.panel_type == "pasarguard":

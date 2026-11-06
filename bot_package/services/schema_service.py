@@ -133,6 +133,7 @@ class SchemaService:
                     "provision_panels",
                     {
                         "hwid_limit": "INTEGER",
+                        "api_key": "VARCHAR",
                     },
                 )
             if "panel_bridge_assignments" in tables:

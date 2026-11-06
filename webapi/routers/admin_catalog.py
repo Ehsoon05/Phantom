@@ -381,6 +381,7 @@ def _panel_out(panel: ProvisionPanel) -> dict:
         "inbounds": json.loads(panel.inbounds_json or "{}"),
         "protocols": json.loads(panel.protocols_json or "[]"),
         "hwid_limit": panel.hwid_limit,
+        "api_key_configured": bool(panel.api_key),
         "is_enabled": panel.is_enabled,
     }
 
@@ -392,6 +393,7 @@ class PanelUpsertRequest(BaseModel):
     base_url: str
     username: str
     password: str
+    api_key: str | None = None
     group_ids: list[int] = []
     inbounds: dict[str, list[str]] = {}
     protocols: list[str] = []
@@ -427,6 +429,8 @@ async def upsert_provision_panel(
     panel.base_url = body.base_url.rstrip("/")
     panel.username = body.username
     panel.password = body.password
+    if body.api_key is not None:
+        panel.api_key = body.api_key.strip() or panel.api_key
     panel.group_ids = json.dumps(body.group_ids)
     panel.inbounds_json = json.dumps(body.inbounds)
     panel.protocols_json = json.dumps(body.protocols)

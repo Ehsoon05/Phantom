@@ -519,7 +519,7 @@ def admin_shop_plan_provision_keyboard() -> ReplyKeyboardMarkup:
 
 
 def admin_provision_panel_keyboard(panel_type: str | None = None) -> ReplyKeyboardMarkup:
-    if panel_type == "easy":
+    if panel_type in {"easy", "hyper"}:
         rows = [
             [_button(ADMIN_SET_PANEL_GROUPS), _button(ADMIN_SET_PANEL_HWID)],
             [_button(ADMIN_TOGGLE_PANEL_ENABLED)],

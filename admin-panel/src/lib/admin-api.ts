@@ -42,6 +42,7 @@ export interface SellerPanelOption {
   title: string;
   panel_type: string;
   hwid_limit: number | null;
+  api_key_configured: boolean;
 }
 
 export interface SellerOffer {

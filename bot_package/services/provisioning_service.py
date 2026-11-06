@@ -174,6 +174,8 @@ def _panel_api_base_urls(panel: ProvisionPanel) -> list[str]:
 
 
 def _panel_http_headers(panel: ProvisionPanel) -> dict[str, str]:
+    if panel.panel_type == "hyper":
+        return {"X-API-Key": str(panel.api_key or "")}
     if panel.key != "svn":
         return {}
     return {
@@ -186,7 +188,9 @@ def _panel_http_headers(panel: ProvisionPanel) -> dict[str, str]:
 
 
 def _subscription_url(base_url: str, payload: dict[str, Any]) -> str:
-    subscription_url = str(payload.get("subscription_url") or "").strip()
+    subscription_url = str(
+        payload.get("subscription_url") or payload.get("subscription_link") or ""
+    ).strip()
     if not subscription_url:
         raise ProvisioningError("پنل لینک اشتراک برنگرداند.")
     parsed = urlparse(subscription_url)
@@ -256,7 +260,13 @@ class ProvisioningService:
                 headers=_panel_http_headers(panel),
             )
             try:
-                token = await ProvisioningService._token(client, panel)
+                token = (
+                    str(panel.api_key or "")
+                    if panel.panel_type == "hyper"
+                    else await ProvisioningService._token(client, panel)
+                )
+                if panel.panel_type == "hyper" and not token:
+                    raise ProvisioningError("کلید API پنل Hyper تنظیم نشده است.")
             except ProvisioningError as exc:
                 last_error = exc
                 await client.aclose()
@@ -351,6 +361,16 @@ class ProvisioningService:
                 None,
                 None,
             ),
+            (
+                "hyper",
+                "hyper panel",
+                "hyper",
+                BotConfig.HYPER_PANEL_URL,
+                BotConfig.HYPER_PANEL_USERNAME,
+                BotConfig.HYPER_PANEL_PASSWORD,
+                "[1]",
+                None,
+            ),
         ]
         for key, title, panel_type, base_url, username, password, group_ids, hwid_limit in defaults:
             if not (base_url and username and password):
@@ -370,6 +390,7 @@ class ProvisioningService:
                     base_url=base_url,
                     username=username,
                     password=password,
+                    api_key=BotConfig.HYPER_PANEL_API_KEY if key == "hyper" else None,
                     group_ids=group_ids,
                     hwid_limit=hwid_limit,
                     is_enabled=True,
@@ -484,6 +505,8 @@ class ProvisioningService:
 
     @staticmethod
     async def _access_fields(client: httpx.AsyncClient, panel: ProvisionPanel, headers: dict) -> dict:
+        if panel.panel_type == "hyper":
+            return {}
         grouped_panel = panel.panel_type in {"easy", "pasarguard"}
         fields: dict[str, Any] = {}
         if grouped_panel:
@@ -551,7 +574,7 @@ class ProvisioningService:
 
     @staticmethod
     async def fetch_inbounds(panel: ProvisionPanel) -> dict[str, list[str]]:
-        if panel.panel_type == "easy":
+        if panel.panel_type in {"easy", "hyper"}:
             return {}
         async with ProvisioningService._api_client(panel) as (client, token):
             response = await client.get("/api/inbounds", headers={"Authorization": f"Bearer {token}"})
@@ -578,7 +601,7 @@ class ProvisioningService:
 
     @staticmethod
     async def fetch_inbound_options(panel: ProvisionPanel) -> list[dict[str, Any]]:
-        if panel.panel_type == "easy":
+        if panel.panel_type in {"easy", "hyper"}:
             return []
         async with ProvisioningService._api_client(panel) as (client, token):
             response = await client.get(
@@ -622,6 +645,77 @@ class ProvisioningService:
         return options
 
     @staticmethod
+    def _hyper_headers(panel: ProvisionPanel) -> dict[str, str]:
+        if not panel.api_key:
+            raise ProvisioningError("کلید API پنل Hyper تنظیم نشده است.")
+        return {"X-API-Key": panel.api_key}
+
+    @staticmethod
+    def _hyper_service_ids(panel: ProvisionPanel) -> list[int]:
+        service_ids = [int(item) for item in _json_list(panel.group_ids) if str(item).isdigit()]
+        return service_ids or [1]
+
+    @staticmethod
+    def _hyper_timing(plan: ShopPlan, *, renew: bool = False) -> dict[str, Any]:
+        if has_unlimited_time(plan):
+            return {"limit_expire": 0}
+        duration_days = effective_duration_days(plan)
+        if effective_time_mode(plan) == "on_hold" and not renew:
+            return {"limit_expire": 0, "on_hold_timeout_days": duration_days}
+        return {
+            "limit_expire": int(
+                (datetime.now(timezone.utc) + timedelta(days=duration_days)).timestamp()
+            )
+        }
+
+    @staticmethod
+    def _hyper_payload(payload: Any) -> dict[str, Any]:
+        if isinstance(payload, list):
+            payload = payload[0] if payload else {}
+        return payload if isinstance(payload, dict) else {}
+
+    @staticmethod
+    async def _hyper_fetch_user(
+        client: httpx.AsyncClient,
+        panel: ProvisionPanel,
+        username: str,
+    ) -> dict[str, Any] | None:
+        response = await client.get(
+            "/api/subscriptions",
+            headers=ProvisioningService._hyper_headers(panel),
+            params={"usernames": username, "page": 1, "limit": 10},
+        )
+        if response.status_code == 404:
+            return None
+        if response.is_error:
+            raise _panel_error(response, "دریافت وضعیت سرویس Hyper")
+        payload = response.json()
+        items = payload.get("items", []) if isinstance(payload, dict) else payload
+        if not isinstance(items, list):
+            return None
+        return next(
+            (
+                item
+                for item in items
+                if isinstance(item, dict) and str(item.get("username")) == username
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _hyper_status(payload: dict[str, Any]) -> str:
+        if not payload.get("enabled", True):
+            return "disabled"
+        usage = int(payload.get("total_usage") or 0)
+        limit = payload.get("limit_usage")
+        if limit is not None and int(limit) > 0 and usage >= int(limit):
+            return "limited"
+        expire = int(payload.get("limit_expire") or 0)
+        if expire > 0 and expire <= int(datetime.now(timezone.utc).timestamp()):
+            return "expired"
+        return "active" if payload.get("activated", True) else "on_hold"
+
+    @staticmethod
     async def create_for_plan(
         session: AsyncSession,
         plan: ShopPlan,
@@ -635,6 +729,37 @@ class ProvisioningService:
         data_limit = volume_gb * 1024**3 if volume_gb > 0 else 0
         if panel.key == "mexico_namahdod":
             data_limit = MEXICO_UNLIMITED_DATA_LIMIT_BYTES
+        if panel.panel_type == "hyper":
+            async with ProvisioningService._api_client(panel) as (client, _token):
+                payload = None
+                username = ""
+                for _ in range(50):
+                    username = await ProvisioningService.next_username(session, plan)
+                    response = await client.post(
+                        "/api/subscriptions",
+                        headers=ProvisioningService._hyper_headers(panel),
+                        json=[{
+                            "username": username,
+                            "limit_usage": data_limit or None,
+                            "services": ProvisioningService._hyper_service_ids(panel),
+                            **ProvisioningService._hyper_timing(plan),
+                        }],
+                    )
+                    if _is_username_conflict(response):
+                        continue
+                    if response.is_error:
+                        raise _panel_error(response, "ساخت سرویس از پنل Hyper")
+                    payload = ProvisioningService._hyper_payload(response.json())
+                    break
+                if payload is None:
+                    raise ProvisioningError(
+                        "ساخت سرویس انجام نشد؛ ۵۰ نام کاربری بعدی از قبل در پنل وجود دارند."
+                    )
+            return ProvisionedSubscription(
+                panel_key=panel.key,
+                username=str(payload.get("username") or username),
+                subscription_url=_subscription_url(panel.base_url, payload),
+            )
         async with ProvisioningService._api_client(panel) as (client, token):
             headers = {"Authorization": f"Bearer {token}"}
             access_fields = await ProvisioningService._access_fields(client, panel, headers)
@@ -700,6 +825,35 @@ class ProvisioningService:
                 "expire": int((datetime.now(timezone.utc) + timedelta(hours=duration_hours)).timestamp()),
                 "on_hold_expire_duration": None,
             }
+        if panel.panel_type == "hyper":
+            limit_expire = int(timing.get("expire") or 0)
+            hyper_timing: dict[str, Any] = {"limit_expire": limit_expire}
+            if mode == "on_hold":
+                hyper_timing["on_hold_timeout_days"] = max(1, (int(duration_hours) + 23) // 24)
+            async with ProvisioningService._api_client(panel) as (client, _token):
+                response = await client.post(
+                    "/api/subscriptions",
+                    headers=ProvisioningService._hyper_headers(panel),
+                    json=[{
+                        "username": username,
+                        "limit_usage": int(volume_mb) * 1024 * 1024 or None,
+                        "services": ProvisioningService._hyper_service_ids(panel),
+                        **hyper_timing,
+                    }],
+                )
+                if _is_username_conflict(response):
+                    payload = await ProvisioningService._hyper_fetch_user(client, panel, username)
+                elif response.is_error:
+                    raise _panel_error(response, "ساخت کانفیگ تست از پنل Hyper")
+                else:
+                    payload = ProvisioningService._hyper_payload(response.json())
+            if not payload:
+                raise ProvisioningError("سرویس Hyper ساخته شد اما اطلاعات آن دریافت نشد.")
+            return ProvisionedSubscription(
+                panel_key=panel.key,
+                username=str(payload.get("username") or username),
+                subscription_url=_subscription_url(panel.base_url, payload),
+            )
         async with ProvisioningService._api_client(panel) as (client, token):
             headers = {"Authorization": f"Bearer {token}"}
             access_fields = await ProvisioningService._access_fields(client, panel, headers)
@@ -737,6 +891,38 @@ class ProvisioningService:
         data_limit = volume_gb * 1024**3 if volume_gb > 0 else 0
         if panel.key == "mexico_namahdod":
             data_limit = MEXICO_UNLIMITED_DATA_LIMIT_BYTES
+        if panel.panel_type == "hyper":
+            async with ProvisioningService._api_client(panel) as (client, _token):
+                headers = ProvisioningService._hyper_headers(panel)
+                response = await client.put(
+                    "/api/subscriptions",
+                    headers=headers,
+                    json={
+                        "usernames": [username],
+                        "limit_usage": data_limit or None,
+                        "services": ProvisioningService._hyper_service_ids(panel),
+                        "enabled": True,
+                        **ProvisioningService._hyper_timing(plan, renew=True),
+                    },
+                )
+                if response.is_error:
+                    raise _panel_error(response, "تمدید سرویس در پنل Hyper")
+                reset = await client.post(
+                    "/api/subscriptions/reset",
+                    headers=headers,
+                    json={"usernames": [username]},
+                )
+                if reset.status_code not in {200, 204}:
+                    raise _panel_error(reset, "ریست حجم سرویس در پنل Hyper")
+            config.panel_key = panel.key
+            config.panel_username = username
+            config.usage_offset_bytes = 0
+            config.display_total_bytes = data_limit if data_limit > 0 else None
+            config.expired_detected_at = None
+            config.deletion_due_at = None
+            config.panel_deleted_at = None
+            await session.flush()
+            return
         async with ProvisioningService._api_client(panel) as (client, token):
             headers = {"Authorization": f"Bearer {token}"}
             access_fields = await ProvisioningService._access_fields(client, panel, headers)
@@ -774,6 +960,17 @@ class ProvisioningService:
         username = config.panel_username or username_from_subscription_url(config.sub_link)
         if panel is None or not username:
             return None
+        if panel.panel_type == "hyper":
+            async with ProvisioningService._api_client(
+                panel, timeout_seconds=25, connect_timeout_seconds=10
+            ) as (client, _token):
+                payload = await ProvisioningService._hyper_fetch_user(client, panel, username)
+            if payload is None:
+                return "deleted"
+            config.panel_key = panel.key
+            config.panel_username = username
+            await session.flush()
+            return ProvisioningService._hyper_status(payload)
         async with ProvisioningService._api_client(
             panel,
             timeout_seconds=25,
@@ -800,6 +997,22 @@ class ProvisioningService:
         if panel is None or not username:
             raise ProvisioningError("برای تغییر وضعیت سرویس، اطلاعات پنل یا نام کاربری قابل تشخیص نیست.")
         new_status = "active" if enabled else "disabled"
+        if panel.panel_type == "hyper":
+            async with ProvisioningService._api_client(panel) as (client, _token):
+                response = await client.post(
+                    f"/api/subscriptions/{'enable' if enabled else 'disable'}",
+                    headers=ProvisioningService._hyper_headers(panel),
+                    json={"usernames": [username]},
+                )
+                if response.is_error:
+                    raise _panel_error(response, "تغییر وضعیت سرویس در پنل Hyper")
+            config.panel_key = panel.key
+            config.panel_username = username
+            await session.flush()
+            from .panel_bridge_service import PanelBridgeService
+
+            await PanelBridgeService.set_config_assignments_enabled(config.id, enabled)
+            return new_status
         async with ProvisioningService._api_client(panel) as (client, token):
             response = await client.put(
                 f"/api/user/{username}",
@@ -822,6 +1035,24 @@ class ProvisioningService:
         username = config.panel_username or username_from_subscription_url(config.sub_link)
         if panel is None or not username:
             raise ProvisioningError("برای حذف سرویس، اطلاعات پنل یا نام کاربری قابل تشخیص نیست.")
+        if panel.panel_type == "hyper":
+            async with ProvisioningService._api_client(panel) as (client, _token):
+                response = await client.request(
+                    "DELETE",
+                    "/api/subscriptions",
+                    headers=ProvisioningService._hyper_headers(panel),
+                    json={"usernames": [username]},
+                )
+                if response.status_code not in {200, 204, 404}:
+                    raise _panel_error(response, "حذف سرویس از پنل Hyper")
+            from .panel_bridge_service import PanelBridgeService
+
+            await PanelBridgeService.remove_config_assignments_in_session(session, config)
+            config.panel_key = panel.key
+            config.panel_username = username
+            config.panel_deleted_at = datetime.now(timezone.utc)
+            await session.flush()
+            return True
         async with ProvisioningService._api_client(panel) as (client, token):
             response = await client.delete(
                 f"/api/user/{username}",
