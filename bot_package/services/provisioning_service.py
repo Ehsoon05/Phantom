@@ -48,6 +48,14 @@ def _clean_username(value: str) -> str:
     return cleaned or "PhantomHubs"
 
 
+def _hyper_username(value: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9_]+", "_", value.strip().casefold())
+    cleaned = re.sub(r"_+", "_", cleaned).strip("_")[:30].rstrip("_")
+    if len(cleaned) < 3:
+        cleaned = f"{cleaned}_vpn"[:30].rstrip("_")
+    return cleaned or "phantomhubs"
+
+
 def _username_base_and_start(value: str) -> tuple[str, int]:
     cleaned = _clean_username(value)
     match = re.fullmatch(r"^(.*?)([0-9]+)$", cleaned)
@@ -734,7 +742,9 @@ class ProvisioningService:
                 payload = None
                 username = ""
                 for _ in range(50):
-                    username = await ProvisioningService.next_username(session, plan)
+                    username = _hyper_username(
+                        await ProvisioningService.next_username(session, plan)
+                    )
                     response = await client.post(
                         "/api/subscriptions",
                         headers=ProvisioningService._hyper_headers(panel),
@@ -826,6 +836,7 @@ class ProvisioningService:
                 "on_hold_expire_duration": None,
             }
         if panel.panel_type == "hyper":
+            username = _hyper_username(username)
             limit_expire = int(timing.get("expire") or 0)
             hyper_timing: dict[str, Any] = {"limit_expire": limit_expire}
             if mode == "on_hold":
