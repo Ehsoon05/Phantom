@@ -13,6 +13,7 @@ ACTIVE_MEMBER_STATUSES = {
     ChatMemberStatus.ADMINISTRATOR,
     ChatMemberStatus.MEMBER,
 }
+REQUIRED_CHANNEL_CHECK_CALLBACK = "required_channel:check"
 
 
 class RequiredChannelService:
@@ -95,6 +96,6 @@ class RequiredChannelService:
 
     @staticmethod
     def join_keyboard(channels: list[RequiredChannel]) -> InlineKeyboardMarkup:
-        return InlineKeyboardMarkup(
-            [[InlineKeyboardButton(f"عضویت در {channel.title}", url=channel.join_url)] for channel in channels]
-        )
+        rows = [[InlineKeyboardButton(f"عضویت در {channel.title}", url=channel.join_url)] for channel in channels]
+        rows.append([InlineKeyboardButton("✅ عضو شدم", callback_data=REQUIRED_CHANNEL_CHECK_CALLBACK)])
+        return InlineKeyboardMarkup(rows)

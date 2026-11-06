@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MMD Marzban API - راهنمای اتصال</title>
+  <style>
+    :root { color-scheme: dark; --bg:#101827; --panel:#182235; --text:#edf3ff; --muted:#b9c6d9; --primary:#426df8; --line:#34445d; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:16px/1.8 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    main { width:min(960px,calc(100% - 32px)); margin:36px auto 64px; }
+    h1,h2 { line-height:1.35; } h1 { margin:0 0 8px; } h2 { margin-top:34px; color:#dce6ff; }
+    .note { background:var(--panel); border:1px solid var(--line); border-right:4px solid var(--primary); padding:16px; border-radius:8px; }
+    code { direction:ltr; unicode-bidi:embed; color:#dce6ff; }
+    pre { direction:ltr; text-align:left; overflow:auto; white-space:pre; background:#0b1220; border:1px solid var(--line); border-radius:8px; padding:16px; }
+    table { border-collapse:collapse; width:100%; overflow:hidden; border:1px solid var(--line); border-radius:8px; }
+    th,td { border-bottom:1px solid var(--line); padding:10px; text-align:right; vertical-align:top; }
+    th { background:var(--panel); } tr:last-child td { border-bottom:0; }
+    a { color:#8dacff; } .warn { color:#ffd68a; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>راهنمای API پنل MMD (Marzban)</h1>
+  <p>این سند برای اتصال مستقل به پنل MMD با حساب کاربری اختصاصی خودتان است. هیچ رمز، توکن داخلی یا اطلاعات PhantomHubs در این فایل وجود ندارد.</p>
+
+  <section class="note">
+    <strong>Base URL:</strong> <code>https://mmd-panel.serendpiti.ir</code><br>
+    مسیر <code>/dashboard/</code> فقط رابط وب است؛ در درخواست های API از آدرس پایه بالا استفاده کنید.<br>
+    برای مشاهده قرارداد دقیق نسخه همان پنل، پس از ورود به <a href="https://mmd-panel.serendpiti.ir/docs">/docs</a> یا <a href="https://mmd-panel.serendpiti.ir/openapi.json">/openapi.json</a> مراجعه کنید.
+  </section>
+
+  <h2>1. دریافت توکن دسترسی</h2>
+  <p>نام کاربری و رمز حساب خودتان را فقط در بک اند نگه دارید. هر بار که توکن منقضی شد، دوباره آن را دریافت کنید.</p>
+  <pre><code>curl -X POST 'https://mmd-panel.serendpiti.ir/api/admin/token' \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'username=YOUR_PANEL_USERNAME' \
+  --data-urlencode 'password=YOUR_PANEL_PASSWORD'</code></pre>
+  <p>خروجی شامل <code>access_token</code> است. در درخواست های بعدی این هدر را بفرستید:</p>
+  <pre><code>Authorization: Bearer YOUR_ACCESS_TOKEN</code></pre>
+
+  <h2>2. دریافت اینباندها</h2>
+  <p>قبل از ساخت کاربر، اینباندهای واقعی همان حساب/پنل را بخوانید و فقط از <code>protocol</code> و <code>tag</code> بازگشتی استفاده کنید.</p>
+  <pre><code>curl 'https://mmd-panel.serendpiti.ir/api/inbounds' \
+  -H 'Authorization: Bearer YOUR_ACCESS_TOKEN'</code></pre>
+  <p>نمونه بخشی از پاسخ:</p>
+  <pre><code>{
+  "vless": [
+    { "tag": "YOUR_INBOUND_TAG", "port": 443, "network": "ws", "tls": "tls" }
+  ]
+}</code></pre>
+
+  <h2>3. ساخت کاربر</h2>
+  <p>حجم بر حسب بایت است: <code>GB * 1024 * 1024 * 1024</code>. برای حجم نامحدود مقدار <code>data_limit</code> را <code>0</code> قرار دهید. زمان <code>expire</code> بر حسب Unix timestamp و UTC است؛ <code>0</code> یعنی بدون تاریخ انقضا.</p>
+  <pre><code>curl -X POST 'https://mmd-panel.serendpiti.ir/api/user' \
+  -H 'Authorization: Bearer YOUR_ACCESS_TOKEN' \
+  -H 'Content-Type: application/json' \
+  --data '{
+    "username": "ExampleUser_1",
+    "status": "active",
+    "data_limit": 10737418240,
+    "data_limit_reset_strategy": "no_reset",
+    "expire": 0,
+    "on_hold_expire_duration": null,
+    "proxies": { "vless": {} },
+    "inbounds": { "vless": ["YOUR_INBOUND_TAG"] }
+  }'</code></pre>
+  <p>از پاسخ، فیلد <code>subscription_url</code> را برای کاربر ارسال کنید. اگر این مقدار نسبی بود، آن را به آدرس پایه بچسبانید:</p>
+  <pre><code>const absoluteSubscriptionUrl = new URL(response.subscription_url,
+  'https://mmd-panel.serendpiti.ir').toString();</code></pre>
+
+  <h2>حالت های زمان</h2>
+  <table>
+    <thead><tr><th>حالت</th><th>فیلدهای لازم</th></tr></thead>
+    <tbody>
+      <tr><td>فعال تاریخ دار</td><td><code>status: "active"</code> و <code>expire: UNIX_TIMESTAMP</code></td></tr>
+      <tr><td>فعال بدون تاریخ</td><td><code>status: "active"</code> و <code>expire: 0</code></td></tr>
+      <tr><td>On hold</td><td><code>status: "on_hold"</code>، <code>expire: 0</code> و <code>on_hold_expire_duration: SECONDS</code></td></tr>
+      <tr><td>غیرفعال</td><td><code>status: "disabled"</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2>4. عملیات های کاربر</h2>
+  <table>
+    <thead><tr><th>عملیات</th><th>درخواست</th></tr></thead>
+    <tbody>
+      <tr><td>دریافت کاربر</td><td><code>GET /api/user/{username}</code></td></tr>
+      <tr><td>ویرایش حجم، تاریخ، وضعیت یا اینباند</td><td><code>PUT /api/user/{username}</code> با بدنه JSON مشابه ساخت</td></tr>
+      <tr><td>ریست مصرف حجم</td><td><code>POST /api/user/{username}/reset</code></td></tr>
+      <tr><td>حذف کامل</td><td><code>DELETE /api/user/{username}</code></td></tr>
+    </tbody>
+  </table>
+  <pre><code>curl -X PUT 'https://mmd-panel.serendpiti.ir/api/user/ExampleUser_1' \
+  -H 'Authorization: Bearer YOUR_ACCESS_TOKEN' \
+  -H 'Content-Type: application/json' \
+  --data '{"data_limit":21474836480,"expire":0,"status":"active"}'
+
+curl -X POST 'https://mmd-panel.serendpiti.ir/api/user/ExampleUser_1/reset' \
+  -H 'Authorization: Bearer YOUR_ACCESS_TOKEN'</code></pre>
+
+  <h2>نمونه Python</h2>
+  <pre><code>import httpx
+
+BASE_URL = "https://mmd-panel.serendpiti.ir"
+USERNAME = "YOUR_PANEL_USERNAME"
+PASSWORD = "YOUR_PANEL_PASSWORD"
+
+with httpx.Client(base_url=BASE_URL, timeout=30) as client:
+    login = client.post("/api/admin/token", data={
+        "username": USERNAME,
+        "password": PASSWORD,
+    })
+    login.raise_for_status()
+    token = login.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    inbounds = client.get("/api/inbounds", headers=headers)
+    inbounds.raise_for_status()
+    print(inbounds.json())
+
+    payload = {
+        "username": "ExampleUser_1",
+        "status": "active",
+        "data_limit": 10 * 1024 ** 3,
+        "data_limit_reset_strategy": "no_reset",
+        "expire": 0,
+        "on_hold_expire_duration": None,
+        "proxies": {"vless": {}},
+        "inbounds": {"vless": ["YOUR_INBOUND_TAG"]},
+    }
+    created = client.post("/api/user", headers=headers, json=payload)
+    created.raise_for_status()
+    user = created.json()
+    print(httpx.URL(BASE_URL).join(user["subscription_url"]))</code></pre>
+
+  <h2>نکات سازگاری و امنیت</h2>
+  <ul>
+    <li>برای HWID یا محدودیت دستگاه، فیلد یکسان و تضمین شده ای در API استاندارد Marzban وجود ندارد. ابتدا قرارداد <code>/docs</code> همان پنل را بررسی کنید؛ افزونه های پنل ممکن است API متفاوتی داشته باشند.</li>
+    <li>در صورت خطای <code>401</code> یا <code>403</code>، اطلاعات ورود یا سطح دسترسی API را بررسی کنید. خطای <code>422</code> معمولاً به معنی نامعتبر بودن فیلدها، پروتکل یا تگ اینباند است.</li>
+    <li class="warn">رمز پنل، access token و هر توکن همگام سازی داخلی را هرگز در فرانت اند، ربات عمومی، GitHub یا پیام های عمومی قرار ندهید.</li>
+    <li>اگر لازم است لینک اشتراک روی دامنه اختصاصی نمایش داده شود، این کار باید توسط سرویس اشتراک مستقل همان مجموعه انجام شود؛ API مرزبان فقط لینک اصلی پنل را برمی گرداند.</li>
+  </ul>
+</main>
+</body>
+</html>

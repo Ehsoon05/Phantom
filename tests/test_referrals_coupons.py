@@ -72,6 +72,146 @@ async def test_self_referral_is_ignored(db):
 
 
 @pytest.mark.asyncio
+async def test_repeatable_wallet_referral_rewards_are_idempotent(db):
+    from datetime import datetime, timezone
+
+    from bot_package.models import ReferralRewardGrant, Transaction, User
+    from bot_package.services.referral_service import ReferralService
+
+    async with db.async_session() as session:
+        referrer = User(telegram_id=1001, first_name="Referrer")
+        referrals = [
+            User(
+                telegram_id=user_id,
+                first_name="Referral",
+                referred_by_user_id=1001,
+                accepted_rules_at=datetime.now(timezone.utc),
+            )
+            for user_id in (2001, 2002, 2003, 2004)
+        ]
+        session.add_all([referrer, *referrals])
+        await session.flush()
+        await ReferralService.create_rule(
+            session,
+            title="هر دو دعوت",
+            qualification_type="joined",
+            required_count=2,
+            is_repeatable=True,
+            reward_type="wallet",
+            wallet_amount=10_000,
+            created_by=123456,
+        )
+        first = await ReferralService.evaluate_referrer(session, 1001)
+        second = await ReferralService.evaluate_referrer(session, 1001)
+        await session.commit()
+
+    async with db.async_session() as session:
+        saved = (await session.execute(select(User).where(User.telegram_id == 1001))).scalar_one()
+        grants = (await session.execute(select(ReferralRewardGrant))).scalars().all()
+        transactions = (
+            await session.execute(select(Transaction).where(Transaction.type == "referral_reward"))
+        ).scalars().all()
+
+    assert len(first) == 2
+    assert second == []
+    assert saved.wallet_balance == 20_000
+    assert [grant.milestone_count for grant in grants] == [2, 4]
+    assert len(transactions) == 2
+
+
+@pytest.mark.asyncio
+async def test_purchase_and_charge_referral_condition(db):
+    from bot_package.models import Config, Purchase, Transaction, User
+    from bot_package.services.referral_service import ReferralService
+
+    async with db.async_session() as session:
+        session.add_all(
+            [
+                User(telegram_id=1001, first_name="Referrer"),
+                User(telegram_id=2002, first_name="Referral", referred_by_user_id=1001),
+                Config(id=1, volume_gb=10, category_key="default", sub_link="https://example.com/sub"),
+            ]
+        )
+        await session.flush()
+        session.add(
+            Purchase(
+                user_id=2002,
+                config_id=1,
+                volume_gb=10,
+                category_key="default",
+                price=100_000,
+                original_price=100_000,
+                service_name="Test",
+            )
+        )
+        await ReferralService.create_rule(
+            session,
+            title="خرید و شارژ",
+            qualification_type="purchased_and_charged",
+            required_count=1,
+            is_repeatable=False,
+            reward_type="wallet",
+            wallet_amount=5_000,
+            created_by=123456,
+        )
+        await session.flush()
+        assert await ReferralService.evaluate_referrer(session, 1001) == []
+        session.add(Transaction(user_id=2002, amount=100_000, type="charge"))
+        await session.flush()
+        rewards = await ReferralService.evaluate_referrer(session, 1001)
+        await session.commit()
+
+    assert len(rewards) == 1
+    assert rewards[0]["reward"] == "5,000 تومان اعتبار کیف پول"
+
+
+@pytest.mark.asyncio
+async def test_service_referral_reward_uses_matching_inventory(db):
+    from datetime import datetime, timezone
+
+    from bot_package.models import Config, Purchase, ShopPlan, User
+    from bot_package.services.referral_service import ReferralService
+
+    async with db.async_session() as session:
+        session.add_all(
+            [
+                User(telegram_id=1001, first_name="Referrer"),
+                User(
+                    telegram_id=2002,
+                    first_name="Referral",
+                    referred_by_user_id=1001,
+                    accepted_rules_at=datetime.now(timezone.utc),
+                ),
+                ShopPlan(id=7, volume_gb=10, category_key="vip", title="۱۰ گیگ VIP", price=100_000),
+                Config(volume_gb=10, category_key="vip", sub_link="https://example.com/vip"),
+            ]
+        )
+        await session.flush()
+        await ReferralService.create_rule(
+            session,
+            title="جایزه VIP",
+            qualification_type="joined",
+            required_count=1,
+            is_repeatable=False,
+            reward_type="service",
+            shop_plan_id=7,
+            created_by=123456,
+        )
+        rewards = await ReferralService.evaluate_referrer(session, 1001)
+        await session.commit()
+
+    async with db.async_session() as session:
+        purchase = (await session.execute(select(Purchase))).scalar_one()
+        config = (await session.execute(select(Config))).scalar_one()
+
+    assert len(rewards) == 1
+    assert purchase.user_id == 1001
+    assert purchase.price == 0
+    assert config.is_sold is True
+    assert config.sold_to_user_id == 1001
+
+
+@pytest.mark.asyncio
 async def test_coupon_percent_fixed_targeting_and_replacement(db):
     from bot_package.services.coupon_service import CouponError, CouponService
 

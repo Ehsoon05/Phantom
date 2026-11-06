@@ -1,4 +1,5 @@
 import importlib
+from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
@@ -206,3 +207,60 @@ async def test_zero_price_update_is_rejected(db):
         success = await PriceService.update_price(session, 1, 0)
 
     assert success is False
+
+
+def test_add_config_plan_keyboard_paginates_all_services():
+    from bot_package.handlers.admin_handlers import (
+        ADD_CONFIG_PAGE_SIZE,
+        _add_config_plan_keyboard,
+    )
+
+    plans = [
+        SimpleNamespace(
+            id=index,
+            category_key=f"category-{index % 3}",
+            title=f"Service {index}",
+            volume_gb=index,
+        )
+        for index in range(1, ADD_CONFIG_PAGE_SIZE * 2 + 4)
+    ]
+
+    first_page = _add_config_plan_keyboard(plans, 0).inline_keyboard
+    second_page = _add_config_plan_keyboard(plans, 1).inline_keyboard
+    last_page = _add_config_plan_keyboard(plans, 2).inline_keyboard
+
+    first_ids = [row[0].callback_data for row in first_page[:ADD_CONFIG_PAGE_SIZE]]
+    second_ids = [row[0].callback_data for row in second_page[:ADD_CONFIG_PAGE_SIZE]]
+    last_ids = [row[0].callback_data for row in last_page[:-2]]
+
+    assert first_ids[0] == "admin_addcfg:select:1"
+    assert second_ids[0] == f"admin_addcfg:select:{ADD_CONFIG_PAGE_SIZE + 1}"
+    assert last_ids[-1] == f"admin_addcfg:select:{len(plans)}"
+    assert any(button.callback_data == "admin_addcfg:page:1" for button in last_page[-2])
+
+
+def test_shop_plan_management_keyboard_paginates_and_keeps_labels_compact():
+    from bot_package.handlers.admin_handlers import (
+        ADD_CONFIG_PAGE_SIZE,
+        _shop_plan_management_keyboard,
+    )
+
+    plans = [
+        SimpleNamespace(
+            id=index,
+            category_key=f"category-with-a-long-key-{index}",
+            title=f"Service with a deliberately long title number {index}",
+            volume_gb=index,
+            is_active=index % 2 == 0,
+        )
+        for index in range(1, ADD_CONFIG_PAGE_SIZE + 3)
+    ]
+    first_page = _shop_plan_management_keyboard(plans, 0).inline_keyboard
+    second_page = _shop_plan_management_keyboard(plans, 1).inline_keyboard
+
+    assert len(first_page[0][0].text) <= 60
+    assert first_page[0][0].callback_data == "admin_planmgr:select:1"
+    assert second_page[0][0].callback_data == (
+        f"admin_planmgr:select:{ADD_CONFIG_PAGE_SIZE + 1}"
+    )
+    assert any(button.callback_data == "admin_planmgr:page:1" for button in first_page[-3])
